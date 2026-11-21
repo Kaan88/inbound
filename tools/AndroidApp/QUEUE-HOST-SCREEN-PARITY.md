@@ -130,7 +130,7 @@ schedules, downloads, Hosts, or pairings. The C2 lane's persisted-state checks
 verify only the local synthetic editor values; they are not an acceptance
 result. Record setup and outcomes in `flow.txt`. Inspect every pair at native size and record differences in the
 acceptance matrix. Captures and automated tests are evidence inputs, not a
-visual PASS; Astra must review both code and comparisons, and only the owner
+visual PASS; Fable must review both code and comparisons, and only the owner
 can approve a design deviation.
 
 Host-only checks (no device action or build):

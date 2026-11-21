@@ -158,7 +158,7 @@ hash records, and for each state `<checkpoint>-capture.png`, `-ui.xml`,
 not modified. The full-screen notification-shade capture can include other
 emulator notices; inspect it for unrelated content before sharing it. Inspect
 each pair at native size, record layout/state/flow
-differences in `docs/plans/android-mockup-acceptance.md`, and obtain Astra's
+differences in `docs/plans/android-mockup-acceptance.md`, and obtain Fable's
 independent code-plus-comparison verdict before claiming acceptance. Generated
 pairs and successful downloads are not themselves a PASS.
 

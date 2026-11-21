@@ -1,6 +1,6 @@
 # Android app: reviews for Fable to check
 
-Historical Android checkpoint. The current [parity handoff](android-parity-handoff.md) governs current worktree selection, release state and Claude continuation after 0.0.9. The original technical decisions and attributed review records below retain their scope.
+Current state and next work: the [Android handoff](android-parity-handoff.md).
 
 Owner, 2026-11-16: "when, not if, fable hits a limit - use opus, but write notes for fable so that it can check when my
 limit resets."
@@ -11,6 +11,46 @@ not the Opus findings first, so its read is its own), then compare, act on what 
 
 Each entry: date; what was reviewed (commit, or files if uncommitted); who reviewed; findings and what was done; what
 Fable should look at.
+
+## Open: Android work from 49f5663c to c745317f (2026-11-21)
+
+Added 2026-11-21 when Claude took the Android work back. Commits `49f5663c..c745317f` (136 commits, 0.0.2 to the 0.0.10 hotfix) were made outside Claude sessions and have had no Fable or Opus review. Earlier milestone verdicts recorded for them in PROGRESS and the matrix came from another reviewer and are input, not acceptance. Review the code and requirements first; use `git diff --stat 49f5663c..c745317f` and `git log --reverse 49f5663c..c745317f`. Review shared Runtime, Contracts and Sites changes for desktop and server impact as well as Android behaviour. The detailed earlier review notes are in git history: `git show c745317f:ANDROID-CODEX-FABLE-REVIEW.md`.
+
+| Work since baseline | Commit checkpoints | Evidence and review focus |
+| --- | --- | --- |
+| Permanent signing and Android updater, 0.0.2 | `d2e06d27`, `178fdb41` | signer identity, fresh build provenance, secret handling, signed feed and user-approved installation. |
+| Link catching and authenticated refresh, 0.0.3 | `d0816724`, `50df32b8` | credential boundaries, durable refresh, consent, Host isolation and intake. |
+| Queues, schedules, settings and execution, 0.0.4–0.0.6 | `b6c2f666`, `87555b99`, `edd073b0` | shared Runtime safeguards, execution leases, signed changelog, decimal speed limits. Review native and Host behavior together. |
+| Core screens, HTTPS pairing, phone/background acceptance and 0.0.7 | `c694d0fa`, `d82cd893`, `00d26b52`, `563fad73`, `92defa31` | [PROGRESS](../../PROGRESS.md) records S24 hashes, reconnect/pause/resume, public in-place update and visual acceptance. ANDROID.4/.7/.10 closures retain their scope; remaining real-account capture and natural Doze moved to ANDROID.14. Interrupted/optional soaks are not full acceptance. |
+| Bundled rclone and Remote Files, 0.0.8 | `15123d61`, `c446b39d`, `f4bbd735`, `60ed93ce`, `6f6a0279`, `577c4422`, `66270193` | Review executable packaging/pinning, 16 KiB alignment/device evidence, process and loopback lifecycle, provider credentials, trust, browse and transfer scope. [Matrix](android-mockup-acceptance.md) and PROGRESS retain evidence. Production phone-originated upload remains separate. |
+| Mockup parity across implemented screens, 0.0.9 | `f3707bc4..d053242e`; publication `03572c06` | [Matrix](android-mockup-acceptance.md) is the per-case record. Includes download/intake/bulk/notification flows, queue editor and live limits, pairing/consent, cloud recovery, C3 tracked mixed transfers, C4 controls and Settings/update prompt. Final Mobile 567 and harness 66 passed. An earlier non-Fable review passed source, visuals and the four flow batches; the owner has since rejected the Remote Files tab (2026-11-21), see ROADMAP ANDROID.8. |
+| Phone browse hotfix, 0.0.10 | `5c12a1af` | Managed HTTP for Android rclone loopback cancellation; explain skipped downloads under no-replace. Validation: [PROGRESS](../../PROGRESS.md#remote-files-on-the-owners-galaxy-s24-fe-2026-11-20). |
+
+Signing (d2e06d27, 178fdb41), what to check:
+
+- The certificate pinned in release-apk.py is the intended permanent Android
+  identity (public digest starts 3746bf5a and ends 8f0457). The verifier must
+  fail on debug signing, wrong keys, multiple signers or unrecognized tool output.
+- No password goes to command arguments, MSBuild properties, build subprocess
+  environments, checked-in files or diagnostics. Only apksigner receives the
+  existing password-file path. This PKCS12 uses the same store/key password;
+  --key-pass is omitted so apksigner reuses the store password.
+- Build provenance: fresh GUID publish directory, explicit InboundTestBuild=false
+  and AndroidKeyStore=false; sign only this invocation's APK. A preexisting
+  production APK must never make a failed/redirected/test publish appear valid.
+- Windows build-tools versions differ: CRLF output, Signer #1 vs V3.0 Signer,
+  sdkVersion vs minSdkVersion. Signature verification must run apksigner first;
+  parsing a digest alone is not cryptographic verification.
+- Manifest must be app.inbound.android, minimum API 31, target 35, arm64-only and
+  non-debuggable; NativeAOT packaging checks must reject test hooks.
+- check-apk.py is an existing marker check, not a DEX definition/ELF symbol parser
+  or a startup test. The csproj separately checks the defined TLS export.
+  Do not treat APK validation or audit approval as device launch acceptance.
+- Signing output is a new file distinct from the input; inspect error handling,
+  partial files after failure, tool choice and whether only verified output is
+  offered for delivery. Ignore rules protect APKs and signing material.
+- Future distribution: signer identity must remain stable across updates; version
+  increments, updater/download trust and installer behavior are later work.
 
 ## Open
 

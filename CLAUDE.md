@@ -1,18 +1,33 @@
 # CLAUDE.md — agent onboarding
 
-Read this first, then `GOAL.md`, `ROADMAP.md`, and `PROGRESS.md`.
-`GOAL.md` and `ROADMAP.md` are the fallback for the unavailable Goal/Todo tools;
-treat them as authoritative tracking. Update them after every meaningful
-increment.
+Read this first, then `GOAL.md`, `ROADMAP.md`, and `PROGRESS.md`, the
+authoritative tracking. Update them after every meaningful increment.
 
 ## Android work on this branch
 
-Read the [parity handoff](docs/plans/android-parity-handoff.md) and the [remaining flow batches](docs/plans/android-mockup-acceptance.md#remaining-work). This is the `android-remote-files-parity` worktree. It holds completed Android 0.0.9 parity and the committed 0.0.10 phone browse hotfix. Read the current handoff before continuing ANDROID.9; the dated Codex handoff, session progress and original build sequence describe earlier work. Keep `main` on its branch. The separate `android-app` working copy contains unfinished ANDROID.9 changes and must be inventoried before reuse.
+This is the `android-remote-files-parity` worktree. Claude leads the Android work
+again from 2026-11-21. Read the [Android handoff](docs/plans/android-parity-handoff.md)
+first, then the [operating notes](docs/android-operating-notes.md) (architecture,
+SDK, adb, phones, emulators, builds) and the [acceptance matrix](docs/plans/android-mockup-acceptance.md).
+Keep `main` on its own checkout and branch. The separate `android-app` working copy
+holds unfinished, uncommitted ANDROID.9 work; inventory it before reusing anything.
 
-For Android, the meaningful checkpoint for project tracking is a flow batch, owner decision or milestone transition. Put each case result in the matrix once. Link it from PROGRESS at batch completion. GOAL holds the objective and ROADMAP holds milestone state. The milestone code and visual audit and the owner's separate later review queue have different scopes.
+Track flow batches, owner decisions and milestone changes, not every check: a case
+result goes in the matrix once, PROGRESS links it when the batch is done, GOAL
+holds the objective and ROADMAP the milestone state.
 
-Run independent Android verification checks in parallel when practical, but keep
-UI actions on any one emulator sequential so checks cannot interfere with each other.
+**Mockups are acceptance criteria (owner, 2026-11-19).** Implement the approved
+layout, states, controls, navigation and interactions in full. A rename, a
+functional smoke test or a code review does not waive a design requirement. Any
+deviation or omission needs the owner's explicit approval first. Compare built
+screens side by side with the references **on real data and on the owner's phone
+as well as on fixtures**: a fixture named and sized to copy the mockup proves
+little (this is how Remote Files passed review and was then rejected by the owner,
+2026-11-21). A Fable review of the code and the comparisons closes a UI milestone
+before merge or release.
+
+Run independent checks in parallel when practical, but keep UI actions on any one
+emulator or phone sequential.
 
 For authorized QA on the owner's physical Android phone, record its display
 settings before starting, set brightness to minimum, and set the screen timeout
@@ -26,31 +41,15 @@ batch, not after each individual check.
 
 When verification needs the owner's credentials, decision, or manual action,
 pause and ask a direct question with the exact steps and the result to report.
-Do not leave the request buried in a milestone update. Never ask the owner to
-send credentials, MFA codes, or private links.
+Never ask the owner to send credentials, MFA codes, or private links.
 
-Android accessibility polish and expanded TalkBack acceptance are optional follow-up,
-not gates for the remaining Android milestones. Preserve existing accessibility and
-record findings without diverting the current milestone work (owner, 2026-11-19).
+Android accessibility polish and expanded TalkBack acceptance are optional
+follow-up, not gates for the remaining milestones. Preserve existing accessibility
+and record findings without diverting milestone work (owner, 2026-11-19).
 
-Later independent Astra review of implementations by Codex is tracked in
-[ANDROID-CODEX-FABLE-REVIEW.md](ANDROID-CODEX-FABLE-REVIEW.md). The legacy filename
-and entry IDs remain for traceability; the owner reassigned this queue from Fable
-to Astra on 2026-11-19. Mark new entries Implementer: Codex and add important
-changes, decisions, commit references, validation, audit results and remaining checks
-as work proceeds. Completed milestone audits do not close this later review queue.
-
-Owner clarification (2026-11-18): "use astra a bit less, on major milestones. this seems too much back and forth." The main agent finishes implementation and consolidated checks before a major-milestone Astra audit. Follow up only to verify confirmed fixes until PASS; do not request Astra reviews for small increments. The existing major-milestone audit requirement remains.
-
-**Mandatory mockup adherence at every UI milestone (owner, 2026-11-19).** The
-approved mockups are acceptance criteria, not inspiration. Implement the
-approved layout, visual states, controls, navigation and interactions in full.
-A rename, a functional smoke test, or a code/release review does not waive
-any design requirement. Obtain explicit owner approval for any deviation or
-omission before treating it as accepted; do not silently narrow the scope.
-Capture the implemented states side by side with the approved references and
-verify their flows. Astra must review both the code and the mockup comparisons
-and sign off on both before closing, merging or releasing the UI milestone.
+Commits `49f5663c..c745317f` were made outside Claude sessions and are unreviewed
+by Fable; they are the first open entry in the
+[Fable review queue](docs/plans/android-fable-review-queue.md).
 
 ## What this project is
 
@@ -220,30 +219,19 @@ dotnet test tests\DownloadManager.TorBox.LiveTests\DownloadManager.TorBox.LiveTe
 - Own branding/assets only.
 - Keep `PROGRESS.md` current at each checkpoint; commit coherent increments.
 
-## Review delegation (user requirement, 2026-11-04)
+## Delegation and review
 
-For Claude-led sessions, delegate simple work and reviews to
-`claude-agent/haiku`; for OpenAI/GPT-led sessions, use `openai/gpt-6-luna`.
-Generally, every main agent should delegate routine/simple work to a cheaper
-capable available model. Simple work includes small changes, diff/commit
-reviews, documentation/encoding checks, evidence wording, and coverage
-spot checks. Discover exact model IDs; do not guess. Verify delegated outputs.
-If the preferred model is unavailable, disclose that and use an available
-cheaper capable equivalent, or ask if none is available. Keep complex work
-(concurrency, durability, security, IPC protocol changes, architecture) in the
-main model. Give reviewers full context and treat findings as input to verify,
-not as acceptance evidence.
-
-Owner's Android continuation authorization (2026-11-19): proactively delegate
-simple bounded work to GPT-6 Luna at high reasoning, and scoped implementation,
-debugging or visual work to GPT-6.1 Terra at high reasoning. Discover available model IDs for the current session. Use the documented cheaper fallback when Luna is unavailable. The main Sol agent owns
-architecture, cross-cutting work and final integration; it must read and check all
-subagent code and verify requirements and checks before integrating it. Record
-the requested model configuration separately from a worker's self-report.
+Delegate routine, bounded work (small changes, diff reviews, documentation and
+encoding checks, evidence wording, coverage spot checks) to a cheaper Claude
+model: Haiku for simple checks, Sonnet for scoped implementation. Opus reviews
+each major addition and rewrites where needed; Fable reviews once at the end of a
+milestone and before a release. Keep concurrency, durability, security, IPC
+protocol and architecture work in the main model. Read and check all delegated
+code yourself; a worker's or reviewer's PASS is input, not acceptance evidence.
 
 ## Known traps
 
-- The OpenCode environment has **no Goal/Todo tools**; use the markdown files.
+- Project tracking lives in `GOAL.md`, `ROADMAP.md` and `PROGRESS.md`, not in session task tools.
 - **Chrome stable 156 removed `--load-extension`**. Manual “Load unpacked” works;
   for automation use Chrome for Testing 156+ (verified path:
   `%LOCALAPPDATA%\Temp\opencode\cft2\chrome-win64\chrome.exe`; the older

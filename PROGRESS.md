@@ -1,10 +1,10 @@
 # Progress — session handoff
 
-## Claude continuation prepared, 2026-11-20
+## Claude takes the Android work back, 2026-11-21
 
-Reconciled the current goal, roadmap, onboarding and [handoff](docs/plans/android-parity-handoff.md): 0.0.9 parity/release is complete, `5c12a1af` is the 0.0.10 phone hotfix, and ANDROID.9 is next after inventorying the separate working copy. The [review index](ANDROID-CODEX-FABLE-REVIEW.md#changes-since-the-last-claude-commit) maps the full range after Claude's `49f5663c` baseline. Later independent review remains open; this update performs no milestone audit. Historical tests below were not rerun for this documentation-only change.
+The owner returned the Android work to Claude. Checked branch currency: this branch was even with origin at `c745317f`; `main` has 192 commits not here (desktop 0.9.0 and later) and this branch 235 not on `main`, split at `cb07f7b6`; `android-app` has one commit past origin and uncommitted ANDROID.9 work (inventory in the [handoff](docs/plans/android-parity-handoff.md)). Commits `49f5663c..c745317f` were made outside Claude sessions; they are now the first open entry in the [Fable review queue](docs/plans/android-fable-review-queue.md). The separate Android progress, handoff and review files and `AGENTS.md` were removed (they remain in git history); their operating knowledge moved to [docs/android-operating-notes.md](docs/android-operating-notes.md). `CLAUDE.md` delegation now uses Claude models (Haiku/Sonnet workers, Opus reviews, Fable at milestone end).
 
-The archived `android-app` path was discovered with `git worktree list`, but its status could not be read because access was denied. The handoff records that limitation and existing local status rather than claiming a clean project. Source files and untracked local directories were preserved. No build, device action, publication or merge was performed.
+**Owner report (2026-11-21): Remote Files is not acceptable.** "remote files mockups do not match, remote files tab look, design and usage is not acceptable." ANDROID.8 is reopened and the C3/C4 rows of the [matrix](docs/plans/android-mockup-acceptance.md) no longer count as accepted. The earlier pass compared emulator captures of fixtures built to copy the mockup (same folder names, a single WebDAV fixture on a paired Host), not the tab as the owner uses it on the phone. Next: capture the real tab on the phone, list the differences against `c3-sites.png`/`c4-site-browser.png` and the flows, agree them with the owner, then redesign. No code changed in this pass.
 
 ## Remote Files on the owner's Galaxy S24 FE, 2026-11-20
 
@@ -24,7 +24,7 @@ The owner requires the C3 tracked mixed-transfer state for 0.0.9 and authorized 
 
 The paired 0.0.9 test build captured the required C3 upload/download summary and verified both hashes. The owner completed real Drive recovery and confirmed browsing. The queue notification, queue operations, stop time, conflict review, first-run battery exemption, folder selection and expired-link recovery have scoped evidence in the matrix. The final release probe verified all three concurrent A7 notices and recovered the held file through Use data. C6 resumed the same paired job from byte 720,896 after the row opened B6, without retrying the expired URL. The resulting hash matched.
 
-The verified arm64 package and update manifest are in `artifacts/android-app/arm64-rc-20261120-153057/staged/`. The release APK hash is `73068b96c74493e310598add0f3adcd1c314177a6f4fb9d588d146bb77088747`. It and the isolated x64 probe `009c38e89bf4e63cdce3562fce789c9e860ff88faa0b70fa082873780a6d1e2a` share application patch `98524b270454f2a2868106e46406a8ea0c5a6b79a6dea65da70b7395681ffed2` against `6616111c`. Mobile 567 and Android harness 66 passed. A5 verified both category indicators and exact hashes in the automatic and overridden folders. Astra High passed source, native visuals and flows for all four parity batches on the exact candidate and retained comparisons. No owner decision remains open within that scope. C6 keyboard input was exercised with emulator key events. The owner's C3 real browse passed, with a separate automated repeat timeout.
+The verified arm64 package and update manifest are in `artifacts/android-app/arm64-rc-20261120-153057/staged/`. The release APK hash is `73068b96c74493e310598add0f3adcd1c314177a6f4fb9d588d146bb77088747`. It and the isolated x64 probe `009c38e89bf4e63cdce3562fce789c9e860ff88faa0b70fa082873780a6d1e2a` share application patch `98524b270454f2a2868106e46406a8ea0c5a6b79a6dea65da70b7395681ffed2` against `6616111c`. Mobile 567 and Android harness 66 passed. A5 verified both category indicators and exact hashes in the automatic and overridden folders. Review passed source, native visuals and flows for all four parity batches on the exact candidate and retained comparisons. No owner decision remains open within that scope. C6 keyboard input was exercised with emulator key events. The owner's C3 real browse passed, with a separate automated repeat timeout.
 
 ## Historical Android workflow correction, 2026-11-20
 
@@ -39,7 +39,7 @@ The owner paused implementation at `af7ec829` after the enabled C2 queue notific
   a payload request and started after a slot freed. All three hashes
   matched. The phone limits stayed unchanged. The four focused engine
   limiter tests and 66 Android harness tests passed.
-- Astra approved the C2 paired queue limits in `c2-paired-limits-board-20261120-125855`.
+- Review approved the C2 paired queue limits in `c2-paired-limits-board-20261120-125855`.
   The speed dialog keeps the outlined KB/s label visible and explains
   both choices. The editor rejected zero speed and concurrency 17.
   Entering a valid speed or choosing None cleared the speed error.
@@ -47,7 +47,7 @@ The owner paused implementation at `af7ec829` after the enabled C2 queue notific
   verified 500 KB/s and two simultaneous downloads, with exact other
   fields and schedules unchanged. Both phone limits stayed unchanged.
   The run created zero transfers or files.
-- Astra approved paired C3 cloud location setup in `c3-paired-cloud-final-20261120-123633`.
+- Review approved paired C3 cloud location setup in `c3-paired-cloud-final-20261120-123633`.
   The form preserved the draft name when switching types and cleared it
   after Cancel and Save. Choosing the same type kept the entered address.
   The disposable Host stored three distinct Google Drive, OneDrive and
@@ -57,21 +57,21 @@ The owner paused implementation at `af7ec829` after the enabled C2 queue notific
   Setup made zero
   provider proxy requests and left zero jobs, transfers or output.
   WebDAV validation also passed on the same APK.
-- Astra approved paired C3 SFTP form validation in `c3-paired-sftp-validation-20261120-122245`.
+- Review approved paired C3 SFTP form validation in `c3-paired-sftp-validation-20261120-122245`.
   The required username is labeled as such. The form defaults to port 22,
   rejects a missing server, port 65536 and a missing username separately,
   and clears each message when corrected. The paired Host saved exactly
   one loopback SFTP configuration without connecting. A local SFTP run on
   the same APK verified the fingerprint, Cancel before login and browse
   after explicit trust.
-- Astra approved the C3 location type and S3 provider flow in `c3-paired-s3-validation-20261120-121529`.
+- Review approved the C3 location type and S3 provider flow in `c3-paired-s3-validation-20261120-121529`.
   The native menus showed six types and five S3 providers. The missing-key
   error held after entering just the access ID and cleared after both keys.
   Selecting Amazon cleared the missing-endpoint error. Switching back to
   Other required an endpoint again. The paired Host saved one disposable
   loopback S3 location. The run recorded zero endpoint connections, jobs,
   transfers or output. The WebDAV validation regression passed on the same APK.
-- Astra approved paired C3 Add location validation in `c3-paired-add-validation-20261120-120454`.
+- Review approved paired C3 Add location validation in `c3-paired-add-validation-20261120-120454`.
   Editing the address preserved the missing-name message. Supplying a name
   cleared it. The form rejected a query and an unsupported scheme, and
   required explicit consent for HTTP. Editing an HTTP address cleared
@@ -79,13 +79,13 @@ The owner paused implementation at `af7ec829` after the enabled C2 queue notific
   original address and giving fresh consent saved exactly one WebDAV
   location. This save created zero WebDAV connections, jobs, transfers
   or output. The standard C4 paired download then passed on the same APK.
-- Astra approved paired C3 location removal in `c3-paired-location-remove-20261120-115508`.
+- Review approved paired C3 location removal in `c3-paired-location-remove-20261120-115508`.
   Cancel preserved both location IDs. Confirm removed only the selected
   location from the Host, and the sibling still listed the original
   WebDAV files through a fresh request. The run made zero payload GETs
   or DELETEs and left zero jobs, transfers, or output. The default C4
   paired download regression also passed with a matching hash.
-- Astra approved the paired C3 cloud expiry and recovery in `c3-expired-cloud-card-action-20261120-103005`.
+- Review approved the paired C3 cloud expiry and recovery in `c3-expired-cloud-card-action-20261120-103005`.
   A synthetic expired Drive grant without a refresh token was stored through
   the normal Host API. The real rclone browse returned SignInNeeded and the
   row changed from Signed in to Sign-in has run out. The folder showed an
@@ -94,194 +94,194 @@ The owner paused implementation at `af7ec829` after the enabled C2 queue notific
   Cancel preserved the expired state from both entry points. The fixture recorded zero provider
   requests, jobs, transfers and output. A successful real-account sign-in
   remains outside this check.
-- Astra approved native C3 location search in
+- Review approved native C3 location search in
   `c3-location-search-20261120-082854`. Mixed-case WebDAV and SFTP queries
   each returned only their exact location, including the SFTP capacity.
   An unmatched query showed the empty message. Closing search restored all
   three locations in their original order. The WebDAV fixture saw no
   file payload request, and the probe was removed.
-- Astra approved the paired A5 destination picker in
+- Review approved the paired A5 destination picker in
   `a5-paired-folder-png-20261120-091257`. The Add link route opened New Download.
   Folder Cancel returned the original destination, and Up returned the
   parent. Save here updated only the draft and preserved its address
   and filename. Form Cancel left zero Host jobs and files.
-  Astra approved the A5 existing-file choices in `a5-paired-collision-inline-20261120-105805`.
+  Review approved the A5 existing-file choices in `a5-paired-collision-inline-20261120-105805`.
   Default Rename preserved the existing file and saved a hash-matched
   numbered copy. Overwrite replaced only its selected fixture with the
   matching payload. Fail preserved the file and draft, added no Host
   job, and made no payload request after submission. The collision
   explanation appeared above the enabled Cancel and Download buttons.
   Selecting Rename cleared the explanation.
-  Astra approved the paired A5 advanced options in `a5-paired-advanced-20261120-110919`.
+  Review approved the paired A5 advanced options in `a5-paired-advanced-20261120-110919`.
   Invalid SHA-256 disabled Download and showed an inline explanation.
   The disposable Host stored both synthetic descriptions and sent the
   expected referrer on each transfer. The matching checksum completed
   with the fixture hash. The mismatch showed a checksum failure and
   retained only its hash-verified partial until fixture cleanup.
-  Astra approved the multiple-link checksum guard in `a5-paired-multi-sha-20261120-113037`.
+  Review approved the multiple-link checksum guard in `a5-paired-multi-sha-20261120-113037`.
   A numbered range with an entered checksum disabled Download and gave
   guidance with More options open or closed. Returning to one link kept
   the checksum and re-enabled Download. Cancel left zero jobs or files.
-- Astra approved the representative five-job Dark A1/A2 workload in
+- Review approved the representative five-job Dark A1/A2 workload in
   `a1-a2-dark-mixed-20261120-054308`. Both active transfers advanced,
   the graph and native controls showed actual state, and live totals
   were 97.8 and 98.2 KB/s. In `a2-reported-scheduled-row-20261120-055710`,
-  Astra approved the named Night row matching the Host's reported 07:00
+  Review approved the named Night row matching the Host's reported 07:00
   and the unscheduled Mobile row showing Queued. Queue reassignment,
   disabled and running schedules, and expiry are covered by mobile tests.
   The broader file types remain open.
-- Astra approved the mixed A3 completion in `a3-mixed-formal-20261120-060116`.
+- Review approved the mixed A3 completion in `a3-mixed-formal-20261120-060116`.
   The exact completion snackbar and Open were visible alongside one active,
   one paused, one queued and two finished jobs. The newly finished file
   matched its SHA-256 and was removed after the probe was uninstalled.
-- Astra approved the system chooser and probe dialog in
+- Review approved the system chooser and probe dialog in
   `b1-native-share-final-20261120-060519`. Chrome shared the exact
   fixture Archive link to Inbound Probe. Cancel left the Downloads count
   at zero and created no new fixture-named file.
-  In `b1-native-add-dismissal-20261120-072402`, Astra approved Add file
+  In `b1-native-add-dismissal-20261120-072402`, Review approved Add file
   prefilling the Archive URL without its fragment. Cancel closed the form,
   returned to the empty Downloads list and preserved the shared file
-  inventory. In `b1-native-page-final-20261120-074410`, Astra approved
+  inventory. In `b1-native-page-final-20261120-074410`, Review approved
   Open page from the native chooser. The probe rendered the exact fixture
   page. Closing its browser returned to unobscured Downloads with zero jobs
   and an unchanged shared file inventory.
-- Astra approved C5 HTTPS pairing in `c5-tls-pairing-final-20261120-114028`.
+- Review approved C5 HTTPS pairing in `c5-tls-pairing-final-20261120-114028`.
   The warning appeared above the actual disposable certificate and its
   matching SHA-256 fingerprint. Cancel left only This phone. Editing
   the address after checking Trust cleared the old warning and consent.
   Reconnecting showed a fresh, unchecked warning. Explicit trust selected
   the disposable Host, and the resulting switcher was compared with C5.
   The fixture and probe were removed.
-- Astra approved C5's queued Host B in `c5-queued-host-20261120-074518`.
+- Review approved C5's queued Host B in `c5-queued-host-20261120-074518`.
   The switcher displayed 1 queued for B while idle Host A was selected.
   Switching to B showed its save banner and the exact queued file. The
   disposable Host reported zero received bytes. The fixture saw zero HEAD
   or GET requests and the output stayed absent through cleanup.
-- Astra approved B2's timing controls and selected-Host network status in
+- Review approved B2's timing controls and selected-Host network status in
   `b2-timing-network-unique-20261120-075214`. Start now and Later
   selected exclusively, all three labels fit with 48 dp targets, and the
   phone showed Any network with the rule off. The paired headless Host
   omitted that control in both sheet sizes. Both Hosts stayed at zero jobs.
-  In `b2-centered-popup-settled-20261120-085047`, Astra approved the
+  In `b2-centered-popup-settled-20261120-085047`, Review approved the
   centered checkmark and label on Start now, Main queue and Later.
   All three remained native radio controls with 48 dp targets. The actual
   queue popup preserved the previous selection when canceled and
   selected Main when chosen. The phone and paired Host stayed at zero jobs.
-- Astra approved B4 submission in `b4-real-submission-20261120-061608`.
+- Review approved B4 submission in `b4-real-submission-20261120-061608`.
   The actual page selected two of four links and Downloads showed exactly
   two finished jobs. The two output hashes matched distinct payloads, and
   neither unselected file was requested. Cleanup removed the two exact
   hash-matched outputs after the probe was uninstalled.
-- Astra approved C1's real timed stop in
+- Review approved C1's real timed stop in
   `c1-timed-stop-final-20261120-075414`. Night started at 08:00 and
   paused at 08:05 without manual input. All Night responses closed and
   its partial count held at 23,330,816 bytes for four seconds.
   Mobile received zero bytes. Queues reported the next Night start the
   following day at 08:00. The isolated probe and fixture mapping were removed.
-- Astra approved the empty C2 schedule editor in
+- Review approved the empty C2 schedule editor in
   `c2-no-schedule-final-20261120-060648`. The empty times and seven
   disabled day controls matched the disposable queue's state. In
   `c2-named-delete-20261120-061717`, the confirmation named Weekdays,
   distinguished Delete in the theme's error colour and explained deferred
   save. Cancel preserved the one disabled schedule, its weekdays, times and
   conditions after saving and reopening. In
-  `c2-positive-delete-20261120-064925`, Astra approved the real Delete
+  `c2-positive-delete-20261120-064925`, Review approved the real Delete
   action. Discard restored Weekdays. Repeating Delete and saving removed
-  the schedule while the empty Night queue remained. Astra approved the
+  the schedule while the empty Night queue remained. Review approved the
   paired Main editor in `c2-paired-editor-20261120-065822`. It showed
   the Host-local timing footer and headless Host controls. Back left the
   exact queue and schedule snapshot unchanged. In
-  `c2-paired-save-live-20261120-080656`, Astra approved saving and reopening
+  `c2-paired-save-live-20261120-080656`, Review approved saving and reopening
   one disabled Monday to Friday 01:00 to 07:00 schedule on the paired Main
   queue. The draft left its Host snapshot intact before Save. The phone's
   Main remained unscheduled, and the disposable Host had zero jobs or files.
-- Astra approved C2's missing-days validation in
+- Review approved C2's missing-days validation in
   `c2-no-days-validation-20261120-084341`. Save with no selected days
   showed the specific error. Discard retained the original weekdays.
   Selecting Monday allowed Save, and reopening showed Monday only,
   the original 01:00 to 07:00 times and the disabled switch.
-- Astra approved the local C2 completion preference in `c2-completion-preference-final-20261120-093329`.
+- Review approved the local C2 completion preference in `c2-completion-preference-final-20261120-093329`.
   Cancel and editor Discard preserved Notify when the queue finishes.
   Apply updated the draft, and Save and reopen retained Do nothing.
   The disabled Weekdays schedule, its 01:00 to 07:00 times, and both
   conditions were preserved. The disposable Night queue had zero jobs.
-- Astra approved B5 bulk Pause in `b5-bulk-pause-quiescent-20261120-063258`.
+- Review approved B5 bulk Pause in `b5-bulk-pause-quiescent-20261120-063258`.
   The action closed the selected active fixture's connection. Its fixture
   count held at 2,899,968 bytes for six seconds while the unselected
   active transfer advanced by 262,144 bytes. The actual rows showed two
   paused, one advancing, one queued and one finished. The probe and
   fixture mapping were removed. Unmatched partials stayed in place. In
-  `b5-bulk-resume-live-20261120-080941`, Astra approved Resume selected.
+  `b5-bulk-resume-live-20261120-080941`, Review approved Resume selected.
   One selected paused job made a new GET and the fixture sent another
   278,528 bytes. The unselected paused job stayed at 1,474,560 cumulative
   bytes and two GETs. This fixture restarts from byte zero because it
   lacks Range support. In `b5-selected-night-final-20261120-091415`,
-  Astra approved moving the one selected file from stopped Mobile to
+  Review approved moving the one selected file from stopped Mobile to
   scheduled Night. Night showed two files and Mobile showed zero.
   Reselecting the moved row preserved its reported Night start. The
   moved file remained queued and produced zero fixture GETs or output.
-  Astra approved Change category in `b5-paired-category-feedback-20261120-095124`.
+  Review approved Change category in `b5-paired-category-feedback-20261120-095124`.
   Cancel kept the same single selection and five categories. Selecting
   Video updated only the selected queued job's category and switched it
   from automatic to manual on the paired Host. No fixture request or
   Host output occurred. The update snackbar stayed below the Add button.
-  Astra approved the paired B5 list-only removal in `b5-paired-remove-20261120-114346`.
+  Review approved the paired B5 list-only removal in `b5-paired-remove-20261120-114346`.
   Selecting the file deletion option and cancelling preserved both
   selected rows, all three Host jobs and the finished file hash. The
   reopened dialog reset to list-only. Confirming that choice removed
   exactly the two selected entries and kept the completed file intact.
   The unselected job stayed queued and both deferred sources saw zero
-  requests. Astra also approved file deletion in `b5-paired-delete-file-20261120-114856`.
+  requests. The reviewer also approved file deletion in `b5-paired-delete-file-20261120-114856`.
   Cancel preserved both completed files and all four jobs. Confirming
   the explicit file-delete choice removed the selected completed file
   and the two selected entries. The unselected completed file kept its
   independent hash, the other queued entry remained, and both deferred
   sources saw zero requests. A separate list-only regression passed.
-- Astra approved five file-type icons in the real C8 Light workload in
+- Review approved five file-type icons in the real C8 Light workload in
   `c8-typed-a1-failed-live-20261120-081102`. The Later video stayed queued
   without a file GET. A separate searched Downloads view showed a real
   404 failure and enabled Retry with no completed output. In
-  `a1-retry-owned-20261120-083311`, Astra approved one explicit Retry.
+  `a1-retry-owned-20261120-083311`, Review approved one explicit Retry.
   The same row moved from 404 to Finished, the fixture saw two additional
   GETs, and the 16 MiB output matched SHA-256. Cleanup removed the exact
   hash-matched output after stopping the probe writer.
-- Astra approved a real paired C4 WebDAV download in
+- Review approved a real paired C4 WebDAV download in
   `c4-paired-pinned-final-20261120-064240`. The probe matched and pinned
   the disposable Host's HTTPS certificate. Cancel retained the selection
   and made no payload request. Confirm made one request and wrote the
   1,048,576-byte FLAC with its expected hash in the exact Host child.
   The decoy child stayed empty and the file never appeared on the phone.
   The owned probe, reverse, relay, and fixture Servers were stopped.
-  In `c4-paired-refresh-final-20261120-083500`, Astra approved Refresh
+  In `c4-paired-refresh-final-20261120-083500`, Review approved Refresh
   folder from the native menu. The same folder obtained a fresh child
   listing, cleared the selection and disabled download. Refresh issued
   zero payload GETs. After reselecting and confirming, one request saved
   the hash-matched 1 MiB payload only in the selected Host folder.
-  In `c4-paired-transfers-final-20261120-092350`, Astra reviewed the native folder
+  In `c4-paired-transfers-final-20261120-092350`, the reviewer checked the native folder
   menu, empty Transfers view and return to the same selected folder.
   The paired Host showed no transfer before confirmation. Refresh
   transfers showed one completed copy with the same batch ID as the
   Host, and the 1 MiB file matched its hash in the chosen Host child.
-  In `c4-paired-delete-final-20261120-093118`, Astra approved the paired
+  In `c4-paired-delete-final-20261120-093118`, Review approved the paired
   delete dialog and refreshed folder. Cancel retained the selected
   notes.pdf and sent zero DELETEs. Confirm sent one accepted DELETE for
   notes.pdf, cleared selection, and left the sibling files available.
   The subsequent sibling download matched its hash in the chosen Host child.
-- Astra approved C6 touch Pause in `c6-touch-pause-final-20261120-064414`.
+- Review approved C6 touch Pause in `c6-touch-pause-final-20261120-064414`.
   The selected paired Host reported 2,228,224 received bytes four seconds
   apart after one tap. The Android row offered Resume and the finished
   file kept its matching hash. In `c6-keyboard-integrated-20261120-071829`,
-  Astra approved Tab to search, directional focus on Finished and Pause,
+  Review approved Tab to search, directional focus on Finished and Pause,
   and one centre-key activation. The Host's paused transfer held at
   3,276,800 received bytes for four seconds. A physical keyboard remains
   outside this emulator proof.
-- Astra approved the C7 Hosts and web UI corrections in `c7-paired-settings-corrected-20261120-094720`.
+- Review approved the C7 Hosts and web UI corrections in `c7-paired-settings-corrected-20261120-094720`.
   The Settings roots reflected the selected Host. Paired Settings omitted
   the three phone-only rows and the paired settings snapshot was unchanged.
   Both detail pages showed the correct destination, switch icon, scope
   callout and Web interface section. Filtered hierarchy checks showed only
   the detail while open and restored the root on Back.
-- Astra approved the update dialog in `android-update-preview-native-20261120-101002`.
+- Review approved the update dialog in `android-update-preview-native-20261120-101002`.
   Short, long and unavailable notes used the reviewed heading and empty
   state. The last long note remained readable with both actions available.
   Later and Back returned to the selected Settings tab. The signed
@@ -291,46 +291,46 @@ The owner paused implementation at `af7ec829` after the enabled C2 queue notific
   candidate. Later dismissed the in-app installation permission
   explanation and kept version code 8. The test used disposable signing
   identities and covered the path through the in-app permission prompt.
-- Astra approved C7 appearance in `c7-nav-geometry-final-retry-20261120-1200`. The native
+- Review approved C7 appearance in `c7-nav-geometry-final-retry-20261120-1200`. The native
   Theme chooser opened over local Settings. Selecting Light and Dark
   changed the active appearance. Back and reopen preserved both themes
   and the Dynamic colour On and Off choices. The navigation highlight
   matched the native selected tab on all four destinations and stayed
   aligned through appearance changes. The Dark comparison and isolated
   probe cleanup passed.
-- Astra approved the C7 Settings search and Back route in
+- Review approved the C7 Settings search and Back route in
   `c7-settings-insets-20261120-063758`. Catching links showed its
   guidance and browser entry with the keyboard dismissed. Site logins
   opened the disabled local Remote Files screen below the status bar.
   The enabled Remote Files list kept its layout and showed the real
   205 GB SFTP capacity in `c3-enabled-insets-20261120-064627`.
-- Astra approved the final A6 Details in
+- Review approved the final A6 Details in
   `a6-details-pause-final-20261120-054830`. Two independent active ranges
   advanced from 262,144 to 3,014,656 bytes each, and the final hash matched.
   The nested Downloads path and queue-specific unmetered rule were shown
   with the global rule off. The owned file and directories were cleaned up.
   Metered-network waiting remains open.
-- Astra approved the real ongoing notification actions in
+- Review approved the real ongoing notification actions in
   `a7-owned-record-actions-20261120-054749`. Open returned to Downloads
   and Pause all left the sole job paused with 2,097,152 bytes unchanged
   for four seconds. The isolated app and mapping were removed. The owned
   incomplete fixture was retained. In `a7-finished-proof-20261120-061054`,
-  Astra approved a real background completion with the exact 156-byte PNG
+  Review approved a real background completion with the exact 156-byte PNG
   hash and confirmed that the notification's Open action displayed the
   expected colour in Photos. The hash-matched output was removed after
   uninstall. The network-wait notice remains open.
 - B3 completed the protected fixture report after local consent and matched
   its SHA-256 in `b3-real-auth-20261120-053929`. The exact output was
   removed after stopping its writer. In `b3-paired-hash-final-20261120-080530`,
-  Astra approved the exact pinned HTTPS recipient and consent actions.
+  Review approved the exact pinned HTTPS recipient and consent actions.
   The paired Host saw zero report requests before consent and after
   Cancel. Send allowed one authenticated metadata request. Download
   created one Host job and its exact 1,379-byte report matched SHA-256
   inside the owned category folder. The phone received no output.
-  In `b3-auth-resume-final-20261120-082402`, Astra approved local authenticated
+  In `b3-auth-resume-final-20261120-082402`, Review approved local authenticated
   Resume. After a settled Pause, the same job requested an authenticated
   range at byte 2,097,152 and received the entire remaining suffix.
-  The 16 MiB file matched SHA-256. In `b3-paired-resume-live-20261120-085743`, Astra
+  The 16 MiB file matched SHA-256. In `b3-paired-resume-live-20261120-085743`, the reviewer
   approved the corresponding paired-Host Resume. Cancel left the Host
   empty. The one-connection job kept its identity and held at 2,097,152
   bytes for three seconds after Pause. Resume fetched the remaining
@@ -339,7 +339,7 @@ The owner paused implementation at `af7ec829` after the enabled C2 queue notific
 
 ### Native first-run permission returns (2026-11-20)
 
-Astra approved the notification Allow and Deny returns. The isolated probe
+Review approved the notification Allow and Deny returns. The isolated probe
 matched Android's permission state in `a0-permissions-allow-20261120-051604`
 and `a0-permissions-deny-20261120-051518`. The final
 `a0-native-deny-20261120-053443` run chose Deny in the battery prompt,
@@ -353,16 +353,16 @@ probe, and the regular build resolves Inbound and app.inbound.android.
 
 ### Core screens and Downloads selection (2026-11-20)
 
-- Astra passed first launch before the permission prompts, the idle Add sheet
+- Review passed first launch before the permission prompts, the idle Add sheet
   and the dark Settings root in `core-a0-a5-c7-retry-20261120-045033`. The
   Settings search narrowed to Catching links and the Site logins row was visible.
 - The same run populated A5 from a loopback metadata response with a 6.1 GB
   size, byte-range support, exact fixture filename and eight requested
-  connections. Astra passed the slimmer slider and 56dp button fills in
+  connections. Review passed the slimmer slider and 56dp button fills in
   `a5-controls-final-20261120-050123`. The capture submitted no download.
 - `b5-mixed-retry-20261120-045121` verified three selected real jobs in active,
   paused and queued states, alongside an unselected active and finished job.
-  The finished file matched its hash. Astra passed the revised B5 icons and
+  The finished file matched its hash. Review passed the revised B5 icons and
   C8's five-job Light view in `c8-actions-final-20261120-051650`. The probe
   verified Light with Dynamic colour off, slim Pause and neutral outlined
   Resume. The named schedule, varied file types and longer chart history
@@ -370,18 +370,18 @@ probe, and the regular build resolves Inbound and app.inbound.android.
 
 ### Verified Remote Files and completion actions (2026-11-20)
 
-- Astra passed the direct A3 snackbar Open in `a3-snackbar-open-20261120-044317`.
+- Review passed the direct A3 snackbar Open in `a3-snackbar-open-20261120-044317`.
   Photos displayed the expected synthetic PNG, the completed SHA-256 matched,
   and scoped cleanup passed. See the mixed-workload checkpoint above.
-- Astra passed the C3 active WebDAV view in `c3-c4-active-20261120-043917`.
+- Review passed the C3 active WebDAV view in `c3-c4-active-20261120-043917`.
   It showed two downloads at 57.3 KB/s and fixture bytes advanced from
   1,638,400 to 1,900,544. The trusted SFTP browse in
   `c3-sftp-capacity-20261120-044216` showed 205 GB free from the fixture's
-  204,800,000,000-byte response. Astra also passed all three browsable
+  204,800,000,000-byte response. The reviewer also passed all three browsable
   protocols together, then the outlined icons and full-height Add location in
   `c3-icons-rerun-20261120-050646`. Expired cloud sign-in and concurrent
   upload/download remain open.
-- Astra passed the C4 nested WebDAV list in `c3-c4-active-20261120-043917`.
+- Review passed the C4 nested WebDAV list in `c3-c4-active-20261120-043917`.
   Order and 12/48 folder counts matched, both selected FLAC hashes passed in
   Downloads/Inbound/Music, and delete Cancel preserved the fixture while
   Confirm removed only notes.pdf.
@@ -391,29 +391,29 @@ probe, and the regular build resolves Inbound and app.inbound.android.
 Pushed checkpoints: `f3707bc4` and `f085e394`. Full Android visual
 acceptance remains open. Earlier entries document their original checkpoints.
 
-- **A3/A6:** Astra approved `a3-a6-present-20261120-042101`: Add remained
+- **A3/A6:** Review approved `a3-a6-present-20261120-042101`: Add remained
   visible, the navigation gap was 16 px, and the folder action was outlined.
   Active Details used one connection and Downloads wording; the finished transfer
   matched its hash. A3 mixed-list/Open tap and A6 nested destination, constraints
   and multiple connections remain open. A6 Stop passed separately in
   `b6-stop-retry-20261120-034215`.
-- **B4:** Astra approved the Archives state in
+- **B4:** Review approved the Archives state in
   `b4-archive-final-20261120-043155`. Final spacing aligns the eight rows and
   checkboxes. Six archives were checked, both totals showed 689 KB, and
   clearing search restored all eight links. Submission remains open.
-- **B6:** Astra approved `b6-recatch-20261120-040546`: Cancel preserved the
+- **B6:** Review approved `b6-recatch-20261120-040546`: Cancel preserved the
   same 7% job; a real WebView Confirm resumed that same job at byte 1,310,720
   and its completed payload matched SHA-256.
-- **C5/C6:** Astra gave a scoped functional PASS for
+- **C5/C6:** The reviewer gave a scoped functional PASS for
   `c5-c6-pulses-20261120-041845`: three exclusive Host choices and a C6
   running-plus-finished list, matching completed hash, and live graph; the
   active transfer advanced from 655,360 to 917,504 bytes over four seconds.
-  Astra passed the live switcher and final C6 layout in
+  Review passed the live switcher and final C6 layout in
   `c5-c6-final-20261120-043359`. Host A showed 1 active at 76.8 KB/s. Finished
   excluded its active job, All restored both, Back from Queues preserved the
   filter session and closing search hid it. Hardware-keyboard and Pause
   activation remain open.
-- **C1:** Astra approved the revised populated cards, action sheet and chart
+- **C1:** Review approved the revised populated cards, action sheet and chart
   navigation in `c1-present-20261120-042308`. The chart opened the same Host's
   live Downloads graph. In `c1-schedule-fires-20261120-051952` Night
   started at 05:30 on the unchanged device clock and advanced from 131,072
@@ -427,8 +427,8 @@ acceptance remains open. Earlier entries document their original checkpoints.
 ### Android parity continuation (2026-11-20)
 
 - Delivered the owner a private ARM64 APK built from the current parity checkout through the SFTP free-space change. Its embedded version is 0.0.8. The existing release certificate, pinned rclone, and 16 KiB alignment verified. No public release or device install of the private APK.
-- The expanded Host run passed 352 with four skipped, with one stale golden snapshot test failing. The two hello frames now reflect the actual Windows capability sequence. The focused rerun passed and Astra approved the source correction.
-- B6 and C2 passed scoped functional source review. Astra requested visual changes. The revised probe includes the badge, scrim and action sizing for B6, and the C2 day buttons, time typography and copy. The owner approved “Notify when the queue finishes” for C2.
+- The expanded Host run passed 352 with four skipped, with one stale golden snapshot test failing. The two hello frames now reflect the actual Windows capability sequence. The focused rerun passed and Review approved the source correction.
+- B6 and C2 passed scoped functional source review. The reviewer requested visual changes. The revised probe includes the badge, scrim and action sizing for B6, and the C2 day buttons, time typography and copy. The owner approved “Notify when the queue finishes” for C2.
 - All 39 host-only parity capture tests passed after updating assertions for the live B6 connections control. An A7 capture stopped at an ADB install timeout. The installed APK matched the owned probe byte for byte and was removed. The install deadline was extended without changing other command deadlines.
 
 ### C1 workload and A3/A6 recapture (2026-11-20)
@@ -437,11 +437,11 @@ acceptance remains open. Earlier entries document their original checkpoints.
   time, and Mobile stopped with one job apiece. The live Main transfer
   advanced from 262,144 to 393,216 bytes. The real queue dropdown admitted
   each fixture to its intended queue, and long press opened the Mobile
-  queue actions. Astra passed those states. Chart navigation, Stop styling,
+  queue actions. Review passed those states. Chart navigation, Stop styling,
   progress track and action-sheet presentation still need visual work.
   Evidence: c1-dropdown-20261120-035933.
 - The revised A3 completion message kept Add visible in the API 33 capture.
-  Astra asked for less space above navigation and a neutral outlined folder
+  The reviewer asked for less space above navigation and a neutral outlined folder
   action. A6 passed the revised active controls and captured finished state.
   The connection note still needs consistent public-folder wording. The
   transfer hash matched. Evidence: a3-a6-recapture-20261120-040258.
@@ -450,7 +450,7 @@ acceptance remains open. Earlier entries document their original checkpoints.
 
 ### Configured C2 approval and link-intake follow-ups (2026-11-20)
 
-- Astra passed the configured local Night queue editor and its Host footer.
+- Review passed the configured local Night queue editor and its Host footer.
   API 33 saved and reopened the disabled Weekdays schedule with Mon–Fri,
   01:00–07:00, charging and unmetered. The weekday gaps and battery row align.
   The footer fits in that viewport. Evidence: c2-clean-boot-20261120-035129.
@@ -463,23 +463,23 @@ acceptance remains open. Earlier entries document their original checkpoints.
 
 ### B6 recovery and C1 scheduler checkpoint (2026-11-20)
 
-- Astra approved the B6 expired-link sheet and recovery by pasted replacement.
+- Review approved the B6 expired-link sheet and recovery by pasted replacement.
   The emulator also verified A6 Stop on the same job. Retry and the replacement
   both requested byte 1,327,104, and the finished file matched SHA-256. The
-  owned file, probe and reverse mapping were removed. Evidence in the Codex
+  owned file, probe and reverse mapping were removed. Evidence in the earlier
   chat's local visualizations directory: b6-stop-retry-20261120-034215.
   Browser re-catch, confirmation and cancellation remain open.
 - C1 cards now display the next timed start from the selected Host, including
   applicable repeats. The screen removes elapsed times and uses “Schedule
-  enabled” when an exact start is unavailable. Astra passed source review.
+  enabled” when an exact start is unavailable. Review passed source review.
   47 scheduler and Host regression checks passed. The isolated workload
   runner and C1 visual comparison remain to be exercised.
 
 ### Scoped API 33 checks (2026-11-20)
 
-Evidence bundles below are in this Codex chat's local visualizations directory.
+Evidence bundles below are in the earlier session's local visualizations directory (see the Android handoff).
 
-- Astra passed source and visual review for the expanded **A7 ongoing
+- Review passed source and visual review for the expanded **A7 ongoing
   notification**. A real transfer populated its rate, progress, ETA, Pause all
   and Open. The run verified the finished payload hash. It did not tap these
   actions or cover the finished and network-wait notices.
@@ -488,14 +488,14 @@ Evidence bundles below are in this Codex chat's local visualizations directory.
   Details. The new completion snackbar uses the Downloads coordinator so Add
   stays accessible. A6 now preserves the local nested destination, uses the
   actual unmetered Host or queue rule, and adjusts the active action and bar
-  layout. Astra passed the A6 source updates. The revised A3/A6 probe built.
+  layout. Review passed the A6 source updates. The revised A3/A6 probe built.
   Fresh visual review is open.
-- Astra passed the **C3** SFTP unavailable-space state. The isolated fixture
+- Review passed the **C3** SFTP unavailable-space state. The isolated fixture
   proved no login before trust, authenticated browse afterward, and an accurate
   location card without a capacity value on return. C3 positive capacity and
   mixed and active states remain open. Evidence: c3-sftp-space-20261120-032528.
 - **B6** retried the original address at byte 1,458,176, resumed the same job
-  from its replacement at that byte, and matched the final hash. Astra passed
+  from its replacement at that byte, and matched the final hash. Review passed
   that flow and the updated badge, actions and scrim. The follow-up reduced
   the action gap and bottom padding and matched the dark surface color.
   The separate A6 Stop attempt showed Cancelled at 8% and preserved a partial
@@ -503,7 +503,7 @@ Evidence bundles below are in this Codex chat's local visualizations directory.
   B6/Stop lane has not yet completed. Evidence: b6-reviewed-20261120-032108
   and b6-stop-final-20261120-032832.
 - **C2** saved and reopened the revised local Weekdays schedule. The owner
-  approved the completion wording, and Astra verified the times, selected
+  approved the completion wording, and the reviewer verified the times, selected
   weekdays, conditions, day size, limits and footer. The equal-gap and
   section-alignment follow-up built. The device-command timeout prevented
   a new C2 comparison. Evidence: c2-reviewed-20261120-031734.
@@ -513,18 +513,18 @@ Evidence bundles below are in this Codex chat's local visualizations directory.
 
 Owner decisions (2026-11-20): B2 shows the selected Host's current unmetered rule. The user changes it in Settings. In A6, Stop keeps partial bytes and restart-from-zero is omitted for active downloads.
 
-On 2026-11-20 the owner accepted the verified isolated S3 upload flow for C4 screen parity. Production upload remains a separate feature. This closes the upload-flow scope decision; the remaining C4 screen comparisons still require Astra review.
+On 2026-11-20 the owner accepted the verified isolated S3 upload flow for C4 screen parity. Production upload remains a separate feature. This closes the upload-flow scope decision; the remaining C4 screen comparisons still require the reviewer review.
 
 ### Android parity evidence, 2026-11-20
 
 - The C2 editor saved and reopened the disabled Weekdays schedule for Night. The Host timing footer was visible without scrolling on inbound33. Both pairs are in `c2-owner-20261120-023106`. The owner approved “Unmetered network” and its existing meaning.
-- In `b5-verified-20261120-023412`, the real five-job fixture selected the active, paused and queued rows, left the other two unselected, and verified that Download again was disabled. Astra passed the selection styling and overflow. Measurable progress, a scheduled start and outline toolbar icons remain open for the full screen.
-- In `b234-owner-20261120-024107`, B2 showed range metadata and the phone Change action. The B3 protected report and its HEAD request both used the synthetic session. Astra passed B3 controls/disclosure and B2 metadata/destination visibility. The next build addresses the signed-in scrim, disclosure length and B2 timing and queue actions.
+- In `b5-verified-20261120-023412`, the real five-job fixture selected the active, paused and queued rows, left the other two unselected, and verified that Download again was disabled. Review passed the selection styling and overflow. Measurable progress, a scheduled start and outline toolbar icons remain open for the full screen.
+- In `b234-owner-20261120-024107`, B2 showed range metadata and the phone Change action. The B3 protected report and its HEAD request both used the synthetic session. Review passed B3 controls/disclosure and B2 metadata/destination visibility. The next build addresses the signed-in scrim, disclosure length and B2 timing and queue actions.
 - The focused Host suite passed 324 tests (4 skipped), the mobile suite passed 550 and 39 capture checks passed. B6 partial recovery, phone-folder payload verification, full-screen visual approval and feature resumption remain open.
 
 ### Android parity resumed (2026-11-20)
 
-The queue/dispatcher suite passed 324 tests with four skipped. Astra passed the B5 stale-menu fix on source review. Fresh signed emulator build: parity-owner-resume-20261120-022458. The owner approved the existing unmetered schedule condition and its accurate label.
+The queue/dispatcher suite passed 324 tests with four skipped. Review passed the B5 stale-menu fix on source review. Fresh signed emulator build: parity-owner-resume-20261120-022458. The owner approved the existing unmetered schedule condition and its accurate label.
 
 ### Android link-intake partial-expiry capture lane (2026-11-20)
 
@@ -545,7 +545,7 @@ The queue/dispatcher suite passed 324 tests with four skipped. Astra passed the 
 
 ### Android mockup parity pause (2026-11-20)
 
-- The owner paused the work before all-screen Astra sign-off. B2's functional
+- The owner paused the work before all-screen reviewer sign-off. B2's functional
   check and scoped source review passed. API 33 saved and reopened the disabled
   Night schedule with Mon–Fri 01:00–07:00, charging and unmetered. The configured
   pair is in `c2-configured-resumed-20261120-021759`; the footer scroll assertion
@@ -554,22 +554,22 @@ The queue/dispatcher suite passed 324 tests with four skipped. Astra passed the 
   built in `parity-b5-resumed-20261120-021617`. The first mixed-state run failed;
   the repaired runner passed eight host tests and has not been rerun on API 33.
   The owner approved disabling Download again for unfinished-only selections.
-- Astra withheld visual approval for B3, B6 and C5. Their follow-up edits still
+- The reviewer withheld visual approval for B3, B6 and C5. Their follow-up edits still
   need a clean build and recapture. See the
   [parity handoff](docs/plans/android-parity-handoff.md).
 
 ### Android mockup parity resumed (2026-11-20)
 
-- The owner asked to continue until Astra signs off. B2's fresh signed API 33
+- The owner asked to continue until the reviewer signs off. B2's fresh signed API 33
   probe completed the paired folder-picker flow on the disposable Server.
   The fixture SHA-256 matched in the visibly selected child and the decoy
-  directory stayed empty. Luna fixed the Archive selector. The runner also
+  directory stayed empty. A worker fixed the Archive selector. The runner also
   uses an enabled clickable selector for the duplicate folder label and
   matches the submit button's resource and current label. Focused runner
   tests passed 4/4. Evidence: `artifacts/android-app/pairs/paired-b2-resumed-20261120-020635/`.
-- Astra gave B2 a scoped SOURCE PASS for the render/save race, modal submit
+- The reviewer gave B2 a scoped SOURCE PASS for the render/save race, modal submit
   guard, cancellation and Host binding. The side-by-side visual gate is open.
-  Astra's review of B5's earlier three-finished-row comparison found selection
+  The reviewer's review of B5's earlier three-finished-row comparison found selection
   badge, bar, surrounding navigation and overflow differences. Mixed-state
   evidence and re-review are pending.
 
@@ -692,12 +692,12 @@ The queue/dispatcher suite passed 324 tests with four skipped. Astra passed the 
   C3/C4 still apply after the Sites → Remote Files rename. The 0.0.8 checks
   covered function and release packaging, not mockup parity. ANDROID.9 is
   paused; its drafts remain in the original checkout. Parity work starts
-  from `66270193` in a separate worktree, with Astra code and visual review
+  from `66270193` in a separate worktree, with reviewer code and visual review
   required before sign-off.
 - The owner extended the 0.0.9 release gate to **all implemented Android
   screens**. The C3/C4 corrections remain the first slice; every other
   implemented screen must also be captured against its approved reference
-  and reviewed by Astra. ANDROID.9 feature work remains paused.
+  and reviewed. ANDROID.9 feature work remains paused.
   `docs/plans/android-mockup-acceptance.md` is the working screen/state
   inventory; historical evidence is not new acceptance. The first C3/C4
   NativeAOT emulator candidates built. The focused Host suite passed 10/10,
@@ -706,7 +706,7 @@ The queue/dispatcher suite passed 324 tests with four skipped. Astra passed the 
   The API 33 run at `%LOCALAPPDATA%\Temp\opencode\remote-files-parity-20261119-230316`
   captured both pairs, exercised the ancestor breadcrumb and two-file
   selection, and verified only the two chosen files arrived, both with
-  their expected SHA-256. It removed the probe and reverse. Astra reviewed
+  their expected SHA-256. It removed the probe and reverse. The reviewer checked
   the prior comparison from the same APK and returned **HOLD** on design,
   destination, sign-in and safety gaps. The first safety corrections now
   require a current listing for delete and prevent credentials carrying over
@@ -737,7 +737,7 @@ The queue/dispatcher suite passed 324 tests with four skipped. Astra passed the 
   `Downloads/Inbound/Music` folder in the UI, checked the C4 footer,
   verified both hashes in that folder with no root Downloads changes,
   and cleaned up the probe, reverse and disposable files/folders.
-  No new Astra approval.
+  No new reviewer approval.
   C4 now orders folders by name and files by modification time before
   pagination. Direct child counts are best-effort (at most eight folders
   per page within two seconds); an unread count is never shown as zero.
@@ -750,7 +750,7 @@ The queue/dispatcher suite passed 324 tests with four skipped. Astra passed the 
   the matching row order, dates and counts (masters 12, stems 48).
   Both selected files still hash-match in `Downloads/Inbound/Music`,
   delete cancel/confirm and scoped cleanup passed. The visual comparison
-  still has icon and spacing differences; this is not Astra sign-off.
+  still has icon and spacing differences; this is not reviewer sign-off.
   Separate API 33 SFTP walkthrough (`remote-files-sftp-only-20261119-233503`)
   matched the fixture fingerprint, verified Cancel sent no login, and
   authenticated only after Trust, then browsed the fixture. Cleanup passed.
@@ -776,12 +776,12 @@ The queue/dispatcher suite passed 324 tests with four skipped. Astra passed the 
   boundaries and abort without a final chunk when source size changes.
   The distinct `sites.device.createOpen` command is fail-closed in
   production. A bounded WebDAV experiment exists only in the probe:
-  Astra found that even `MOVE Overwrite: F` on rclone's WebDAV server
+  The reviewer found that even `MOVE Overwrite: F` on rclone's WebDAV server
   can race another writer between its check and rename. A pre-existing
   conflict test does not exercise that boundary. Before enabling Android
   upload, use a backend with an atomic create-only commit and verify a
   competing write at that boundary; never fall back to legacy uploads.
-  Astra's core comparison also found open A4 sheet and C7 Settings
+  The reviewer's core comparison also found open A4 sheet and C7 Settings
   differences (source rows/height and search/swatches/Site logins).
   API 33 probe `android-conditional-upload-20261120-000434` received
   `abc`, preserved the already-present `artwork.zip`, left staging
@@ -832,7 +832,7 @@ The queue/dispatcher suite passed 324 tests with four skipped. Astra passed the 
   The exact MediaStore row, probe package and owned ADB reverse were removed.
   This verifies the loopback interaction, not production upload or visual
   sign-off. The separate Host test covers the competing-writer race.
-  Astra's follow-up held all-screen visual acceptance. C4 fixes share one
+  The reviewer's follow-up held all-screen visual acceptance. C4 fixes share one
   phone-folder navigation path that clears selection, use a checked blue
   selected row, show the full filename in confirmation, and serialize the
   synthetic MediaStore operations. The API 33 rerun
@@ -850,7 +850,7 @@ The queue/dispatcher suite passed 324 tests with four skipped. Astra passed the 
   eight-link fixture list and two selected rows without submitting a job.
   Its `b5-pair.png` was mislabeled: it shows selected page links (B4),
   whereas the approved B5 is Downloads-list multiselect with overflow.
-  Astra rechecked the C4 code and captures and passed the isolated upload
+  The reviewer rechecked the C4 code and captures and passed the isolated upload
   probe only; C1, C2 and A2 remain partial, and global acceptance is open.
   `android-c1-disposable-20261120-011021` adds a stopped Night queue beside
   Main and opens that disposable queue's no-schedule editor. Running C1,
@@ -869,7 +869,7 @@ The queue/dispatcher suite passed 324 tests with four skipped. Astra passed the 
   B4 search passed again. Visual acceptance is still open.
   `android-b3-compact-20261120-012541` shows the compact local signed-in
   sheet with an inline Download button and the cookie-use/resume notice;
-  no job was submitted. Astra passed the B2/B3 dispatch and consent code
+  no job was submitted. Review passed the B2/B3 dispatch and consent code
   review but held B2 visual parity (destination, queue, Wi-Fi, More options)
   and noted B3 button width and sheet height still differ. Paired consent
   and the full form were not changed.
@@ -881,7 +881,7 @@ The queue/dispatcher suite passed 324 tests with four skipped. Astra passed the 
   expired-link sheet after a fixture HTTP 410. Refreshing the existing task
   with the replacement URL completed with the expected SHA-256; only the
   exact verified output was removed. This was a zero-byte failure, not
-  partial-resume evidence. Astra visual review remains open.
+  partial-resume evidence. Reviewer visual review remains open.
   `android-b2-options-20261120-013706` verifies that More options reveals
   and hides the existing connection/timing controls without submitting.
   It also recaptured compact B3 with the shorter cookie notice and B4 with
@@ -891,14 +891,14 @@ The queue/dispatcher suite passed 324 tests with four skipped. Astra passed the 
   `android-b6-styled-20261120-014313` verified same-job refresh and hash
   match; `android-c5-handle-20261120-014440` captured both Host selections,
   reverified the one-row remote download, and removed its owned reverse.
-  These are not Astra visual sign-off.
-  Astra passed the C5 handle/selection and B6 layout/action-order checks only.
+  These are not reviewer visual sign-off.
+  Review passed the C5 handle/selection and B6 layout/action-order checks only.
   B2's remote destination picker is limited to a Host that offers folder
-  browsing. Astra found a stale-folder race and a dismissal lifetime gap;
+  browsing. The reviewer found a stale-folder race and a dismissal lifetime gap;
   navigation now serializes, Save uses the displayed completed listing,
   and cancellation prevents fallback or applying a late result. Mobile
   549/549 including the cancellation regression; parity tooling 36/36.
-  Device walkthrough and Astra recheck of the picker remain open.
+  Device walkthrough and reviewer recheck of the picker remain open.
 
 - Android 0.0.8 (version code 8) published as an Android-only prerelease from
   `577c442245b2dd37a09cdb53aff37fe5a63971dd`, with Remote Files and bundled rclone.
@@ -930,7 +930,7 @@ The queue/dispatcher suite passed 324 tests with four skipped. Astra passed the 
   and the filename-specific incomplete-file warning. Probe and reverse
   cleanup passed. Evidence:
   `%LOCALAPPDATA%\Temp\opencode\rclone-arm64-source\emu-ui-kill-20261119-221807`.
-  Sites suite with rclone: 224 passed, 20 skipped. Astra gave final **PASS**
+  Sites suite with rclone: 224 passed, 20 skipped. The reviewer gave final **PASS**
   for the ANDROID.8 implementation and signed arm64 release checks after
   independently inspecting the recovery UI evidence and matching APK size
   and hash. This does not establish physical-device Remote Files background
@@ -947,7 +947,7 @@ The queue/dispatcher suite passed 324 tests with four skipped. Astra passed the 
   `%LOCALAPPDATA%\Temp\opencode\rclone-arm64-source\emu-delayed-transfer-20261119-215446`.
   Mobile suite 539/539, focused real-rclone sign-in suite 3/3, release
   tooling 16/16, fixture suite 5/5. This is local IPC evidence, not a
-  paired-Host, UI walkthrough or background/screen-off pass. Astra pre-merge
+  paired-Host, UI walkthrough or background/screen-off pass. reviewer pre-merge
   review remains open; no APK was published.
 
 - ANDROID.8 standard arm64 production packaging verified locally: the
@@ -1188,7 +1188,7 @@ The queue/dispatcher suite passed 324 tests with four skipped. Astra passed the 
   the listener. Restored app appearance and Android display settings:
   adaptive brightness on, brightness 67, timeout 30 seconds. Evidence:
   `%LOCALAPPDATA%\Temp\opencode\inbound-s24-core-007\populated-comparison.png`.
-  Independent Astra review: PASS for ANDROID.4. Phone evidence covers the
+  Independent review: PASS for ANDROID.4. Phone evidence covers the
   completed state; active, paused and failed colours were not accepted on
   the phone. First run and notification Open remain emulator evidence.
 
@@ -1211,7 +1211,7 @@ The queue/dispatcher suite passed 324 tests with four skipped. Astra passed the 
   empty Main queue matched before/after. This establishes in-place continuity
   and unchanged observed UI, not private-data byte equality or retention of
   non-empty jobs. Evidence: `%LOCALAPPDATA%\Temp\opencode\inbound-s24-update-007\`.
-  Independent Astra milestone review: PASS.
+  Independent milestone review: PASS.
 
 - Published [Android 0.0.7](https://github.com/Kaan88/inbound/releases/tag/android-v0.0.7)
   from `652e1e53` and advanced `android-latest`. This is a version-bump
@@ -1404,7 +1404,7 @@ The queue/dispatcher suite passed 324 tests with four skipped. Astra passed the 
   observations: `C:\Users\kaank\AppData\Local\Temp\opencode\idm-android-resume-20261119-134123`.
 - ANDROID.4/.7 remain partial. Next: exercise the signed app's core screens on
   the phone against the A/C8 references while keeping phone settings unchanged;
-  independently set up an isolated HTTPS pairing fixture. No new Astra audit.
+  independently set up an isolated HTTPS pairing fixture. No new review.
 - Follow-on: the full Server suite on the fresh Release binaries passed **208/208**
   (`server-full.trx`). The S24 preflight reported API 37, 0.0.6 and keyguard
   showing; no phone UI was captured or operated.
@@ -1431,56 +1431,48 @@ The queue/dispatcher suite passed 324 tests with four skipped. Astra passed the 
   processes were stopped. This does not establish acceptance on a phone or on a
   publicly trusted Inbound endpoint.
 
-S24 background/reboot batch complete; owner pause boundary (2026-11-19, Codex). Production signed0.0.6/API37 completed a naturally scheduled ordinary queue4100 transfer over direct LAN while locked/noninteractive AOD (8MiB, SHA-256 `f4337909e2c0473eb563c4a8010233439d96d01b668ab9c209ed4bb19cb8fd20`). Separate owner-approved single reboot of a user-started UIDT job1 recovered after unlock without an automated app launch: boot ID changed, fresh job1 start logged, timestamped postboot HTTP Range resumed at byte1,114,112, and final16MiB hash matched `db5e9447f0246a6102d25fb34b353db82a355866a4890ef77c9262cbff257c13`. Optional request tracing added only to AndroidTrialServer; main reviewed Terra code, built0errors/0warnings and passed live HEAD/GET/Range/correlation checks. Both task jobs/files/parts and task queue/schedule removed; baseline Main/empty downloads and display timeout/adaptive mode restored, owned LAN fixture stopped. App source/APK/feed unchanged. Owner said "pause after the step is done, not in the middle"; this batch is finished and cleaned: stop here before another step until resumed. Full ANDROID.6/.7, remaining phone Doze/network/power, long-duration and complete visual/accessibility/remote acceptance, and later independent review remain OPEN. Raw evidence: `artifacts/android-app/android6-s24-background/`.
+S24 background/reboot batch complete; owner pause boundary (2026-11-19). Production signed0.0.6/API37 completed a naturally scheduled ordinary queue4100 transfer over direct LAN while locked/noninteractive AOD (8MiB, SHA-256 `f4337909e2c0473eb563c4a8010233439d96d01b668ab9c209ed4bb19cb8fd20`). Separate owner-approved single reboot of a user-started UIDT job1 recovered after unlock without an automated app launch: boot ID changed, fresh job1 start logged, timestamped postboot HTTP Range resumed at byte1,114,112, and final16MiB hash matched `db5e9447f0246a6102d25fb34b353db82a355866a4890ef77c9262cbff257c13`. Optional request tracing added only to AndroidTrialServer; main reviewed the worker's code, built0errors/0warnings and passed live HEAD/GET/Range/correlation checks. Both task jobs/files/parts and task queue/schedule removed; baseline Main/empty downloads and display timeout/adaptive mode restored, owned LAN fixture stopped. App source/APK/feed unchanged. Owner said "pause after the step is done, not in the middle"; this batch is finished and cleaned: stop here before another step until resumed. Full ANDROID.6/.7, remaining phone Doze/network/power, long-duration and complete visual/accessibility/remote acceptance, and later independent review remain OPEN. Raw evidence: `artifacts/android-app/android6-s24-background/`.
 
-Android constraint/theme acceptance (2026-11-19, Codex): signed0.0.6 S24 dark C1/C2/C7 and empty dynamic-colour Downloads were viewed beside approved references; original app appearance, adaptive brightness and timeout restored. API33 NativeAOT emulator verified actual OS Wi-Fi metering and battery-saver holds at zero bytes, then automatic hash-matched completion when each condition cleared. Corrected scheduled Doze test used SIGKILL only on the verified idle app PID: payload stayed queued/0bytes in forced idle through12:36:51 for a12:36 schedule, then completed naturally by12:37:01 after unforce (2,097,153bytes; SHA-256 `a740e0039f45586d220c77e43663196aed08648c2e38effd0fb069d026bc098c`). The first `am kill` attempt was Android reason10/user-stop and correctly stayed user-paused; it is not a background-resume failure. All four task jobs/payloads, queue and schedule removed; original emulator metering/low-power/idle-force state and recorded baseline fields restored, non-root adb; hardware emulator remains running. Main verified Terra's evidence review. No app source changes or new release; ANDROID.6/.7 remain PARTIAL for physical API37 background/network/power/reboot, full visual/accessibility flows, broader remote and later independent review. Evidence: latest ANDROID-CODEX-PROGRESS and `artifacts/android-app/android6-acceptance-0.0.5/`.
+Android constraint/theme acceptance (2026-11-19): signed0.0.6 S24 dark C1/C2/C7 and empty dynamic-colour Downloads were viewed beside approved references; original app appearance, adaptive brightness and timeout restored. API33 NativeAOT emulator verified actual OS Wi-Fi metering and battery-saver holds at zero bytes, then automatic hash-matched completion when each condition cleared. Corrected scheduled Doze test used SIGKILL only on the verified idle app PID: payload stayed queued/0bytes in forced idle through12:36:51 for a12:36 schedule, then completed naturally by12:37:01 after unforce (2,097,153bytes; SHA-256 `a740e0039f45586d220c77e43663196aed08648c2e38effd0fb069d026bc098c`). The first `am kill` attempt was Android reason10/user-stop and correctly stayed user-paused; it is not a background-resume failure. All four task jobs/payloads, queue and schedule removed; original emulator metering/low-power/idle-force state and recorded baseline fields restored, non-root adb; hardware emulator remains running. Main verified a worker's evidence review. No app source changes or new release; ANDROID.6/.7 remain PARTIAL for physical API37 background/network/power/reboot, full visual/accessibility flows, broader remote and later independent review. Evidence: `artifacts/android-app/android6-acceptance-0.0.5/`.
 
-Android acceptance checkpoint (2026-11-19, Codex): the owner's S24 FE was rediscovered over Wi-Fi ADB (SM-S721B/API37). Its installed 0.0.6 APK SHA-256 exactly matches the public release. Real-phone UI created two disabled schedules, saved/reopened Mon/Wed/Fri, canceled deletion once, then deleted only the second and verified the first remained. A 1 MiB task download waited in the stopped queue, completed after explicit queue start, and matched fixture SHA-256 `b13261ceffb27a120f88c3466a3917bfb2875493d5f802422b433a3599407be6`; transport was Wi-Fi ADB reverse, not direct LAN. Task queue/schedule/job/payload/reverse removed; baseline Main and empty downloads verified. Main personally viewed C1/C2/C7 phone/mockup pairs; Terra checked evidence and visual scope. Owner manually confirmed TalkBack moves between controls and reads useful labels in Downloads. Original TalkBack/accessibility, brightness and timeout values were restored and verified; this does not establish exhaustive accessibility acceptance. Emulator NativeAOT API33 additionally held a charging-only queue without payload requests, then completed with matching hash after simulated AC; a persisted Android job naturally recreated an absent process and started the queue at11:48:18 for11:47 (78seconds late). Emulator task data removed, recorded baseline queue fields restored, non-root adb; full settings hash differs after create/delete, so no byte-identical restoration claim. ANDROID.6/.7 remain PARTIAL; phone Doze/network/reboot, full visual/accessibility and broader remote gates remain OPEN.
+Android acceptance checkpoint (2026-11-19): the owner's S24 FE was rediscovered over Wi-Fi ADB (SM-S721B/API37). Its installed 0.0.6 APK SHA-256 exactly matches the public release. Real-phone UI created two disabled schedules, saved/reopened Mon/Wed/Fri, canceled deletion once, then deleted only the second and verified the first remained. A 1 MiB task download waited in the stopped queue, completed after explicit queue start, and matched fixture SHA-256 `b13261ceffb27a120f88c3466a3917bfb2875493d5f802422b433a3599407be6`; transport was Wi-Fi ADB reverse, not direct LAN. Task queue/schedule/job/payload/reverse removed; baseline Main and empty downloads verified. Main personally viewed C1/C2/C7 phone/mockup pairs; a worker checked evidence and visual scope. Owner manually confirmed TalkBack moves between controls and reads useful labels in Downloads. Original TalkBack/accessibility, brightness and timeout values were restored and verified; this does not establish exhaustive accessibility acceptance. Emulator NativeAOT API33 additionally held a charging-only queue without payload requests, then completed with matching hash after simulated AC; a persisted Android job naturally recreated an absent process and started the queue at11:48:18 for11:47 (78seconds late). Emulator task data removed, recorded baseline queue fields restored, non-root adb; full settings hash differs after create/delete, so no byte-identical restoration claim. ANDROID.6/.7 remain PARTIAL; phone Doze/network/reboot, full visual/accessibility and broader remote gates remain OPEN.
 
-Android 0.0.6 published (2026-11-19, Codex): https://github.com/Kaan88/inbound/releases/tag/android-v0.0.6 from source `edd073b09472bab45c9c18adb4ae4161ad08be35`. Permanent-key NativeAOT arm64 APK:20,664,711 bytes, SHA-256 `30411689649b22ab6ff24ae0f520a3b924178917fa728bf1a2715d706f722685`; manifest SHA-256 `fdc5c2666cd8037a6255529bb5c7603f16eb8f5ba13eecd619f27d4acc005266`. Downloaded public APK/manifest/checksums match staged bytes; android-latest matches the same versionCode6/versionName0.0.6 signed manifest. Desktop latest remains v0.9.0. Main reviewed worker output and final source; NativeAOT rate checks, Mobile528 and solution build passed as scoped in the candidate checkpoint below. Queue/global KB/s correction is shipped; no new Astra milestone audit claimed. ANDROID.6/.7 phone/TalkBack, broader remote and Doze/network/reboot acceptance and later independent review remain OPEN. Main checkout untouched; no merge to main.
+Android 0.0.6 published (2026-11-19): https://github.com/Kaan88/inbound/releases/tag/android-v0.0.6 from source `edd073b09472bab45c9c18adb4ae4161ad08be35`. Permanent-key NativeAOT arm64 APK:20,664,711 bytes, SHA-256 `30411689649b22ab6ff24ae0f520a3b924178917fa728bf1a2715d706f722685`; manifest SHA-256 `fdc5c2666cd8037a6255529bb5c7603f16eb8f5ba13eecd619f27d4acc005266`. Downloaded public APK/manifest/checksums match staged bytes; android-latest matches the same versionCode6/versionName0.0.6 signed manifest. Desktop latest remains v0.9.0. Main reviewed worker output and final source; NativeAOT rate checks, Mobile528 and solution build passed as scoped in the candidate checkpoint below. Queue/global KB/s correction is shipped; no new the reviewer milestone audit claimed. ANDROID.6/.7 phone/TalkBack, broader remote and Doze/network/reboot acceptance and later independent review remain OPEN. Main checkout untouched; no merge to main.
 
-Android 0.0.6 candidate (2026-11-19, Codex): remote QA exposed binary speed inputs versus decimal rate summaries. Queue and overall KB/s inputs now use 1000 B/s; unchanged legacy raw limits are preserved. Main personally reviewed the complete diff; Terra scoped source/evidence PASS. Mobile528, Debug build0errors/36warnings, Release solution0errors/87warnings passed. NativeAOT x64 install verified 32 and256 inputs persist as32000 and256000 B/s and render accordingly. Permanent-key arm64 packaging checks passed (20,664,711 bytes, SHA-256 `30411689649b22ab6ff24ae0f520a3b924178917fa728bf1a2715d706f722685`); staged locally, not yet published. Isolated remote schedule Mon/Wed23:58–23:59 and restart persistence verified; task queue/schedule removed and global limit reset toNone, local settings hash unchanged. Hardware emulator remains visible as requested. Public feed remains0.0.5; ANDROID.6/.7 phone/TalkBack, broader remote and Doze/network/reboot acceptance remain OPEN. Evidence: `artifacts/android-app/android6-acceptance-0.0.5/`; later independent review remains OPEN.
+Android 0.0.6 candidate (2026-11-19): remote QA exposed binary speed inputs versus decimal rate summaries. Queue and overall KB/s inputs now use 1000 B/s; unchanged legacy raw limits are preserved. Main personally reviewed the complete diff; a worker scoped source/evidence PASS. Mobile528, Debug build0errors/36warnings, Release solution0errors/87warnings passed. NativeAOT x64 install verified 32 and256 inputs persist as32000 and256000 B/s and render accordingly. Permanent-key arm64 packaging checks passed (20,664,711 bytes, SHA-256 `30411689649b22ab6ff24ae0f520a3b924178917fa728bf1a2715d706f722685`); staged locally, not yet published. Isolated remote schedule Mon/Wed23:58–23:59 and restart persistence verified; task queue/schedule removed and global limit reset toNone, local settings hash unchanged. Hardware emulator remains visible as requested. Public feed remains0.0.5; ANDROID.6/.7 phone/TalkBack, broader remote and Doze/network/reboot acceptance remain OPEN. Evidence: `artifacts/android-app/android6-acceptance-0.0.5/`; later independent review remains OPEN.
 
-Android 0.0.4 published (2026-11-19, Codex): owner requested immediate APK publication ("just put the apk already"). Source commit b6c2f6668378c0fc0b16c8be5fa5f92397dd2ba7 is pushed to origin/android-app; no merge to main. Public prerelease https://github.com/Kaan88/inbound/releases/tag/android-v0.0.4 contains the permanent-key NativeAOT arm64 APK, signed manifest and SHA256SUMS. Both releases use latest=false; desktop latest remains v0.9.0. The android-latest feed now serves the identical 0.0.4 manifest. Public APK bytes and both manifest copies were downloaded and matched local checksums: APK cd49d3e2b0b3f729752642934a29f2a5ae4b577e3e50486a7b5107d0fe6bff65 (20,599,175 bytes), manifest 3343eabef3a601c116325203c366c210eb5eea64a104ad184f1bbbd248b5f979. Release/signature/API31/target35/ABI/no-test-hook checks passed. Final solution: 0 errors, 23 warnings; Mobile505, Core2373 and focused final Integration10 passed; remaining broad suites still running at publication. Astra source audit PASS. Final NativeAOT emulator install/launch preserves data; S24 is not attached. ANDROID.6 physical-device/accessibility and final broader acceptance remain OPEN; publication does not complete the milestone or later independent review queue. Evidence: artifacts/android-app/android6/final-production-clean-build.txt, final-release-prepare.txt, final-solution-build.txt, final-regressions.txt, audit-mobile-final.txt and public-verification/.
+Android 0.0.4 published (2026-11-19): owner requested immediate APK publication ("just put the apk already"). Source commit b6c2f6668378c0fc0b16c8be5fa5f92397dd2ba7 is pushed to origin/android-app; no merge to main. Public prerelease https://github.com/Kaan88/inbound/releases/tag/android-v0.0.4 contains the permanent-key NativeAOT arm64 APK, signed manifest and SHA256SUMS. Both releases use latest=false; desktop latest remains v0.9.0. The android-latest feed now serves the identical 0.0.4 manifest. Public APK bytes and both manifest copies were downloaded and matched local checksums: APK cd49d3e2b0b3f729752642934a29f2a5ae4b577e3e50486a7b5107d0fe6bff65 (20,599,175 bytes), manifest 3343eabef3a601c116325203c366c210eb5eea64a104ad184f1bbbd248b5f979. Release/signature/API31/target35/ABI/no-test-hook checks passed. Final solution: 0 errors, 23 warnings; Mobile505, Core2373 and focused final Integration10 passed; remaining broad suites still running at publication. Source audit PASS. Final NativeAOT emulator install/launch preserves data; S24 is not attached. ANDROID.6 physical-device/accessibility and final broader acceptance remain OPEN; publication does not complete the milestone or later independent review queue. Evidence: artifacts/android-app/android6/final-production-clean-build.txt, final-release-prepare.txt, final-solution-build.txt, final-regressions.txt, audit-mobile-final.txt and public-verification/.
 
 
-Historical pre-publication checkpoint (2026-11-19, superseded by the publication above): owner asked "could you make a release to github," authorizing Android 0.0.4 publication after verification. C1/C2/C7 follow the approved 28-flow mockup board. Initial major Astra audit returned CHANGES REQUIRED; eight verified findings have source fixes, with re-audit pending. Main Sol personally inspected delegated source and added schedule-parent identity checks. Mobile 489 and focused identity/scope/golden 8 passed; full Integration rerun and final Android builds/live checks are in progress. ANDROID.6 remains partial and the later independent review queue remains OPEN. No release has been published yet.
+Historical pre-publication checkpoint (2026-11-19, superseded by the publication above): owner asked "could you make a release to github," authorizing Android 0.0.4 publication after verification. C1/C2/C7 follow the approved 28-flow mockup board. Initial major review returned CHANGES REQUIRED; eight verified findings have source fixes, with re-audit pending. The main agent personally inspected delegated source and added schedule-parent identity checks. Mobile 489 and focused identity/scope/golden 8 passed; full Integration rerun and final Android builds/live checks are in progress. ANDROID.6 remains partial and the later independent review queue remains OPEN. No release has been published yet.
 
 
 ### ANDROID.6 board-approved implementation checkpoint (2026-11-19)
 
-The owner reviewed the [Android flow review](docs/plans/android-mockups/android6-flow-review.html) and said "looks good." This approves the proposed flows as design direction and resumes their implementation; it does not accept implementation or complete ANDROID.6. Main Sol completed board browser QA at 320, 390, 736, 1024 and 1440 px with no horizontal overflow, clipped dialog/content or script errors; reference zoom opens/closes. The embedded C1/C2/C7 originals are byte-identical to the source images. These checks validate the HTML review artifact, not device, accessibility or feature behavior. Main reviewed delegated source and removed an unwired C2 overflow control and static wrong title.
+The owner reviewed the [Android flow review](docs/plans/android-mockups/android6-flow-review.html) and said "looks good." This approves the proposed flows as design direction and resumes their implementation; it does not accept implementation or complete ANDROID.6. The main agent completed board browser QA at 320, 390, 736, 1024 and 1440 px with no horizontal overflow, clipped dialog/content or script errors; reference zoom opens/closes. The embedded C1/C2/C7 originals are byte-identical to the source images. These checks validate the HTML review artifact, not device, accessibility or feature behavior. Main reviewed delegated source and removed an unwired C2 overflow control and static wrong title.
 
-Ownership now: Terra implements C2 editor/dialogs and C7 grouped root/Details flows. Main Sol implements queue actions, shared completion behavior and integration, and personally reads/checks worker code. Preserve board-marked future capabilities and selected-Host versus phone-only boundaries as pending until implemented and verified. Current selected-Host work includes queue dashboard/editor and schedules; nullable shared per-queue unmetered, charging and battery-saver-off conditions; per-queue aggregate HTTP payload caps; phone power monitoring; persisted ordinary Android queue jobs with revocable Runtime execution lease; CAS settings updates and working settings subsets. Queue selection/admission and Details assignment remain in progress. Remote torrent/rclone transfers are outside these queue policies.
+Ownership now: A worker implements C2 editor/dialogs and C7 grouped root/Details flows. The main agent implements queue actions, shared completion behavior and integration, and personally reads/checks worker code. Preserve board-marked future capabilities and selected-Host versus phone-only boundaries as pending until implemented and verified. Current selected-Host work includes queue dashboard/editor and schedules; nullable shared per-queue unmetered, charging and battery-saver-off conditions; per-queue aggregate HTTP payload caps; phone power monitoring; persisted ordinary Android queue jobs with revocable Runtime execution lease; CAS settings updates and working settings subsets. Queue selection/admission and Details assignment remain in progress. Remote torrent/rclone transfers are outside these queue policies.
 Completion behavior to verify: the existing `NotifyWhenFinished` preference controls whether the queue emits its transient summary notice once all its jobs are terminal; it does not change `Queue.IsRunning`. Android releases its background execution lease when idle for both choices. Thus “Notify and finish” means notify, then let the idle background lease end; “Do nothing” suppresses the notice while the queue remains ready. Neither choice means stopping the queue, exiting the app/Host, or shutting down the device.
 
 Checks: Full Integration 2,077 passed, 32 skipped, 0 failed (`artifacts/android-app/android6/integration-final.txt`); latest Mobile 464 passed; focused Engine queue limits 4 passed; latest Android Debug build 0 errors and 2 known SDK warnings (`artifacts/android-app/android6/android-layout-check.txt`). Earlier Core 2373, Engine 213, Mobile 457, focused Runtime 8 and queue-cap 3 results are historical pre-integration checkpoints, not substitutes for later validation. The dedicated inbound33 emulator previously exercised a daily 09:00 schedule, start/stop, rotation and restored editor draft; C7 dark captures remain in `artifacts/android-app/android6/`. These do not establish current visual acceptance.
 
-Still pending: final NativeAOT and physical-phone runs; selected remote-Host behavior; Doze/battery; TalkBack; theme and side-by-side visual acceptance; future capabilities marked in the board, including Android site-logins management, roaming policy and Android proxy editor. ANDROID.6 remains IN PROGRESS and unchecked in ROADMAP; no milestone completion, release or Astra PASS is claimed. Later independent Astra review remains OPEN.
+Still pending: final NativeAOT and physical-phone runs; selected remote-Host behavior; Doze/battery; TalkBack; theme and side-by-side visual acceptance; future capabilities marked in the board, including Android site-logins management, roaming policy and Android proxy editor. ANDROID.6 remains IN PROGRESS and unchecked in ROADMAP; no milestone completion, release or review PASS is claimed. Later independent review remains OPEN.
 
 ### Historical ANDROID.6 local implementation checkpoint (2026-11-19)
 
-At this earlier checkpoint, owner direction was to prepare mockups before unspecified-flow implementation; the later board review and approval are recorded above. Codex prepared [Android flow review](docs/plans/android-mockups/android6-flow-review.html) with 28 proposals and embedded unchanged C1/C2/C7 references. Undefined-flow implementation is paused until owner design review. Main Sol personally reviewed worker source, removed an unwired partial C2 overflow, wired the editor title, and inspected all mockup contact sheets; Terra independently inspected all 28 rendered proposals. Browser checks at 320, 390, 736, 1024 and 1440 px found no horizontal overflow, clipped dialogs/content or script errors; reference zoom opens/closes. This verifies the review artifact, not Android accessibility or feature acceptance.
+At this earlier checkpoint, owner direction was to prepare mockups before unspecified-flow implementation; the later board review and approval are recorded above. The [Android flow review](docs/plans/android-mockups/android6-flow-review.html) with 28 proposals and embedded unchanged C1/C2/C7 references. Undefined-flow implementation is paused until owner design review. The main agent personally reviewed worker source, removed an unwired partial C2 overflow, wired the editor title, and inspected all mockup contact sheets; a worker independently inspected all 28 rendered proposals. Browser checks at 320, 390, 736, 1024 and 1440 px found no horizontal overflow, clipped dialogs/content or script errors; reference zoom opens/closes. This verifies the review artifact, not Android accessibility or feature acceptance.
 
-Final consolidated Integration: 2077 passed, 32 skipped, 0 failed (`artifacts/android-app/android6/integration-final.txt`). Latest Mobile: 464 passed; focused engine queue limits: 4 passed. Android Debug build after pictured C1 correction and coherent C2 header: 0 errors, 2 existing SDK target warnings (`android-layout-check.txt`). No Android.6 production release or Astra audit. Earlier results below are retained as checkpoints.
+Final consolidated Integration: 2077 passed, 32 skipped, 0 failed (`artifacts/android-app/android6/integration-final.txt`). Latest Mobile: 464 passed; focused engine queue limits: 4 passed. Android Debug build after pictured C1 correction and coherent C2 header: 0 errors, 2 existing SDK target warnings (`android-layout-check.txt`). No Android.6 production release or review. Earlier results below are retained as checkpoints.
 
 ANDROID.6 is IN PROGRESS and local/uncommitted; ROADMAP remains unchecked. The current selected-Host implementation includes a queue dashboard/editor and schedules; nullable shared per-queue unmetered-network, charging and battery-saver-off policy; per-queue aggregate HTTP payload caps; phone power monitoring; persisted ordinary Android queue jobs with a revocable Runtime execution lease; compare-and-swap settings updates; and working settings subsets. Queue selection/admission and Details assignment are being integrated. Remote torrent and rclone transfers are outside these queue policies.
 
-The owner asked which background behavior would be best. Sol recommended and adopted Android-managed automatic best-effort background jobs, which may be delayed by Doze or battery management, without requesting exact-alarm permission. This is the implementation recommendation, distinct from an explicit owner-selected scheduling behavior.
+The owner asked which background behavior would be best. The main agent recommended and adopted Android-managed automatic best-effort background jobs, which may be delayed by Doze or battery management, without requesting exact-alarm permission. This is the implementation recommendation, distinct from an explicit owner-selected scheduling behavior.
 
-Sol read and reviewed all delegated code, tests and documentation before integration, and personally corrected the null-clear settings merge, stale `LastResult`, raw-action crash-guard classification, Android bindings, stable queue-card updates, encoded text, UI labels/touch/keyboard/discovery. Sol owns lifecycle, Runtime and IPC integration.
+The main agent read and reviewed all delegated code, tests and documentation before integration, and personally corrected the null-clear settings merge, stale `LastResult`, raw-action crash-guard classification, Android bindings, stable queue-card updates, encoded text, UI labels/touch/keyboard/discovery. The main agent owns lifecycle, Runtime and IPC integration.
 
-Earlier consolidated results: Core 2373, Engine 213 and Mobile 457 passed; focused Runtime queue-condition/lease checks passed 8; earlier queue-cap checks passed 3. These checks precede the latest queue admission/UI/membership integration and are not final consolidated verification. Debug Android build and the dedicated inbound33 emulator exercised a daily 09:00 schedule, start/stop, rotation and restored editor draft; C7 dark captures are under `artifacts/android-app/android6/`. The daily S24 FE data was untouched. Full Integration was still running at this checkpoint; expected exact Hello capability/golden compatibility failures were being corrected. No full Integration green result or Astra audit is claimed.
+Earlier consolidated results: Core 2373, Engine 213 and Mobile 457 passed; focused Runtime queue-condition/lease checks passed 8; earlier queue-cap checks passed 3. These checks precede the latest queue admission/UI/membership integration and are not final consolidated verification. Debug Android build and the dedicated inbound33 emulator exercised a daily 09:00 schedule, start/stop, rotation and restored editor draft; C7 dark captures are under `artifacts/android-app/android6/`. The daily S24 FE data was untouched. Full Integration was still running at this checkpoint; expected exact Hello capability/golden compatibility failures were being corrected. No full Integration green result or review is claimed.
 
-NativeAOT, physical-phone, selected-remote-host, Doze/battery, TalkBack, theme and visual-pair acceptance remain pending. Only the dedicated inbound33 emulator was used for this Android.6 checkpoint. Later independent Astra review remains OPEN.
-
-### Codex implementation review queue (2026-11-19)
-
-Owner clarified that the existing ANDROID-CODEX-FABLE-REVIEW.md is to record
-implementations by Codex for later independent Astra review. The legacy path/IDs
-and historical audit evidence are retained; prior pending Fable assignments in
-this Codex queue are superseded. Codex records important changes, commit references,
-validation and acceptance gaps there. Later review remains OPEN; no new audit ran.
+NativeAOT, physical-phone, selected-remote-host, Doze/battery, TalkBack, theme and visual-pair acceptance remain pending. Only the dedicated inbound33 emulator was used for this Android.6 checkpoint. Later independent review remains OPEN.
 
 ### ANDROID.5 0.0.3 delivered (2026-11-19)
 
@@ -1490,7 +1482,7 @@ validation and acceptance gaps there. Later review remains OPEN; no new audit ra
 
 ### ANDROID.5 audited fixture checkpoint (2026-11-19)
 
-- Source audit: Astra final PASS after the reserved-name and refresh-wakeup fixes. The auditor verified both controlled tests force the original races and read the focused 16-pass log; this was source/read-only review, not an independent device run. Fable-CODEX-3 remains OPEN.
+- Source audit: final PASS after the reserved-name and refresh-wakeup fixes. The auditor verified both controlled tests force the original races and read the focused 16-pass log; this was source/read-only review, not an independent device run. Fable review remains OPEN.
 - NativeAOT authenticated refresh completed the existing `auth(3)` job: All 7, Finished 7, Failed 0, same fixture hash. GitHub's public sign-in form rendered in the Native WebView; no account or credentials were entered, so GitHub sign-in itself is unverified. Unknown, ambiguous or redirect-provenance downloads may need a manually supplied URL; observed POST and blob are not replayed as GET. No TLS bypass or browser-profile import.
 - Core 2373, Engine 210, Mobile 408 passed. Full Integration 2059 passed, 32 skipped, one failed before the queue fix; afterward the exact failure plus two new regressions passed 3, queue policy passed 10, and reservation-focused checks passed 16. There is no clean full Integration rerun after that fix. The final phone APK and install are recorded in the 0.0.3 delivery entry (`android5-arm64-final.txt`, `android5-s24-install.txt`).
 - ANDROID.5 source is audited and native fixture flows have evidence, but exhaustive acceptance is open: real accounts, broader light-mode, TalkBack and rotation checks. Do not mark the milestone fully accepted yet.
@@ -1498,13 +1490,13 @@ validation and acceptance gaps there. Later review remains OPEN; no new audit ra
 ### ANDROID.5 link intake checkpoint (2026-11-18)
 
 - Work remains in progress. The first native signed-in file download was checked with a matching hash. Mobile suite passed 408 tests (two existing xUnit analyzer warnings). An earlier set of 309 Host/IPC tests passed before the later runtime rewrite; the 13 audit-focused checks are not yet final evidence for the current state.
-- Initial Astra findings prompted fixes; verification is pending. Fable-CODEX-3 remains OPEN, including shared-runtime refresh/security/durability and browser attribution. This checkpoint is not milestone acceptance.
+- Initial review findings prompted fixes; verification is pending. Fable review remains OPEN, including shared-runtime refresh/security/durability and browser attribution. This checkpoint is not milestone acceptance.
 
 ### Android 0.0.2 published; link intake started (2026-11-18)
 
 - Owner approved publication and chose "Ask before sending cookies to the selected server": name the target and obtain consent per download before forwarding cookies. ANDROID.5 share/browser/page selection and expired-link refresh remain in progress; pure PageLinks model and nine tests were reviewed, fixed for single-URL punctuation, passed staged tests and copied into source/tests. Native UI is not integrated.
 - Android source 0.0.2 at d2e06d27 and CI guard 178fdb412196f76aa7fa3257a051cfd8f73c3a0c were committed and pushed on android-app only; main unchanged. Owner-approved prereleases [android-v0.0.2](https://github.com/Kaan88/inbound/releases/tag/android-v0.0.2) (APK, manifest, SHA256SUMS) and [android-latest](https://github.com/Kaan88/inbound/releases/tag/android-latest) (feed manifest) target 178fdb4, both latest=false. Public asset hashes match APK ec52f1ff71bf5ea6d29af8f8764ae32dea01058e87e312af52929cd1caf42276 and manifest bb5510151d7a5d696cdaa0371ecad844609df9b5a3b6fcc208562762db4a40a6. Android-tag Linux/Docker jobs skipped; desktop latest v0.9.0 remained unchanged.
-- NativeAOT emulator 0.0.2 checked the real HTTPS production feed and displayed "Inbound is up to date" (emulator-public-feed-before.xml). The signed HTTP fixture established the 1→2 installer flow; an upgrade from a newer public offer remains for a future release. S24 updated to 0.0.2 with data preserved (s24-updater-install.txt). Evidence under artifacts/android-app/codex-signing/. Main stopped its loopback fixture server, reset the emulator install-source permission to default and removed its pushed fixture files. Final combined Astra PASS covers updater, preparation/helper, runner and persistence guard; Fable review remains OPEN.
+- NativeAOT emulator 0.0.2 checked the real HTTPS production feed and displayed "Inbound is up to date" (emulator-public-feed-before.xml). The signed HTTP fixture established the 1→2 installer flow; an upgrade from a newer public offer remains for a future release. S24 updated to 0.0.2 with data preserved (s24-updater-install.txt). Evidence under artifacts/android-app/codex-signing/. Main stopped its loopback fixture server, reset the emulator install-source permission to default and removed its pushed fixture files. Final combined review PASS covers updater, preparation/helper, runner and persistence guard; Fable review remains OPEN.
 
 ### Updater 0.0.2 delivered; regression checks completed (2026-11-18)
 
@@ -1515,7 +1507,7 @@ validation and acceptance gaps there. Later review remains OPEN; no new audit ra
 - All 10 .NET suites: 6221 pass, 61 expected optional-fixture skips; extension 339
   and web 717 tests plus typechecks pass. Existing warnings remain. Test-only
   persistence guard and missing-dependency runner corrections explained in the
-  Codex report. Evidence: artifacts/android-app/codex-signing/updater-project-tests-final.txt,
+  earlier Android report. Evidence: artifacts/android-app/codex-signing/updater-project-tests-final.txt,
   updater-frontend-tests.txt, s24-updater-install.txt. No claim of a published
   production newer-offer update; emulator signed installer flow passed.
 
@@ -1523,7 +1515,7 @@ validation and acceptance gaps there. Later review remains OPEN; no new audit ra
 ### Android auto-update and desktop APK (2026-11-18)
 
 - Owner: "implement update first then continue android.5" and "and then put the updatable apk on the desktop"; schedule: "once a day or if the app is launched completely for the first time. (from being killed and opened etc.)" Auto-download and an install prompt are implemented. Next: ANDROID.5.
-- Astra code audit PASS after main-agent fixes and reverification, including release preparation; later Fable review remains OPEN. NativeAOT emulator: signed test baseline code 1 checked a signed HTTP fixture for code 2, automatically downloaded and verified metadata/RSA, size/hash, APK certificate and ABI, showed Ready; Install → Open Settings → allow → return opened the Android system update, which installed and opened code 2. Warm resume with the same PID caused no extra check; force-stop/reopen with a new PID checked again. Persisted job 4001 has a 24-hour period and two-hour flex; two forced runs completed without CTS failure.
+- Code audit PASS after main-agent fixes and reverification, including release preparation; later Fable review remains OPEN. NativeAOT emulator: signed test baseline code 1 checked a signed HTTP fixture for code 2, automatically downloaded and verified metadata/RSA, size/hash, APK certificate and ABI, showed Ready; Install → Open Settings → allow → return opened the Android system update, which installed and opened code 2. Warm resume with the same PID caused no extra check; force-stop/reopen with a new PID checked again. Persisted job 4001 has a 24-hour period and two-hour flex; two forced runs completed without CTS failure.
 - Full Mobile: 373 passed (19 updater, 14 HTTP). A pre-existing HEAD persistence count guard missed the two ReadOnlyState uses of already-registered types; test-only 21→23 correction passed nine focused tests. The full project test rerun remains in progress, not a pass claim. NativeAOT diagnostic linker file locking was avoided with separate intermediates and no reusable servers.
 - Desktop: C:/Users/kaank/Desktop/Inbound-android-0.0.2-updatable.apk, 20,135,037 bytes, SHA-256 ec52f1ff71bf5ea6d29af8f8764ae32dea01058e87e312af52929cd1caf42276; copy hash matched. The signed local bundle artifacts/android-app/release-0.0.2 contains the APK, manifest-android-arm64.json and SHA256SUMS; it is not published. S24 remains on 0.0.1 at this checkpoint; app source defaults to 0.0.2.
 - Evidence under artifacts/android-app/codex-signing/: updater-arm64-release-build.txt, updater-release-prepare-final.txt, updater-system-install-opened.txt, updater-schedule-launch-tests.txt and emulator-http-ready screenshot. Test-only local HTTP transport replaced an adb-pushed external input correctly blocked by Android permissions; this was not a production updater failure. Production feed 404 handles no published release; no public newer-offer update has been tested.
@@ -1533,51 +1525,26 @@ validation and acceptance gaps there. Later review remains OPEN; no new audit ra
 - Owner now requires Android auto-update before ANDROID.5: check once daily or on each genuine fresh process launch (killed and reopened, not each Activity recreation), automatically download an available update, then prompt the user to install. This was planned at that checkpoint; see the completed updater entry above.
 - Design starting point for evaluation: trusted GitHub Android feed, signed metadata/hash and pinned APK certificate, private cache, daily OS-scheduled network job and process-start check, with installation only on user action. Throttling and metering are implementation choices still under evaluation. The order at that checkpoint was auto-update, then ANDROID.5 link catching.
 
-### Codex permanent-key APK on S24 FE (2026-11-18)
+### Permanent-key APK on S24 FE (2026-11-18)
 
 - Owner authorized adb connection, installation and removal of the existing app. On the S24 FE (SM-S721B, Samsung API 37), uninstall of app.inbound.android and installation of Desktop/Inbound-android-0.0.1-release.apk succeeded. The authorized uninstall reset the old app's private state.
 - Installed APK SHA-256 matched cf8c3667622e7af6f0b73ea9203f5c9cfa345081dc3918ac31f96adc291b315d; version code 1, name 0.0.1, min API 31, target 35. Launch returned status ok; MainActivity was top resumed and PID 29872 remained alive. Cold TotalTime 377 ms, WaitTime 380 ms; app log fullyDrawn 317 ms with zero rows. These timings are not a controlled benchmark: keyguard was not checked.
-- Evidence: artifacts/android-app/codex-signing/s24-release-install.txt. No settings changed, downloads deleted, other apps touched, jobs added or real download tested. Full UI, TalkBack and download acceptance remain open. Astra code audit PASS; later Fable review OPEN. At that checkpoint the next step was ANDROID.5; the newer auto-update priority is above.
+- Evidence: artifacts/android-app/codex-signing/s24-release-install.txt. No settings changed, downloads deleted, other apps touched, jobs added or real download tested. Full UI, TalkBack and download acceptance remain open. Code audit PASS; later Fable review OPEN. At that checkpoint the next step was ANDROID.5; the newer auto-update priority is above.
 
-### Codex permanent Android signing (2026-11-18)
+### Permanent Android signing (2026-11-18)
 
 - Built and verified a permanent-key APK: Desktop/Inbound-android-0.0.1-release.apk,
   20,061,237 bytes; SHA-256 cf8c3667622e7af6f0b73ea9203f5c9cfa345081dc3918ac31f96adc291b315d.
 - New ReleaseSigning build mode and release-apk.py: fresh publish, explicit non-test,
   password-file signing after MSBuild, pinned certificate, manifest/ABI and packaging
   checks, atomic publication. Ten regression tests and real SDK 34-37 matrix pass;
-  inherited test-build override and old-debug-signer refusal verified. Astra audit PASS
-  after two fix rounds; later Fable review OPEN in ANDROID-CODEX-FABLE-REVIEW.md.
-- Evidence: artifacts/android-app/codex-signing/build-release-final.txt and Codex report;
+  inherited test-build override and old-debug-signer refusal verified. review PASS
+  after two fix rounds; later Fable review OPEN in the [Fable review queue](docs/plans/android-fable-review-queue.md).
+- Evidence: artifacts/android-app/codex-signing/build-release-final.txt and earlier Android report;
   usage: docs/android-builds.md. Existing NativeAOT warnings remain. Local/uncommitted;
   no push or public release. Main unchanged. At this signing checkpoint phone reinstall/startup
   had not run; see the later S24 entry above. At that checkpoint ANDROID.5 was next; see the newer auto-update priority above.
 
-
-### Later Fable review of Codex work (2026-11-18)
-
-- Owner requested important new work be recorded for Fable to review later. Queue created:
-  [ANDROID-CODEX-FABLE-REVIEW.md](ANDROID-CODEX-FABLE-REVIEW.md), linked from CLAUDE and the Codex report.
-  First open scope is permanent signing, with Astra findings, main-agent fixes and pending acceptance.
-
-### Codex coordination and Astra audits (2026-11-18)
-
-- Owner: Codex coordinates, delegates simple work to lesser agents and implements complex work itself.
-  After each major milestone Astra audits the code; Codex fixes confirmed findings and Astra verifies
-  again, repeating until it passes. Current available auditor: `gpt-6.2-astra`.
-- Workflow recorded in `ANDROID-CODEX-PROGRESS.md`; prior Claude-specific review history remains evidence
-  for earlier changes. No implementation or audit performed in this documentation checkpoint.
-
-### Codex takeover of Android (2026-11-18)
-
-- Owner confirmed the existing state: "basic app functionality is in" and "you'll work on this project now."
-  Codex (OpenAI/GPT) takes over continuation of the Android app from this checkpoint.
-- Separate ongoing report: [ANDROID-CODEX-PROGRESS.md](ANDROID-CODEX-PROGRESS.md), also linked from `CLAUDE.md`.
-  This supplements, rather than replaces, GOAL, ROADMAP and this project's shared handoff history.
-- Baseline verified: `android-app` at `49f5663c`, clean worktree, equal to the live GitHub branch;
-  main checkout left unchanged. Existing device/test evidence below was read, not rerun.
-- At takeover, next recorded work was signing, then ANDROID.5; signing is completed in the newer entry above.
-  No application, APK, signing-key or phone changes in this takeover checkpoint.
 
 ### Android follow-ups to steps 3 and 6 (ANDROID.4/.7), branch `android-app` (2026-11-17)
 
@@ -5931,11 +5898,11 @@ Batched 0.1.5 scheduler/queue source (2026-11-05): startup triggers, timed/overn
 
 ### Completion actions, HTTP telemetry and statistics — batched source (2026-11-05)
 
-- Per-download completion options are editable in Properties before completion. Program defaults may be inherited, disabled or replaced with an executable; the saved file is passed as one argument without shell parsing. Open-file and explicit exit/shutdown/restart/logoff choices are persisted. System actions require global opt-in and no other unfinished downloads. The execution marker is saved before side effects; restart does not replay them. Per-download system choices override queue system actions while retaining independent queue open-file behavior and avoiding duplicate opens. Luna reviewed source; main corrected that precedence.
-- Actual HTTP response streams are instrumented at all five engine send sites (direct/range redirects and media/key/manifest requests). The wrapper preserves response headers and streaming/cancellation, measures returned read bytes and a short rolling rate, and removes entries on failure/disposal. Progress details distinguish active HTTP streams from checkpointed byte ranges and explicitly distinguish HTTP/2 streams from physical sockets. Only host/port/protocol/status/ranges/counters are exposed; no URL paths, query tokens or credentials. Luna source review found no concrete wrapping/disposal defect. Consolidated engine and live checks remain required.
+- Per-download completion options are editable in Properties before completion. Program defaults may be inherited, disabled or replaced with an executable; the saved file is passed as one argument without shell parsing. Open-file and explicit exit/shutdown/restart/logoff choices are persisted. System actions require global opt-in and no other unfinished downloads. The execution marker is saved before side effects; restart does not replay them. Per-download system choices override queue system actions while retaining independent queue open-file behavior and avoiding duplicate opens. A worker reviewed source; main corrected that precedence.
+- Actual HTTP response streams are instrumented at all five engine send sites (direct/range redirects and media/key/manifest requests). The wrapper preserves response headers and streaming/cancellation, measures returned read bytes and a short rolling rate, and removes entries on failure/disposal. Progress details distinguish active HTTP streams from checkpointed byte ranges and explicitly distinguish HTTP/2 streams from physical sockets. Only host/port/protocol/status/ranges/counters are exposed; no URL paths, query tokens or credentials. A worker source review found no concrete wrapping/disposal defect. Consolidated engine and live checks remain required.
 - Statistics now combine current jobs with minimal archived records (ID/state/bytes/dates only). Removal saves its archive before deleting the job; archive records whose IDs are still live are excluded, preventing double counts across interruption. Host-owned archive state survives stale Options saves. View → Statistics shows recorded/completed/today bytes, completion/failure/cancellation counts, current activity and speed. UI states that these are saved-progress records, not network-interface usage; previously deleted history cannot be reconstructed. The archive intentionally retains historical records rather than relying on the visible list.
 - Source inspection found that background PersistAsync logs and swallows write failures. Added an explicit required-save path for queue membership, category/completion edits and completion execution markers; failed edits restore in-memory choices and actions do not execute without a saved marker. Job deletion now waits for the runner to settle, is ordered against queued persistence, and retains the in-memory job on durable-delete failure. Scheduler/quota/update-defer settings writes now also coordinate with the shared mutation gate to avoid overwriting Host-owned groups/history.
-- Follow-up source fixes: property and queue membership edits hold persistence admission through mutation/save/rollback, and queued background saves take a fresh snapshot after admission, preventing obsolete writes from undoing committed edits/markers. Resume admission coordinates with removal, and completion side effects skip jobs cancelled or being removed. Statistics archive and current-activity semantics were independently reviewed by Luna; no concrete calculation/persistence defect was found. These changes still require the consolidated fault/concurrency tests.
+- Follow-up source fixes: property and queue membership edits hold persistence admission through mutation/save/rollback, and queued background saves take a fresh snapshot after admission, preventing obsolete writes from undoing committed edits/markers. Resume admission coordinates with removal, and completion side effects skip jobs cancelled or being removed. Statistics archive and current-activity semantics were independently reviewed by a worker; no concrete calculation/persistence defect was found. These changes still require the consolidated fault/concurrency tests.
 - No builds/tests were run for these source increments, following the owner's batched implementation instruction. Consolidated validation must cover body streaming/resume/hash/cancellation, marker write failures and one-time side effects via fake executors, queue/category write failures, stats removal/restart/interruption/stale settings and all new UI layouts/theme/DPI. Scheduler timing/retries and full live WinUI review remain open;0.1.5 is not packaged or published.
 
 Batched 0.1.5 source (2026-11-05): per-download completion options and real HTTP response-stream telemetry added; no build/test run. Properties stages program inheritance/override/disable, open-file and gated system actions; execution marker is persisted before side effects. HTTP telemetry measures actual response reads across direct/range/media/probe requests and exposes only host/port, protocol/status/range/bytes/rate. Statistics added to scope: archived minimal job records are written before removal and deduplicated against current jobs for persistent byte/count totals, with a View → Statistics window integrated in source. Consolidated validation remains pending.
@@ -5943,9 +5910,9 @@ Batched 0.1.5 source (2026-11-05): per-download completion options and real HTTP
 ### Groups and bottom speed graph — batched source, not yet validated (2026-11-05)
 
 - Group membership and definitions share one atomic settings write. General Options preserves Host-owned groups; create/add/detach/rename/ungroup are explicit IPC actions. Each download belongs to at most one group; moving membership does not change its queue or file location. Parent pause/resume/cancel acts on a membership snapshot and reports per-child failures; cancel retains files and skips terminal children. Group controls release the settings mutation gate before waiting for transfers to settle.
-- Removing a download first saves its detached group membership under the same mutation gate, then removes the independent job. Failed group persistence retains the job. An interruption between these operations leaves an ordinary ungrouped download. Luna reviewed persistence; main fixed removal coordination and terminal-cancel handling from that review.
-- Download-only speed graph follows the supplied qBittorrent screenshot's history/grid/period structure using original WinUI drawing code. Keeps at most one hour of session samples; unknown/stale/offline data creates gaps. Downsampling retains peaks/troughs; visibility and expansion are saved. Luna source review found a reconnect/snapshot freshness edge, fixed by withholding samples until a fresh snapshot. No qBittorrent code/assets copied.
-- Main reviewed Luna's groups window, fixed stale child-action capture, polling error lifetime, responsive parent/child rows, collapsed creation editor and DPI-aware initial sizing bounded to the work area. All are source changes awaiting the single consolidated validation pass.
+- Removing a download first saves its detached group membership under the same mutation gate, then removes the independent job. Failed group persistence retains the job. An interruption between these operations leaves an ordinary ungrouped download. A worker reviewed persistence; main fixed removal coordination and terminal-cancel handling from that review.
+- Download-only speed graph follows the supplied qBittorrent screenshot's history/grid/period structure using original WinUI drawing code. Keeps at most one hour of session samples; unknown/stale/offline data creates gaps. Downsampling retains peaks/troughs; visibility and expansion are saved. A worker source review found a reconnect/snapshot freshness edge, fixed by withholding samples until a fresh snapshot. No qBittorrent code/assets copied.
+- Main reviewed a worker's groups window, fixed stale child-action capture, polling error lifetime, responsive parent/child rows, collapsed creation editor and DPI-aware initial sizing bounded to the work area. All are source changes awaiting the single consolidated validation pass.
 - Consolidated acceptance must cover restart and stale Options saves, moving/detaching children, partial child-control failure, atomic-write failure and interruption, unknown-total aggregation, independent child details, graph gaps/periods/theme/DPI and responsive window layout. No builds or tests were run for this batch. Published release remains0.1.4.
 
 Batched 0.1.5 source (2026-11-05): persistent independent download groups now have Host-owned definitions/membership, atomic settings commits and group controls. Tasks and selected-download context actions expose group creation/assignment; expandable management window is integrated in source, with aggregate progress/controls visible while collapsed and independent child controls. Bottom download-only speed graph added from owner reference 33528189-2dc8223e-d865-11e7-9d2a-2b5102afb5af.png: selectable 1/5/30/60-minute session history, scale/grid, current/average/peak, disconnected/stale gaps, persisted visibility/collapse. Source-only; consolidated build/tests and live DPI/theme/workflow acceptance pending. FTP remains out of scope.
@@ -5954,12 +5921,12 @@ Batched 0.1.5 source (2026-11-05): explicit unused-category deletion in Options 
 
 Owner scope update (2026-11-05): FTP work is out of scope; existing backend support is retained, but no additional FTP UI or acceptance work is required.
 
-Batched 0.1.5 implementation: Download Properties now supports assigning existing downloads to built-in/custom categories or automatic extension classification. Host validates category identity, persists the choice, and does not relocate payloads. DTO/view model preserve automatic versus explicit classification. Added multi-selection Change category context action with per-file failure reporting. Luna read-only review found no issue in the Properties/Host reassignment path; main inspected the changes. Consolidated verification pending; no build/test run for this increment.
+Batched 0.1.5 implementation: Download Properties now supports assigning existing downloads to built-in/custom categories or automatic extension classification. Host validates category identity, persists the choice, and does not relocate payloads. DTO/view model preserve automatic versus explicit classification. Added multi-selection Change category context action with per-file failure reporting. A worker read-only review found no issue in the Properties/Host reassignment path; main inspected the changes. Consolidated verification pending; no build/test run for this increment.
 
 ### Event sounds added to implementation batch (verification deferred)
 
 - Added persisted EventSoundFiles settings and mappings, Options Sounds editor with local WAV picker and disabled/system/file modes, plus Host event playback for completed/failed/queue-finished. Legacy completion toggle remains authoritative; previously silent failure/queue events remain silent until explicitly configured. Inline validation keeps Options open on invalid WAV selections. Queue-finished playback is deduplicated per queue cycle.
-- Luna implemented isolated SoundOptionsEditor and CompletionSoundPlayer helpers; parent integrated model/DTO/persistence/runtime settings/WinUI/Host event plumbing. Sound playback is asynchronous with file size/playback bounds, no process execution, and owned SoundPlayer disposal. Reviewed helper ownership: disposal cancels playback and defers CTS/semaphore disposal until active calls exit. Parent added inline picker-failure handling and a narrow-window layout.
+- A worker implemented isolated SoundOptionsEditor and CompletionSoundPlayer helpers; parent integrated model/DTO/persistence/runtime settings/WinUI/Host event plumbing. Sound playback is asynchronous with file size/playback bounds, no process execution, and owned SoundPlayer disposal. Reviewed helper ownership: disposal cancels playback and defers CTS/semaphore disposal until active calls exit. Parent added inline picker-failure handling and a narrow-window layout.
 - No build or test was started for this increment, following the owner's request. Consolidated verification must include settings roundtrip, legacy defaults, WAV picker cancellation/errors, event selection, simultaneous events, shutdown disposal and live sound playback. This is source work, not accepted behavior.
 
 ### Batched implementation workflow and metadata preview (0.1.5 source)
@@ -5968,14 +5935,14 @@ Batched 0.1.5 implementation: Download Properties now supports assigning existin
 - Added Host-owned HTTP metadata preview and Add URL filename/size/type display, asynchronous automatic check and refresh button. HEAD falls back to a one-byte Range GET only for405/501, reads headers without consuming response bodies, and creates no jobs/payload/history. Uses the existing engine proxy, saved login, redirect credential boundaries, target validation and host limiter. Runtime allows two previews with12s deadlines; UI uses a separate IPC connection, so slow preview does not hold the normal command stream. It preserves user filename edits, recalculates automatic category folders from suggested names, invalidates responses after credential changes/closure, and allows Start/Later without waiting.
 - Closing the dedicated preview pipe now cancels Host work through a one-message lookahead. Pipelined messages are retained for next dispatch. Review found exceptional lookahead faults and operation-first faults needing observation; source corrected to cancel/observe both paths. These last corrections are not yet revalidated per the new batching instruction.
 - Before the workflow change: new metadata engine cases6/6 and real-HTTP metadata integration2/2 passed; Core83/83 and Host/WinUI builds passed. Already-started full engine suite53/53 passed. The already-started full integration run also completed84/84 (artifacts/integration-metadata.log,1m46s), before final cancellation-review and sound changes. Do not extrapolate these results to final untested fixes or live GUI acceptance.
-- Protocol.HostVersion now derives from Contracts assembly version (0.1.5) instead of stale0.1.3; protocol stays1. Luna compiled/reflected that narrow change before the new testing instruction. Public installer remains0.1.4; no new release published.
+- Protocol.HostVersion now derives from Contracts assembly version (0.1.5) instead of stale0.1.3; protocol stays1. A worker compiled/reflected that narrow change before the new testing instruction. Public installer remains0.1.4; no new release published.
 
 ### Persistent categories and Add URL selection (0.1.5 source, 2026-11-05)
 
 - Added stable custom category definitions (ID/name/extensions/optional destination), persisted job membership and explicit-versus-automatic classification. Legacy jobs without membership keep built-in filename classification. New automatic jobs use custom rules before built-ins; explicit choices survive filename changes. Automatic membership updates after Move/Rename. Renaming definitions preserves IDs and files.
 - Add URL selects Automatic/built-in/custom categories, initializes category folders, supports one-off path override, and creates saved categories using the chosen destination and extension rules. Creation is explicitly immediate even if the download is cancelled. Start/Later wait for an in-flight create. Remember-folder applies to the explicitly selected category; browser captures still use the configured default.
 - Sidebar shows custom categories and Other. Options Save to edits names/extensions/folders. CLI --category, export/import and redownload preserve membership. General settings saves cannot remove existing custom definitions; deletion/reassignment UI remains open. Settings updates are serialized so concurrent category creation rejects stale settings instead of losing definitions.
-- Focused category/browser checks7/7 and Core79/79 pass: real payload hash, classification, explicit override, remember, rename, restart, invalid/ambiguous rules and stale/concurrent saves. Runtime/CLI/WinUI builds passed. Luna review found GUID casing and missing Other navigation; corrected both. Removal-race concern was checked against current source: all existing definitions are retained, and serialized settings saves reject stale lists. Custom sidebar selection restores after definitions arrive. Full integration82/82 passes in1m46s (artifacts/integration-categories.log). Live GUI/layout acceptance remains open; not published.
+- Focused category/browser checks7/7 and Core79/79 pass: real payload hash, classification, explicit override, remember, rename, restart, invalid/ambiguous rules and stale/concurrent saves. Runtime/CLI/WinUI builds passed. A worker review found GUID casing and missing Other navigation; corrected both. Removal-race concern was checked against current source: all existing definitions are retained, and serialized settings saves reject stale lists. Custom sidebar selection restores after definitions arrive. Full integration82/82 passes in1m46s (artifacts/integration-categories.log). Live GUI/layout acceptance remains open; not published.
 - Test exploration confirmed manual downloads retain their URL filename rather than adopting Content-Disposition at start. Metadata preview/server-name handling remains open; category coverage does not verify it.
 
 ### Windows Shell file icons (0.1.5 source, 2026-11-05)
@@ -5983,12 +5950,12 @@ Batched 0.1.5 implementation: Download Properties now supports assigning existin
 - Implemented original Windows Shell icon provider for main download rows, queue file rows and individual progress/completion headers. Pending files use registered file-type icons without opening a partial payload; completed files request the actual local file icon, including embedded application icons. Missing files fall back to their registered type; existing font glyph remains on errors/loading.
 - Native calls run off the UI thread under a two-worker gate with COM initialized. Owned HICON/DC/DIB handles are released in finally blocks; dual-background rendering reconstructs premultiplied BGRA for alpha and legacy mask icons. No file is executed to inspect its icon. Cache holds at most256 tasks, expires completed entries after one minute, and distinguishes completed-job revisions. Overflow requests still load under the worker gate. Job view models reject stale async completions after path/state/name changes.
 - Native integration checks pass2/2: associated/unknown/extensionless types; actual cmd.exe differs from generic executable type; missing actual path falls back; output transparency/premultiplied bounds;100 repeated lookups do not grow GDI/USER handle counts beyond tolerance. WinUI Release x64 builds with zero warnings/errors; scoped whitespace check passes. These checks do not establish visual/DPI acceptance, cache-burst runtime acceptance or every third-party shell handler's behavior. Not yet packaged/published. Published latest remains0.1.4. Current app/installer/install/package/extension version fields advanced consistently to0.1.5; extension rebuilt at0.1.5 with34/34 tests and typecheck passing.
-- Luna reviewed ownership/concurrency/UI key guards. Fixed the identified full-in-flight-cache permanent fallback and clarified the COM apartment behavior. Broader WinUI and lifecycle acceptance remains open.
+- A worker reviewed ownership/concurrency/UI key guards. Fixed the identified full-in-flight-cache permanent fallback and clarified the COM apartment behavior. Broader WinUI and lifecycle acceptance remains open.
 
 ### Queue file details and priority-aware ordering (2026-11-05)
 
 - Post-0.1.4 source: Queues → Files now shows file name, size, status and time remaining using existing job display formatting, with filename tooltip and inherited application theme. The dialog explicitly labels the values as an opening-time snapshot. Move controls cannot cross priority boundaries, matching the scheduler rather than offering a reorder it would ignore.
-- WinUI Release x64 build passes with zero warnings/errors; scoped diff whitespace check passes. Live layout/DPI acceptance remains open. Luna read-only review confirmed populated queue deletion still needs coordinated Host reassignment; composing individual moves in the UI is not sufficient. No deletion behavior was changed.
+- WinUI Release x64 build passes with zero warnings/errors; scoped diff whitespace check passes. Live layout/DPI acceptance remains open. A worker read-only review confirmed populated queue deletion still needs coordinated Host reassignment; composing individual moves in the UI is not sufficient. No deletion behavior was changed.
 - Owner requested Windows file/application icons. Main-list executable-specific icon behavior still requires targeted live checking; no icon implementation claimed.
 
 ### Right-click handoff on a protected link (2026-11-05)
@@ -6024,7 +5991,7 @@ Batched 0.1.5 implementation: Download Properties now supports assigning existin
 - InstalledBuild clamps an ahead-of-binary version record to the actual Host assembly version; focused regression passes. About now derives its version from its running assembly. Source versions advanced consistently to 0.1.4; this version is not yet packaged/published.
 - Update installation downloads the same verified manifest selected by its check. Throttled byte progress is available in snapshot/events and a separate compact WinUI progress window; failed/busy results stop its progress state. Host and WinUI compile with zero warnings/errors. Live progress/restart and installed repair acceptance remain unverified.
 - Signed updater/concurrency integration tests 6/6 pass. Isolated helper success/missing-installer/partial-failure rollback fixtures pass; fixture artifacts: artifacts/update-helper-tests-48c02caa9f544da698daa31c8d03b967.
-- Luna agents hit usage limits. Main verified their folder-picker work, fixed the test mock to dispatch the dedicated native-port reply, and ran extension tests 29/29 plus typecheck/build successfully. No live browser acceptance claimed.
+- Worker agents hit usage limits. Main verified their folder-picker work, fixed the test mock to dispatch the dedicated native-port reply, and ran extension tests 29/29 plus typecheck/build successfully. No live browser acceptance claimed.
 ## Current state (2026-11-04)
 
 ### Queue editor increment (2026-11-05)
@@ -6034,7 +6001,7 @@ Batched 0.1.5 implementation: Download Properties now supports assigning existin
 -0.1.3 published: https://github.com/Kaan88/download-manager-builds/releases/tag/v0.1.3. Five asset sizes verified; versioned anonymous manifest signature verifies with unchanged release trust anchor. Setup75,489,064bytes; signedZIP112,268,895bytes SHA256`eb6dfae7b3b4eba3fb98abf26ecbe9e9a8e2ad5218715dc1670c303a39c2ebd3`. Initial unqualified latest redirect still returned cached0.1.2 immediately after upload; versioned0.1.3 is verified, latest propagation being checked. Reload unpacked extension after installation to replace running background worker. Browser live acceptance and installed automatic update remain unproven.
 - Main reviewed extension Browse helper and both handoff/batch bindings: cancellation unchanged, only confirmed path applied, errors inline, Browse disabled while awaiting. Main ran25extension tests/typecheck/build successfully (including picker sender rejection/nativepathforwarding; furtherUIhelpercancel tests still being added). Host/WinUI/self-contained installer builds pass. Helper closes only target-install resident frontends before waiting for Host, preventing older reconnect loops from racing upgrade; strengthened isolated harness passes outsideCIM-restricted sandbox, with explicit error-stage assertions. No installed app was changed by agent tests.
 
-- Preparing0.1.3 for owner tray-exit/popup/destination-picker feedback; version fields bumped consistently by Luna, historical releases unchanged. Folderpicker frontend task re-dispatched with followup_task after discovering queued send_message to completed agent had not started a new turn; actual native/background implementation was already landed. Do not claim extension Browse controls complete until source/tests are inspected.
+- Preparing0.1.3 for owner tray-exit/popup/destination-picker feedback; version fields bumped consistently by a worker, historical releases unchanged. Folderpicker frontend task re-dispatched with followup_task after discovering queued send_message to completed agent had not started a new turn; actual native/background implementation was already landed. Do not claim extension Browse controls complete until source/tests are inspected.
 - Legacy folder migration hardened on dm.saveSettings as well as load: a stale Options tab cannot reintroduce defaultDestination after extension reload. Chrome typecheck passes; regression assertion queued with folderpicker tests.
 
 - Full integration now73/73 passes (1m43s; `artifacts/integration-update-admission-fixed.log`). Deterministic timeout was introduced by the cancellation regression fixture: /slow writes its first64KiB before throttling, so an8KiB response could complete client-side while its server handler still delayed, poisoning reuse of that HTTP/1 connection. Enlarging to128KiB ensures an incomplete response on cancellation; focused/new checks and fullsuite now pass. No production timeout increase or skipped test.
@@ -6042,15 +6009,15 @@ Batched 0.1.5 implementation: Download Properties now supports assigning existin
 - Native extension folder picker uses a dedicated native messaging port, so its long modal interaction cannot block unrelated handoffs on the normal sequential IPC connection. Only extension handoff/batch pages may request it. UI wiring/tests in progress; Host compile and Chrome typecheck pass.
 
 - Owner reported tray Exit relaunching Host: confirmed resident WinUI reconnect loop called EnsureStarted every iteration. Unreleased fix bootstraps until first valid connection, then reconnects without spawning Host; explicit application launch still calls EnsureStarted even for an already resident frontend. EOF disconnect now updates offline status. Host/WinUI Release builds pass; live exit/reopen acceptance pending. Updater IPC success now requests shutdown in finally even if the reply fails, preventing staged/quiesced Host deadlock.
-- Owner reported toolbar extension popup sizing and missing destination picker. Luna changed popup intrinsic width to390px with bounded height/scroll; 24 extension tests/typecheck/build passed, visual acceptance pending. Main added native host.pickFolder/host.folderPicked contracts, serialized Windows STA FolderBrowserDialog, default app folder starting location, and extension sender validation permitting only handoff/batch pages. Host builds; Luna implementing both destination Browse controls/tests. These changes are unreleased.
-- Diagnostic full integration rerun also failed the same update fixture manifest GET timeout:72/73 (log artifacts/integration-update-admission.log). Paired tests pass; Luna investigating order/shared HTTP-client state. Treat full suite as failing, not transient/accepted.
+- Owner reported toolbar extension popup sizing and missing destination picker. A worker changed popup intrinsic width to390px with bounded height/scroll; 24 extension tests/typecheck/build passed, visual acceptance pending. Main added native host.pickFolder/host.folderPicked contracts, serialized Windows STA FolderBrowserDialog, default app folder starting location, and extension sender validation permitting only handoff/batch pages. Host builds; a worker implementing both destination Browse controls/tests. These changes are unreleased.
+- Diagnostic full integration rerun also failed the same update fixture manifest GET timeout:72/73 (log artifacts/integration-update-admission.log). Paired tests pass; a worker investigating order/shared HTTP-client state. Treat full suite as failing, not transient/accepted.
 
-- Unreleased manual Add URL Browse control implemented by Luna, reviewed by main and Release x64 built with 0 warnings/errors; cancellation preserves editable path, errors inline, field has explicit accessible name. Live picker acceptance remains open; screenshot gap matrix updated to distinguish source/build evidence from remaining gaps.
+- Unreleased manual Add URL Browse control implemented by a worker, reviewed by main and Release x64 built with 0 warnings/errors; cancellation preserves editable path, errors inline, field has explicit accessible name. Live picker acceptance remains open; screenshot gap matrix updated to distinguish source/build evidence from remaining gaps.
 - Runtime update staging rechecks active transfers after package fetch and atomically pauses new runner admission through staging/restart; failure releases admission and reschedules. Expanded signed-update regression verifies malformed signed ZIP fails safely and following download completes. Six focused update tests pass. Full integration run:72/73, one local fixture manifest request timed out after30s. Paired concurrent-cancellation/signed-update rerun passes2/2; full diagnostic rerun running session12371, log `artifacts/integration-update-admission.log`. Do not claim full suite green yet.
 - Update periodic/retry timers now use System.Threading.Timer because settings callbacks arrive on IPC worker threads; disposal and retry changes synchronized, disabled preference rechecked after fetch. Host Release build passes. Runtime periodic/retry acceptance still pending; no new release published during owner's0.1.2 test.
 
 - Browser cleanup verification complete at unit/mock level: 24/24 extension tests (six new cancel/erase/search cases), typecheck and build pass; main reviewed tests and reran tests/typecheck. Live Edge flyout reproduction still outstanding. This work is unreleased.
-- Busy installed automatic updates now schedule a one-minute retry rather than waiting the normal daily interval; disabling automatic updates cancels pending retry and automatic checks revalidate the preference after manifest fetch. Host Release build passed before the final preference guard; runtime retry/disable acceptance remains open. Naming/original-icon follow-up recorded in ROADMAP per owner request. Luna now implementing the missing manual destination Browse control; no installed UI actions authorized by that subtask.
+- Busy installed automatic updates now schedule a one-minute retry rather than waiting the normal daily interval; disabling automatic updates cancels pending retry and automatic checks revalidate the preference after manifest fetch. Host Release build passed before the final preference guard; runtime retry/disable acceptance remains open. Naming/original-icon follow-up recorded in ROADMAP per owner request. A worker now implementing the missing manual destination Browse control; no installed UI actions authorized by that subtask.
 
 - Unreleased post-0.1.2 fixes: Runtime serializes all update installations (automatic/tray/IPC) with a shared nonwaiting gate and refuses another helper after successful staging. Six update integration tests pass, including a slow-manifest concurrent request rejected as busy and cancellation releasing the gate. Runtime Release build clean. Further active-download admission races and busy-update retry cadence remain open.
 - Update helper now backs up/restores the browser extension alongside app and metadata, with normalized scoped target checks and rejection of linked target directories. `tools/test-update-helper.ps1` invokes the real helper with isolated fake installers and NoStart: missing installer preserves baseline, partial app/extension/metadata replacement failure rolls back all three, success writes expected metadata without executing fake Host. Main reran all three successfully; fixtures at `artifacts/update-helper-tests-493d52796f414063bd13341b46136b30`. These fixes are not in published0.1.2.
@@ -6062,14 +6029,14 @@ Batched 0.1.5 implementation: Download Properties now supports assigning existin
 - Built self-contained 0.1.2 installer and ZIP; prepare-release script validated real ZIP and emitted five explicit public assets with signed manifest/checksums. 0.1.2 upload started (exec session27893; verify terminal result). Test installer `artifacts/update-test/DownloadManagerUpdateTest-0.1.1.exe` deliberately records installed0.1.1 using current0.1.2 binaries to exercise upgrade to0.1.2; SHA256 `993595A0D67E28D90726FFD6E3D5AD36A31A3D266A47022EB96865194F9816CD`.
 - Update helper no longer removes app on preflight failure before replacement; regression with missing install.ps1 preserves original marker and reports failure. It refuses proceeding after Host exit timeout; install.ps1 scopes process checks to target app path, refuses active Host rather than killing all Hosts by name. Backup retained through restart; success recorded after launch. Final helper revision is in signed update ZIP; setup EXE embeds the preceding helper revision (same successful path, earlier success backup cleanup), so future update execution uses the signed ZIP helper. Further lifecycle acceptance remains required.
 
-- Extension media opt-out and legacy-folder cleanup implemented by Luna and verified by main: 18/18 extension tests, typecheck and 0.1.1 build pass. Media scanning defaults off for missing settings; Options toggle stops observers/listeners and clears panel, resources and badges on existing pages. Serialized broadcasts and content generation guard prevent stale enable after disable. Download All link collection remains independent. Extension Options no longer offers a persistent destination override; explicit one-off handoff destination remains covered. Live browser/UI acceptance still open.
+- Extension media opt-out and legacy-folder cleanup implemented by a worker and verified by main: 18/18 extension tests, typecheck and 0.1.1 build pass. Media scanning defaults off for missing settings; Options toggle stops observers/listeners and clears panel, resources and badges on existing pages. Serialized broadcasts and content generation guard prevent stale enable after disable. Download All link collection remains independent. Extension Options no longer offers a persistent destination override; explicit one-off handoff destination remains covered. Live browser/UI acceptance still open.
 - Release signer now requires an existing private key; explicit `--generate-key` uses exclusive creation, and signing output never contains private key material. Release build passes; two fixture manifests verify against one stable public key. Hosting decision pending: origin repository is private, so unauthenticated default update URLs cannot fetch its release assets. Asked owner whether to use a public builds-only repository or authenticated private updates; no repository visibility changes or release publication performed.
 
 - Full integration suite after browser destination routing and queue-name persistence: 72/72 passed (1m43s). GitHub release/update work explicitly added by owner: remote `Kaan88/download-manager`; `gh auth status` succeeds outside restricted network context. Existing installed-build metadata gating and signed-manifest updater need release wiring/acceptance; no new release uploaded yet. Existing UpdateSigner creates a new key per invocation, so release signing must support a stable private key before publishing an update feed.
 
-- Fixed queue rename propagation: changed job names are persisted and emit `updated`; initialization reconciles denormalized names from authoritative queue settings, including a crash between settings/job writes. Runtime Release build has 0 warnings/errors and the expanded rename/order/delete/restart test passes. Luna read-only review found no regression; shared mutable settings saves and failure rollback remain a broader concurrency/durability gap, not closed by this fix. Scheduler run dates intentionally remain preserved by ID, retaining once-per-day suppression after edits.
+- Fixed queue rename propagation: changed job names are persisted and emit `updated`; initialization reconciles denormalized names from authoritative queue settings, including a crash between settings/job writes. Runtime Release build has 0 warnings/errors and the expanded rename/order/delete/restart test passes. A worker read-only review found no regression; shared mutable settings saves and failure rollback remain a broader concurrency/durability gap, not closed by this fix. Scheduler run dates intentionally remain preserved by ID, retaining once-per-day suppression after edits.
 
-- Resumed verification: Release Runtime build passes with 0 warnings/errors. Filtered browser-directory/queue integration run passes 11/11, including both browser sources across restart with a conflicting music category destination and a one-off folder choice. Browser requests use the application default; desktop category routing remains separate. Existing xUnit2031 warning remains. Media opt-out/Options migration is still being implemented by Luna; no live Edge ghost-entry fix is claimed. Chrome API documents cancel completion before the returned promise resolves, so a terminal-state race is not established by source inspection alone.
+- Resumed verification: Release Runtime build passes with 0 warnings/errors. Filtered browser-directory/queue integration run passes 11/11, including both browser sources across restart with a conflicting music category destination and a one-off folder choice. Browser requests use the application default; desktop category routing remains separate. Existing xUnit2031 warning remains. Media opt-out/Options migration is still being implemented by a worker; no live Edge ghost-entry fix is claimed. Chrome API documents cancel completion before the returned promise resolves, so a terminal-state race is not established by source inspection alone.
 
 - Compaction handoff: active goal remains finishing all remaining in-scope functionality/acceptance before TorBox/Docker/WebUI, without dropping quality/features. Version 0.1.1 bumped consistently. Queue create/policy/delete/move actions and scheduler edit UI are in the worktree; live acceptance pending. Latest queued regressions passed 8/8; ongoing agents own further tests and UI/media work.
 - New browser requirements: persistent old extension destination must migrate back to application default; disable page media scanning/bubble via explicit setting; investigate Edge ghost download/flyout after native handoff. Main added clearing legacy `settings.defaultDestination` in extension loadSettings and browser Runtime destination routing now skips both last-folder and category-folder fallbacks (explicit one-off destination still wins). These latest changes are not yet tested. `/root/review_filename` owns media opt-out + extension Options cleanup/tests; `/root/extension_review` owns queue/scheduler WinUI work (latest build passed). Main must verify their results, run directory regression with a conflicting category folder, and investigate Edge ghost entry without weakening acknowledged-before-cancel handoff safety. No new 0.1.1 package installed.
@@ -6122,7 +6089,7 @@ Batched 0.1.5 implementation: Download Properties now supports assigning existin
 - Owner explicitly resumed implementation. This supersedes the deferral below.
 - Holding Del to prevent capture while clicking links: actual bypass transfer acceptance remains pending.
 - Chrome handoff confirmation no longer overwrites the configured default folder. Runtime browser sources (`chromeAuto`, `chromeContextMenu`) ignore the desktop last-folder fallback and do not overwrite that memory; explicit one-download and category destinations still apply. Integration suite: 68/68, including both browser sources with consecutive requests and service restart. One initial focused run had a transient AccessDenied on atomic settings replacement; focused rerun and full suite passed.
-- Extension windows fit content within the current display's available bounds, scroll on short screens, and keep handoff/batch actions sticky. Delete+link capture uses page-side one-shot original-URL gestures, queried before pausing Chrome; this replaced a fire-and-forget registration race found by Luna's mocked review. Browser-chrome pages, unloaded source documents, and iframe initiators are not established shortcut coverage. Extension mock/unit suite 16/16 plus typecheck/build; live Chrome acceptance remains pending.
+- Extension windows fit content within the current display's available bounds, scroll on short screens, and keep handoff/batch actions sticky. Delete+link capture uses page-side one-shot original-URL gestures, queried before pausing Chrome; this replaced a fire-and-forget registration race found by a worker's mocked review. Browser-chrome pages, unloaded source documents, and iframe initiators are not established shortcut coverage. Extension mock/unit suite 16/16 plus typecheck/build; live Chrome acceptance remains pending.
 - WinUI Options reorganized into General/Save to/Downloads/Connection/Proxy/Updates tabs with bounded scroll areas and a working completion-window setting. Add URL uses Address → Download file info with Start download/Download later and advanced queue/conflict choices; list header/body share horizontal scrolling to preserve alignment on narrow windows. Build and live visual review in progress; none of this establishes owner visual approval.
 - The supplied ThinkBroadband page explicitly disallows scripted/automated file downloads; inspected the page but repeatable transfer checks use the controlled local TestServer instead. No automated ThinkBroadband payload transfer claimed.
 
@@ -6160,7 +6127,7 @@ Batched 0.1.5 implementation: Download Properties now supports assigning existin
   single/8-connection output hashes, same/cross-origin credentials, malformed
   and unsupported targets, and disabled local destinations. Engine **41/41**.
   This does not bypass Cloudflare or establish that testfile.org works.
-- Reviewed Luna's filename helper; added encoded-separator sanitization and a
+- Reviewed a worker's filename helper; added encoded-separator sanitization and a
   regression. Extension **7/7**, typecheck and build pass. Real GitHub browser
   acceptance against the new installer remains pending.
 - Added `DownloadWindow`: a separate per-job frontend (`--job <guid>`), with
@@ -6185,7 +6152,7 @@ Batched 0.1.5 implementation: Download Properties now supports assigning existin
 - Earlier tray left-click/balloon click, dedicated settings activation and
   light-theme resource changes are built. **Live tray/settings/light-mode
   acceptance remains pending.** Corrected the pre-existing extra U+00C2 before middle-dot status-bar
-  separators. Luna reviewed the routine diff/encoding changes; review is not
+  separators. A worker reviewed the routine diff/encoding changes; review is not
   acceptance evidence.
 - Computer-use `@oai/sky` works for observation and the new app controls.
   Do not rerun the old PowerShell UI helper in the
@@ -7651,8 +7618,8 @@ random-access part file **in the destination directory**:
 - User reports GitHub release filenames becoming UUIDs, testfile.org failures, tray balloon clicks and tray Settings doing nothing, broken light mode, and requests separate automatic download progress/completion windows. UI priority is high.
 - Installed logs are `%LOCALAPPDATA%\DownloadManager\logs\host-20261104.log`; inspect job records selectively without exposing cookies/headers. testfile.org jobs failed HTTP 403 at zero bytes. Curl confirmed `Cf-Mitigated: challenge` for site links; in-app browser also shows Cloudflare verification (`https://testfile.org/files-5GB`). Do not claim this is fixed or try to bypass challenges.
 - Important engine finding still UNFIXED: `HttpDownloadEngine.SendWithRedirectsAsync` always starts at `job.Url` and ignores browser-supplied `FinalUrl`, potentially replaying the challenged landing URL instead of the already-resolved CDN URL. Any fix must preserve original-origin credential stripping, validate target scheme/local-network policy, and add regression tests.
-- Luna implemented extension filename helper/tests: prefer informative Chrome filename; when empty/UUID, prefer decoded original URL before opaque final URL. Six Node tests and typecheck passed. Review changes before packaging.
-- Luna changed `App.xaml` and `MainWindow.xaml` to theme resources rather than hardcoded dark surfaces. WinUI build passed before subsequent main-session edits.
+- A worker implemented extension filename helper/tests: prefer informative Chrome filename; when empty/UUID, prefer decoded original URL before opaque final URL. Six Node tests and typecheck passed. Review changes before packaging.
+- A worker changed `App.xaml` and `MainWindow.xaml` to theme resources rather than hardcoded dark surfaces. WinUI build passed before subsequent main-session edits.
 - Main-session edits NOT YET BUILT/TESTED: tray left click and BalloonTipClicked open UI; App uses separate named settings activation event so secondary-instance `--page settings` is not discarded; MainWindow restores minimized windows, persists nullable DarkMode in UiState, follows system theme when unset, and clears pending settings request correctly. No new installer yet.
 - Separate automatic progress/completion windows are NOT implemented yet. Current progress is a manual ContentDialog and completion is a modal dialog tied to the main window. Need standalone per-job windows with live progress and completion actions, including when main UI is hidden/not initially running.
 - Computer-use skill was loaded. Tool discovery returned no dedicated computer namespace, but user says it worked with DeepSeek and is starting a new chat to recheck. Do not repeat a blanket claim that desktop control is unavailable; inspect skill/tool availability freshly. Browser tab for testfile.org exists; no verification challenge was interacted with.
@@ -7744,7 +7711,7 @@ the first engine/host/IPC implementation.
 - Kept: G1 Download All (page link collection in the extension). `DownloadSource.Grabber` and `ScheduleRule.GrabberProjectId` stay only so old state files load; legacy grabber schedules are removed and persisted on startup.
 - Tests: core 78/78 (26 robots cases removed), engine 33/33, integration 65/65 (11 grabber tests removed, `LegacyGrabberSchedulesAreDroppedOnLoad` added).
 
-Luna source review identified startup-only failure consumption, fixed with pending startup IDs; periodic metadata failures intentionally wait for the next configured period and are exposed via LastRunError. Full scheduler, sync hash/atomic replacement, retry counts, stale configuration and queue-detach failure/restart tests are required in the consolidated pass.
+A worker source review identified startup-only failure consumption, fixed with pending startup IDs; periodic metadata failures intentionally wait for the next configured period and are exposed via LastRunError. Full scheduler, sync hash/atomic replacement, retry counts, stale configuration and queue-detach failure/restart tests are required in the consolidated pass.
 
 ## 0.1.5 final launch/packaging checkpoint (2026-11-05)
 Scoped Host launch now checks the same named mutex as IPC rather than global process names. WinUI Release build passed with zero warnings/errors (artifacts/validation-launch.log). Fresh isolated QA launched outside the sandbox and rendered the dark main window and unified Scheduler; source fix clears a stale initial connection-error status after successful refresh while retaining editor errors. This last status fix awaits the final rebuild. Packaging review identified output deletion containment and version override guards; fixes in progress. The existing local installer predates these final changes and must be rebuilt before release. No public 0.1.5 publication or install acceptance claimed.
@@ -7822,7 +7789,7 @@ Reviewed every window and dialog in both themes (isolated `uiqa` profile, captur
 ## 2026-11-19 — Android 0.0.5 update prompt and stop verification checkpoint
 
 The owner approved the proposed update dialog as design direction. Implementer:
-Codex; Android 0.0.5/code 5 and signed changelog work are local, uncommitted and
+Android 0.0.5/code 5 and signed changelog work are local, uncommitted and
 unpublished. Signed-notes Mobile passed 528 (artifacts/android-app/android6/update-notes-mobile-final.txt);
 signer build had 0 warnings/errors. Full Integration passed 2,095, skipped 32,
 failed 0 (artifacts/android-app/android6/final-integration-full.txt); accompanying
@@ -7838,8 +7805,8 @@ network-change or physical-phone acceptance. The tested build had JobRunIdentity
 and the owner-requested crash-guard changes, but not the latest callback ownership,
 API 30 StopReason and picker fixes.
 
-Astra identified three fresh source findings in per-execution callback ownership,
-API 30 stop-reason handling and open-dropdown keyboard confirmation. Main and Luna
+The reviewer identified three fresh source findings in per-execution callback ownership,
+API 30 stop-reason handling and open-dropdown keyboard confirmation. Main and a worker
 fixed the source; follow-up review remains pending. The latest Debug compile is
 running after binding errors were corrected. Rebuild with all latest fixes, final
 NativeAOT/arm64 verification and device acceptance remain pending. Android 0.0.4
@@ -7847,7 +7814,7 @@ is immutable; 0.0.5 is not released. ANDROID.6 remains IN PROGRESS and unchecked
 later independent review remains OPEN.
 ### 2026-11-19 — Android stop-resume and source-review update
 
-Astra follow-up recorded SOURCE PASS for all three fresh source findings; ANDROID.6
+review follow-up recorded SOURCE PASS for all three fresh source findings; ANDROID.6
 and the later independent review remain open. The queue picker Debug build passed
 0 errors / 5 warnings; the final rerun is ongoing and includes explicit
 e.Handled=false plus a documentation-comment fix
@@ -7861,7 +7828,7 @@ claim automatic resumption or broader lifecycle acceptance. Android 0.0.5 is not
 published, and ANDROID.6 remains IN PROGRESS and unchecked.
 ### 2026-11-19 — Android modal picker checkpoint
 
-Implementer: Codex. Astra follow-up recorded SOURCE PASS for the modal-picker source
+review follow-up recorded SOURCE PASS for the modal-picker source
 after main reviewed the full worker change and added event unsubscription before
 disposal. On API 33 Debug, keyboard Tab/Enter/Down/Enter selected `Night-QA`; delayed
 metadata, landscape rotation and portrait restoration retained the selection.
@@ -7879,7 +7846,7 @@ independent review remains OPEN.
 
 ### 2026-11-19 — Android 0.0.5 published
 
-Implementer: Codex. Source commit `87555b993ae8f3de7e61a171c87a932a8d6a4a2b` was
+Source commit `87555b993ae8f3de7e61a171c87a932a8d6a4a2b` was
 pushed to `android-app` and published as [Android 0.0.5](https://github.com/Kaan88/inbound/releases/tag/android-v0.0.5).
 The permanent-key NativeAOT arm64 APK (20,664,711 bytes) SHA-256 is
 `1cf087a69c56744e1ee7b0bd5e3c29bce1fe7cad5db371f78ada35fac8805691`; manifest SHA-256
@@ -7900,16 +7867,16 @@ TalkBack and broader remote-host acceptance remain pending. ANDROID.6 remains
 IN PROGRESS and unchecked, ANDROID.7 and the later independent review remain OPEN;
 publication does not complete those milestones.
 
-Cleanup verified by Codex: task queues stopped, Follows the system theme restored,
+Cleanup verified: task queues stopped, Follows the system theme restored,
 battery reset, font_scale absent, free rotation and non-root adbd restored; owned
 fixture57556 and emulator5554 stopped. S24 stayed disconnected and untouched.
 The final NativeAOT dark-dialog preview was also viewed by main.
 
-Documentation-only handoff refresh (2026-11-19, Codex): owner requested a handoff
+Documentation-only handoff refresh (2026-11-19): owner requested a handoff
 with subagent reminders, then cleared the thread goal. Replaced stale checkpoint
-blocks in ANDROID-CODEX-HANDOFF.md with current evidence, stop state, explicit
-Luna/high and Terra/high routing, major-only Astra/high audits and mandatory
-personal main-agent review of every worker code change. Bounded Terra/high
+blocks in the then handoff with current evidence, stop state, explicit
+worker routing, major-only audits and mandatory
+personal main-agent review of every worker code change. Bounded worker
 read-only review passed after main corrected the no-ADB-reverse claim to the
 latest scheduled/reboot batch. No implementation, build, device action or goal
 restart; project scope and outstanding acceptance remain unchanged.

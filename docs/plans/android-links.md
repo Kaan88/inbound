@@ -18,7 +18,7 @@ This is an implementation brief, not acceptance evidence.
    continuation/hash against controlled files. Never promise resume if the server
    cannot prove it is the same content. Provider-managed files keep provider refresh.
 5. Local scripted share/browser/auth-cookie/page-batch/expired-link checks, screenshot
-   comparisons, regression suites and Astra fix/reverification loop. Record Fable scope.
+   comparisons, regression suites and Fable fix/reverification loop. Record Fable scope.
 
 ## Decisions and constraints
 
@@ -39,11 +39,11 @@ This is an implementation brief, not acceptance evidence.
   implemented Host operation; do not build nonfunctional copies of mockup chips.
 - Preserve or safely cancel pending capture on rotation; do not put cookies in Bundles,
   intents or logs. A changed target Host must not silently inherit a consent/selection.
-- Browser-auth refresh adds optional request context and Host capability negotiation; shared-runtime validation, backward compatibility and durability passed the Astra source audit; Fable review remains open.
+- Browser-auth refresh adds optional request context and Host capability negotiation; shared-runtime validation, backward compatibility and durability passed the Source audit; Fable review remains open.
 
 ## Current evidence
 
-Source passed the ANDROID.5 Astra audit after confirmed fixes and controlled regressions.
+Source passed the ANDROID.5 review after confirmed fixes and controlled regressions.
 Permanent-key 0.0.3 is on the Desktop and S24; the signed local release bundle is
 not published and the public GitHub update feed remains 0.0.2. See PROGRESS's
 0.0.3 delivery entry for exact APK hash and device evidence.

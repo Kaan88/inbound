@@ -81,4 +81,4 @@ disposable host; remove only the reverse mapping the run installed; stop
 fixture listeners. Verify prior device network/power and app appearance,
 brightness mode/value and timeout, and the original local UI baseline.
 Log which cases passed, failed or were unobserved in `PROGRESS.md`; request
-independent Astra review before closing the milestone.
+independent review before closing the milestone.

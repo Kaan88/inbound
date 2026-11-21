@@ -55,7 +55,7 @@ A NativeAOT emulator test updated a version-code 1 baseline to code 2 using a
 signed HTTP fixture and reached the actual Android installer. The first fixture,
 which used an adb-pushed external file, was blocked; the test transport was fixed.
 That was a fixture issue, not a production-feed result. Runtime/core and release
-preparation received Astra PASS. The full Mobile suite passed 373 tests, including
+preparation received review PASS. The full Mobile suite passed 373 tests, including
 19 updater and 14 HTTP tests. The initial broader project run found an existing
 persistence source-count guard mismatch; the test-only correction passed all nine
 focused guard tests. The broader .NET rerun passed 6221 tests (61 optional skips).

@@ -74,9 +74,9 @@ and do not silently uninstall the daily phone's app. Once installed under the
 permanent key, keep using that key and increase the app version code for updates.
 Automatic APK download/install offers and public release publication are later work.
 
-The current Codex milestone audit and later Fable queue are separate:
-ANDROID-CODEX-PROGRESS.md and ANDROID-CODEX-FABLE-REVIEW.md. Do not claim a
-Fable approval from an Astra pass.
+Earlier milestone audits and the later Fable queue are separate
+(docs/plans/android-fable-review-queue.md). Do not claim a Fable approval
+from another reviewer's pass.
 
 References: [Android apksigner](https://developer.android.com/tools/apksigner),
 [.NET Android build properties](https://learn.microsoft.com/dotnet/android/building-apps/build-properties).
