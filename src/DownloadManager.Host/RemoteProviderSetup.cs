@@ -28,7 +28,7 @@ internal sealed record RemoteProviderSetup(RemoteProviderRegistry Registry, Remo
         return new RemoteProviderSetup(registry, new RemoteLinkBroker(registry, log: log), http);
     }
 
-    public RemoteJobCoordinator CreateCoordinator(StoragePaths paths, IRemoteJobHost host, IPackagePasswordKeeper packagePasswords, Action<string> log)
+    public RemoteJobCoordinator CreateCoordinator(StoragePaths paths, IRemoteJobHost host, IPackagePasswordKeeper? packagePasswords, Action<string> log)
         => new(Registry, new JsonRemoteJobStore(paths, log), host, new RemoteCoordinatorOptions { PackagePasswords = packagePasswords }, log: log);
 
     public void Dispose() => Http.Dispose();

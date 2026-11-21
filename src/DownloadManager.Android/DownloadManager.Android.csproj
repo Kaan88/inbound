@@ -103,6 +103,9 @@
     <ProjectReference Include="..\DownloadManager.Persistence\DownloadManager.Persistence.csproj" />
     <ProjectReference Include="..\DownloadManager.Runtime\DownloadManager.Runtime.csproj" />
     <ProjectReference Include="..\DownloadManager.Mobile\DownloadManager.Mobile.csproj" />
+    <!-- ANDROID.9: the phone's own Host runs TorBox jobs, as the desktop and the server do. -->
+    <ProjectReference Include="..\DownloadManager.Providers.TorBox\DownloadManager.Providers.TorBox.csproj" />
+    <Compile Include="..\DownloadManager.Host\RemoteProviderSetup.cs" Link="Host\RemoteProviderSetup.cs" />
   </ItemGroup>
 
   <!--

@@ -4,6 +4,7 @@ using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using DownloadManager.Core.Providers;
 
 namespace DownloadManager.Providers.TorBox;
@@ -188,8 +189,9 @@ public sealed class TorBoxClient :
             RemoteQueueAction.Remove => "delete",
             _ => throw new ArgumentOutOfRangeException(nameof(action)),
         };
-        var payload = new Dictionary<string, object> { ["queued_id"] = id, ["operation"] = operation };
-        using var body = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+        // JSON nodes, not reflection: the phone's NativeAOT build has no reflection serializer (ANDROID.9).
+        var payload = new JsonObject { ["queued_id"] = id, ["operation"] = operation };
+        using var body = new StringContent(payload.ToJsonString(), Encoding.UTF8, "application/json");
         using var document = await SendAsync(HttpMethod.Post, "queued/controlqueued", body, false, cancellationToken).ConfigureAwait(false);
     }
 
@@ -208,7 +210,9 @@ public sealed class TorBoxClient :
         // The query form takes a list too, but a body keeps long lists out of the address.
         foreach (var chunk in hashes.Distinct(StringComparer.OrdinalIgnoreCase).Chunk(100))
         {
-            using var body = new StringContent(JsonSerializer.Serialize(new { hashes = chunk }), Encoding.UTF8, "application/json");
+            var hashList = new JsonArray();
+            foreach (var hash in chunk) hashList.Add(hash);
+            using var body = new StringContent(new JsonObject { ["hashes"] = hashList }.ToJsonString(), Encoding.UTF8, "application/json");
             using var document = await SendAsync(HttpMethod.Post, $"{Family(kind)}/checkcached?format=object&list_files={(listFiles ? "true" : "false")}", body, false, cancellationToken).ConfigureAwait(false);
             var data = Data(document);
             if (data.ValueKind != JsonValueKind.Object) continue;
@@ -357,8 +361,8 @@ public sealed class TorBoxClient :
             throw new ArgumentException("Not a TorBox id.", nameof(item));
         }
 
-        var payload = new Dictionary<string, object> { ["operation"] = "delete", [idName] = id };
-        using var body = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+        var payload = new JsonObject { ["operation"] = "delete", [idName] = id };
+        using var body = new StringContent(payload.ToJsonString(), Encoding.UTF8, "application/json");
         try
         {
             using var document = await SendAsync(HttpMethod.Post, path, body, false, cancellationToken).ConfigureAwait(false);

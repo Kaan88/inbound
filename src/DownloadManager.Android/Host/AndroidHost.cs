@@ -1,9 +1,12 @@
 using DownloadManager.Contracts;
 using DownloadManager.Core;
+using DownloadManager.Core.Providers;
+using DownloadManager.Host;
 using DownloadManager.Mobile;
 using DownloadManager.Persistence;
 using DownloadManager.Runtime;
 using DownloadManager.Runtime.Ipc;
+using DownloadManager.Runtime.Remote;
 using DownloadManager.Runtime.Sites;
 
 namespace Inbound.App.Host;
@@ -38,16 +41,34 @@ internal sealed class AndroidPlatform : IHostPlatform
 
 internal sealed class DelegateLog(Action<string> say) : IHostLog
 {
-    public void Info(string message) => say("[host] " + message);
+    /// <summary>The TorBox key and the links it signs, masked as the desktop's log file masks them (logcat is readable over adb).</summary>
+    public IRemoteSecretMatcher? Secrets { get; set; }
 
-    public void Warn(string message) => say("[host WARN] " + message);
+    public void Info(string message) => say("[host] " + Clean(message));
 
-    public void Error(string message) => say("[host ERROR] " + message);
+    public void Warn(string message) => say("[host WARN] " + Clean(message));
+
+    public void Error(string message) => say("[host ERROR] " + Clean(message));
+
+    private string Clean(string message) => UrlRedactor.RedactText(Secrets?.Mask(message) ?? message);
+}
+
+/// <summary>TorBox on the phone (ANDROID.9): the provider, its jobs and their commands, as the desktop Host composes them.</summary>
+internal sealed record AndroidRemote(RemoteProviderSetup Setup, RemoteJobCoordinator Jobs, RemoteCommands Commands)
+{
+    public bool Started { get; set; }
+
+    public async Task StopAsync(Action<string> say)
+    {
+        try { if (Started) await Jobs.StopAsync().ConfigureAwait(false); }
+        catch (Exception ex) { say("[host] remote jobs shutdown: " + ex.GetType().Name); }
+        Commands.Dispose();
+    }
 }
 
 /// <summary>
 /// The Host core on Android, in this process: DownloadManagerService + HostCommandDispatcher composed as
-/// src/DownloadManager.Server/ServerApp.cs composes them, minus the HTTP front, Torrents, TorBox and Archives. A client is an
+/// src/DownloadManager.Server/ServerApp.cs composes them, with TorBox and minus the HTTP front, Torrents and Archives. A client is an
 /// <see cref="InProcessSession"/> talking to the dispatcher with the same IpcMessage envelopes a pipe or WebSocket carries.
 /// For now it lives and dies with the process (no foreground service yet).
 /// </summary>
@@ -63,16 +84,18 @@ internal sealed class AndroidHost : IAsyncDisposable
         Android.OS.Environment.GetExternalStoragePublicDirectory(Android.OS.Environment.DirectoryDownloads)?.AbsolutePath ?? "/storage/emulated/0/Download";
 
     private readonly HttpDownloadEngine _engine;
+    private readonly AndroidRemote _remote;
     private readonly SitesCommands? _sites;
     private readonly ISleepPrevention? _siteSleep;
     private readonly Action<string> _say;
 
-    private AndroidHost(DownloadManagerService service, HostCommandDispatcher dispatcher, HttpDownloadEngine engine, SitesCommands? sites, ISleepPrevention? siteSleep, ActivityState activity,
+    private AndroidHost(DownloadManagerService service, HostCommandDispatcher dispatcher, HttpDownloadEngine engine, AndroidRemote remote, SitesCommands? sites, ISleepPrevention? siteSleep, ActivityState activity,
         ISleepPrevention sleep, EventHandler<JobChangeEventArgs> onJob, EventHandler<bool> onWait, EventHandler<AppSettings> onSettings, Action<string> say)
     {
         Service = service;
         Dispatcher = dispatcher;
         _engine = engine;
+        _remote = remote;
         _sites = sites;
         _siteSleep = siteSleep;
         Activity = activity;
@@ -126,16 +149,32 @@ internal sealed class AndroidHost : IAsyncDisposable
             },
             checkpoints: checkpointStore);
         DownloadManagerService service;
+        AndroidRemote remote;
+        RemoteProviderSetup? remoteSetup = null;
         try
         {
-            service = new DownloadManagerService(paths, jobStore, checkpointStore, settingsStore, engine, log.Info, sleepPrevention: sleep)
+            remoteSetup = RemoteProviderSetup.Create(paths, engine, log.Info);
+            log.Secrets = remoteSetup.Registry;
+            service = new DownloadManagerService(paths, jobStore, checkpointStore, settingsStore, engine, log.Info, sleepPrevention: sleep,
+                linkBroker: remoteSetup.Broker, linkSecrets: remoteSetup.Registry)
             {
                 // Unknown power holds charging and battery-saver queues until the first report.
                 PlatformReportsQueuePower = true,
             };
+            // Archive passwords from TorBox packages wait for the phone's extraction (ANDROID.9, archives step).
+            var remoteJobs = remoteSetup.CreateCoordinator(paths, service, packagePasswords: null, log.Info);
+            remote = new AndroidRemote(remoteSetup, remoteJobs, new RemoteCommands(remoteSetup.Registry, remoteJobs, log: log.Info));
+            service.DirectAddresses = remoteJobs;
+            foreach (var provider in remoteSetup.Registry.All)
+            {
+                // Addresses saved earlier may turn out to hold a key that was only just entered.
+                if (provider.Account is { } account)
+                    account.Changed += (_, _) => _ = ProtectStoredSecretsAsync(service, say);
+            }
         }
         catch
         {
+            remoteSetup?.Dispose();
             engine.Dispose();
             throw;
         }
@@ -164,6 +203,17 @@ internal sealed class AndroidHost : IAsyncDisposable
             await service.SetQueuePowerStateAsync(power.Charging, power.BatterySaver, ct).ConfigureAwait(false);
             await service.InitializeAsync(lastRunStoppedByUser, ct).ConfigureAwait(false);
             service.TrayAvailable = false;
+            // After the service, because reconciling can create local jobs at once. Ordinary downloads don't depend on it:
+            // without it the Add sheet's TorBox entry is simply not offered.
+            try
+            {
+                await remote.Jobs.StartAsync().ConfigureAwait(false);
+                remote.Started = true;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                log.Warn("TorBox jobs could not start: " + ex.GetType().Name);
+            }
 
             // Default destination while none was ever set: the shared Download folder, directly (owner, 2026-11-16: no
             // subfolder, so no Video/ or Compressed/ category folders either). Decided by the setting itself, not by whether a
@@ -202,7 +252,7 @@ internal sealed class AndroidHost : IAsyncDisposable
 #endif
                     );
             }
-            var dispatcher = new HostCommandDispatcher(service, new AndroidPlatform(), log)
+            var dispatcher = new HostCommandDispatcher(service, new AndroidPlatform(), log, remote.Started ? remote.Commands : null)
             {
                 Folders = new FolderBrowser(new PathRoots([SharedDownloadFolder]) { Called = "this phone's Download folder" }),
                 Sites = sites,
@@ -220,7 +270,7 @@ internal sealed class AndroidHost : IAsyncDisposable
                 service.AttachSiteTransfers(sites.Transfers.Demand, sites.Transfers.SetSpeedLimit);
             }
             dispatcher.Start();
-            return new AndroidHost(service, dispatcher, engine, sites, siteSleep, activity, sleep, onJob, onWait, onSettings, say);
+            return new AndroidHost(service, dispatcher, engine, remote, sites, siteSleep, activity, sleep, onJob, onWait, onSettings, say);
         }
         catch (Exception startError)
         {
@@ -234,19 +284,28 @@ internal sealed class AndroidHost : IAsyncDisposable
             try { if (sites is not null) await sites.DisposeAsync().ConfigureAwait(false); }
             catch (Exception ex) { sitesShutdownError = ex; }
             finally { siteSleep?.Dispose(); }
+            await remote.StopAsync(say).ConfigureAwait(false);
             try { await service.ShutdownAsync(CancellationToken.None).ConfigureAwait(false); }
             catch (Exception ex)
             {
                 say("[host] shutdown after a failed start: " + ex.GetType().Name + ": " + ex.Message);
+                remote.Setup.Dispose();
                 engine.Dispose();
                 // Something may still be running over the state folder: no second start in this process.
                 throw new HostLeftRunningException(startError, sitesShutdownError is null ? ex : new AggregateException(sitesShutdownError, ex));
             }
 
+            remote.Setup.Dispose();
             engine.Dispose();
             if (sitesShutdownError is not null) throw new HostLeftRunningException(startError, sitesShutdownError);
             throw;
         }
+    }
+
+    private static async Task ProtectStoredSecretsAsync(DownloadManagerService service, Action<string> say)
+    {
+        try { await service.ProtectStoredSecretsAsync().ConfigureAwait(false); }
+        catch (Exception ex) { say("[host WARN] protecting stored links: " + ex.GetType().Name); }
     }
 
     internal Task PauseRemoteFilesAsync() => _sites?.Transfers.PauseAllAsync("Paused from the notification.") ?? Task.CompletedTask;
@@ -264,8 +323,10 @@ internal sealed class AndroidHost : IAsyncDisposable
         try { if (_sites is not null) await _sites.DisposeAsync().ConfigureAwait(false); }
         catch (Exception ex) { _say("[host] remote files shutdown: " + ex.GetType().Name); }
         finally { _siteSleep?.Dispose(); }
+        await _remote.StopAsync(_say).ConfigureAwait(false);
         try { await Service.ShutdownAsync(CancellationToken.None).ConfigureAwait(false); }
         catch (Exception ex) { _say("[host] shutdown: " + ex.GetType().Name + ": " + ex.Message); }
+        _remote.Setup.Dispose();
         _engine.Dispose();
         _sleep.Dispose();
     }
