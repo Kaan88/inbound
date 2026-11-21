@@ -47,6 +47,9 @@ line or in a file). Tests: 4 end-to-end copy tests on two `rclone serve sftp` se
 flaky certificate test, passed alone 3 times), Mobile 640. Not run on a phone yet. Golden frames on the two branches
 will need regenerating at the merge. Open for the owner: the phone's copy always skips existing files (offer Replace or
 Keep both?); the desktop, web UI and CLI list a copy batch by direction and source only (give them a copy display?).
+Owner decision (2026-11-22): on the phone, copies, uploads and downloads ask only when names already exist at the
+target (checked against the target pane's listing), once per batch: "N files already exist in <place>" with Skip,
+Replace and Keep both; no clash starts at once. A clash added after the pane loaded falls back to Skip.
 
 ## ANDROID.9: torrents on Wi-Fi, seeding on Wi-Fi while charging, 2026-11-22
 
