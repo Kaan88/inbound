@@ -34,6 +34,17 @@ This phone tab
 13. It is a download-folder picker ("Use this download folder"), not the phone side of a two-sided browser: no files, no sizes, no upload action, and the bottom bar disappears.
 14. Its rows are cards while the Site tab's are flat rows; the folder glyph renders as a flat bar; every row repeats "Folder · on this phone".
 
+Owner decisions for the redesign (2026-11-21)
+- This phone becomes a full browser with upload. "like desktop apps either panel can be any server. right local by
+  default": the two tabs are two panes; the left tab (Site) opens the chosen location, the right tab is the phone by
+  default, and either can be switched to any location. Copying goes to the other tab's location.
+- Interaction follows Android conventions: a tap on a folder opens it, a tap on a file shows its options, a tap on the
+  icon starts multi-select. Proposed additions, to agree with the mockups: a long-press also starts multi-select; in
+  selection a tap toggles a row; a selection top bar with count, select all and close; Back clears a selection before
+  leaving the folder; pull to refresh; sort in the menu.
+- These go beyond c3/c4, so the new states (pane location switcher, file options sheet, selection bar, This phone
+  with files and upload) get mockups first, agreed by the owner, saved in `android-mockups/`, then built.
+
 Speed (owner report, 2026-11-21)
 15. "mobile remote files loads directories very slowly compared to desktop with the same google drive account." Matches item 5. The [review](android-review-49f5663c-c745317f.md) found that only the phone asks for folder item counts on every browse (up to +2 s per folder, Back and breadcrumb), rclone stops after 60 s idle so most opens are cold, and Back never reuses a listing. Fable: that explains the 4-5 s subfolders but only 5-8 s of the 20 s first open; measure before fixing. Measured on the S24 on 2026-11-21 ([timing](android-review-49f5663c-c745317f.md#timing-on-the-s24-fe-2026-11-21)): our code adds about 0.5 s plus the 2 s count budget; rclone's Drive list varied from 0.7 s to 34.5 s for the same folders, which fits Drive throttling. Confirmed and fixed the same day: Google rate-limited rclone's shared client ID, and the phone had no way to enter the owner's own (the desktop has one). With the phone's new client ID fields and lazy counts, Drive folders show in 0.5-1.3 s on the S24 ([cause](android-review-49f5663c-c745317f.md#cause-found-and-fixed-2026-11-21)). Item 5's progress indicator is still part of the redesign.
 

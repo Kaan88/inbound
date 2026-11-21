@@ -1,5 +1,12 @@
 # Progress — session handoff
 
+## Remote Files redesign: owner decisions, 2026-11-21
+
+With the speed fixes done the redesign starts. The owner chose a full This phone browser with upload, two tabs as two
+panes where either can be any location (the right one the phone by default), and Android conventions: tap a folder to
+open, tap a file for its options, tap the icon to multi-select. Recorded in the
+[matrix](docs/plans/android-mockup-acceptance.md); new states get mockups for the owner's approval before building.
+
 ## Remote Files: rclone stays warm on the phone and Back shows folders at once, 2026-11-21
 
 Review fixes P2, P3, P4 and P5 ([details](docs/plans/android-review-49f5663c-c745317f.md#host-speed-fixes-2026-11-21)):
