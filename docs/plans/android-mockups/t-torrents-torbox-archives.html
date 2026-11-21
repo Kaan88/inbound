@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=412">
+<title>Torrents, TorBox, archives</title>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+<!-- ANDROID.9 states for the owner's approval (2026-11-21). Same tokens and sizes as the a-series and c7.
+     The phone does the work itself; with another host selected (C5) the same screens act on that host.
+     Render one screen per hash (#t1 ... #t7) at 412x892, device scale 3. -->
+<style>
+:root{--bg:#181818;--surface:#202020;--raised:#2a2a2a;--icon:#383838;--line:#343434;--sel:#2b3a4f;--card-blue:#2c3f57;--blue:#4aa3f0;--on-blue:#0e1b2a;
+  --text:#f2f2f2;--muted:#a3a3a3;--danger:#f08a80;--amber:#e0a93e;--green:#7ccf8a;--ok-bg:#1e3a27;--warn-bg:#3d2f14;--violet:#b79cff;--chip:#d3e6fa}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:412px;height:892px;overflow:hidden;background:var(--bg);color:var(--text);font-family:Roboto,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+.screen{position:relative;width:412px;height:892px;display:none;overflow:hidden}
+.screen.on{display:block}
+svg{display:block;flex:none}
+.status{height:36px;display:flex;align-items:center;justify-content:space-between;padding:0 22px 0 24px;font-size:14px}
+.status .r{display:flex;gap:8px;align-items:center}
+.appbar{height:64px;display:flex;align-items:center;padding:0 8px 0 12px;gap:12px}
+.appbar .t{font-size:22px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ib{width:48px;height:48px;display:grid;place-items:center;border-radius:24px;flex:none}
+.pad{padding:0 16px}
+.field{border:1px solid #4a4a4a;border-radius:8px;padding:9px 14px;display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.field .l{font-size:12px;color:var(--muted)}
+.field .v{font-size:15.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.field .txt{flex:1;min-width:0}
+.lbl{font-size:13px;color:var(--muted);margin:12px 0 8px}
+.seg{display:flex;border:1px solid #4a4a4a;border-radius:24px;height:44px;overflow:hidden}
+.seg div{flex:1;display:flex;align-items:center;justify-content:center;gap:8px;font-size:14.5px;font-weight:500}
+.seg div+div{border-left:1px solid #4a4a4a}
+.seg .on{background:var(--sel);color:#dfe9f6}
+.hint{font-size:12.5px;color:var(--muted);line-height:17px;margin:8px 2px 0}
+.banner{border-radius:12px;padding:12px 14px;display:flex;gap:12px;align-items:flex-start;margin-top:12px}
+.banner b{font-weight:500;font-size:14.5px;display:block}
+.banner span{font-size:12.5px;color:#c9d8cc;display:block;margin-top:2px}
+.banner.ok{background:var(--ok-bg)}
+.banner.ok svg{color:var(--green)}
+.banner.warn{background:var(--warn-bg)}
+.banner.warn span{color:#e6d4b4}
+.banner.warn svg{color:var(--amber)}
+.tree{background:var(--surface);border-radius:16px;margin-top:8px;padding:4px 0}
+.tr{height:44px;display:flex;align-items:center;gap:10px;padding:0 14px 0 10px;font-size:14.5px}
+.tr .n{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tr .s{font-size:13px;color:var(--muted)}
+.tr.off .n,.tr.off .s{color:#8a8a8a}
+.cb{width:20px;height:20px;border-radius:5px;border:2px solid #8f8f8f;display:grid;place-items:center;flex:none}
+.cb.on{background:var(--blue);border-color:var(--blue);color:var(--on-blue)}
+.cb.part{background:var(--blue);border-color:var(--blue)}
+.cb.part::after{content:"";width:10px;height:2px;background:var(--on-blue);border-radius:1px}
+.foot{position:absolute;left:0;right:0;bottom:0;height:96px;background:var(--bg);display:flex;align-items:center;gap:12px;padding:0 16px 14px}
+.btn{height:56px;border-radius:28px;display:flex;align-items:center;justify-content:center;gap:10px;font-size:15.5px;font-weight:500;white-space:nowrap}
+.btn.out{border:1px solid #5a5a5a;color:var(--blue);padding:0 24px}
+.btn.fill{background:var(--blue);color:var(--on-blue);flex:1}
+.homebar{position:absolute;left:50%;bottom:6px;width:108px;margin-left:-54px;height:4px;border-radius:2px;background:#e6e6e6}
+.search{height:56px;margin:4px 16px 0;border-radius:28px;background:var(--surface);display:flex;align-items:center;gap:12px;padding:0 8px 0 18px;color:var(--muted);font-size:16px}
+.hostpill{margin-left:auto;height:40px;border-radius:20px;background:var(--sel);color:#dfe9f6;display:flex;align-items:center;gap:6px;padding:0 12px;font-size:14px;font-weight:500}
+.chips{display:flex;gap:8px;padding:12px 16px 4px;white-space:nowrap;overflow:hidden}
+.chip{height:32px;padding:0 12px;border:1px solid var(--line);border-radius:8px;display:flex;align-items:center;font-size:14px;color:#cfcfcf;flex:none}
+.chip.on{background:var(--sel);border-color:var(--sel);color:var(--chip)}
+.card{background:var(--surface);border-radius:18px;margin:8px 16px 0;padding:12px 14px 12px 14px}
+.dl{display:flex;align-items:center;gap:14px}
+.ico{width:40px;height:40px;border-radius:11px;background:var(--icon);display:grid;place-items:center;flex:none}
+.nm{font-size:16px;line-height:21px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500}
+.sb{font-size:13px;color:var(--muted);line-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.txt{min-width:0;flex:1}
+.round{width:40px;height:40px;border-radius:20px;background:var(--sel);display:grid;place-items:center;color:#cfe0f3;flex:none}
+.bar{height:5px;border-radius:3px;background:var(--icon);margin-top:10px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--blue);border-radius:3px}
+.bar.g i{background:var(--green)}
+.bar.a i{background:var(--amber)}
+.g{color:var(--green)}.a{color:var(--amber)}.bl{color:var(--blue)}
+.small-btn{height:36px;padding:0 16px;border-radius:18px;background:var(--blue);color:var(--on-blue);display:flex;align-items:center;font-size:14px;font-weight:500;flex:none}
+.small-btn.tonal{background:var(--sel);color:#dfe9f6}
+.nav{position:absolute;left:0;right:0;bottom:0;height:104px;background:var(--surface);display:flex;padding:10px 0 0}
+.nav div{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;font-size:12.5px;color:var(--muted)}
+.nav .on{color:var(--text);font-weight:500}
+.nav .on svg{background:var(--sel);border-radius:16px;width:64px;padding:4px 20px;height:32px}
+.nav svg{height:32px;width:24px;padding:4px 0}
+.fab{position:absolute;right:16px;bottom:120px;height:56px;border-radius:16px;background:var(--blue);color:var(--on-blue);display:flex;align-items:center;gap:10px;padding:0 20px 0 16px;font-size:16px;font-weight:500}
+.sum{background:var(--card-blue);border-radius:24px;margin:4px 16px 0;padding:18px 18px 18px}
+.big{font-size:46px;font-weight:500;letter-spacing:-1px;line-height:50px}
+.acts{display:flex;gap:10px;margin-top:16px;align-items:center}
+.circ{width:48px;height:48px;border-radius:24px;background:var(--sel);display:grid;place-items:center;color:#dfe9f6;flex:none}
+.tabs{display:flex;margin:10px 16px 0;border-bottom:1px solid var(--line)}
+.tab{flex:1;text-align:center;font-size:14.5px;color:var(--muted);padding:12px 0 11px;position:relative}
+.tab.on{color:var(--blue)}
+.tab.on::after{content:"";position:absolute;bottom:-1px;left:22%;right:22%;height:3px;border-radius:3px 3px 0 0;background:var(--blue)}
+.kv{background:var(--surface);border-radius:18px;margin:12px 16px 0;padding:6px 16px}
+.kv div{display:flex;padding:9px 0;font-size:14.5px}
+.kv div span:first-child{width:118px;color:var(--muted);flex:none}
+.scrim{position:absolute;inset:0;background:rgba(0,0,0,.55)}
+.sheet{position:absolute;left:0;right:0;bottom:0;background:var(--surface);border-radius:28px 28px 0 0;padding:10px 20px 34px}
+.grab{width:32px;height:4px;border-radius:2px;background:#5a5a5a;margin:4px auto 16px}
+.sheet h2{font-size:22px;font-weight:400;margin-bottom:6px}
+.sheet p{font-size:14px;color:var(--muted);line-height:20px}
+.group{font-size:13px;color:var(--blue);font-weight:500;margin:18px 28px 6px}
+.set{background:var(--surface);border-radius:20px;margin:0 16px;overflow:hidden}
+.sr{display:flex;align-items:center;gap:16px;padding:12px 16px;min-height:60px}
+.sr + .sr{border-top:1px solid #2a2a2a}
+.sr .t{font-size:16px}
+.sr .d{font-size:13px;color:var(--muted);line-height:18px;margin-top:1px}
+.sw{width:52px;height:32px;border-radius:16px;border:2px solid #8f8f8f;position:relative;flex:none}
+.sw::after{content:"";position:absolute;left:6px;top:6px;width:16px;height:16px;border-radius:8px;background:#8f8f8f}
+.sw.on{background:var(--blue);border-color:var(--blue)}
+.sw.on::after{left:24px;top:4px;width:24px;height:24px;border-radius:12px;background:var(--on-blue)}
+.chev{color:var(--muted);margin-left:auto}
+.pw{border:2px solid var(--blue);border-radius:8px;padding:8px 14px;margin:16px 0 6px;display:flex;align-items:center}
+.pw .l{font-size:12px;color:var(--blue)}
+.pw .v{font-size:17px;letter-spacing:3px}
+.check{display:flex;align-items:center;gap:12px;font-size:14.5px;margin-top:12px}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute"><defs>
+<symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+<symbol id="i-back" viewBox="0 0 24 24"><path d="M20 12H5M11 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="i-more" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.8" fill="currentColor"/><circle cx="12" cy="12" r="1.8" fill="currentColor"/><circle cx="12" cy="19" r="1.8" fill="currentColor"/></symbol>
+<symbol id="i-paste" viewBox="0 0 24 24"><rect x="6" y="4.5" width="12" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="9" y="3" width="6" height="3.5" rx="1" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
+<symbol id="i-file" viewBox="0 0 24 24"><path d="M7 3h7l5 5v12a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z M14 3v5h5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+<symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4l2 2h9A1.5 1.5 0 0 1 21 9.5v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="i-caret" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="i-right" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="i-torrent" viewBox="0 0 24 24"><circle cx="12" cy="5.5" r="2.3" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="5.5" cy="17.5" r="2.3" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="18.5" cy="17.5" r="2.3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M10.8 7.5l-4.1 7.9M13.2 7.5l4.1 7.9M7.8 17.5h8.4" stroke="currentColor" stroke-width="1.8"/></symbol>
+<symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 3L5 13.5h6L10 21l8-10.5h-6z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+<symbol id="i-zip" viewBox="0 0 24 24"><rect x="6" y="3" width="12" height="18" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M11 3v2h2v2h-2v2h2v2h-2" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="10" y="13" width="4" height="4" rx="1" fill="none" stroke="currentColor" stroke-width="1.6"/></symbol>
+<symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
+<symbol id="i-pause" viewBox="0 0 24 24"><path d="M9 6v12M15 6v12" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></symbol>
+<symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13l10.5-6.5z" fill="currentColor"/></symbol>
+<symbol id="i-stop" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="1.5" fill="none" stroke="currentColor" stroke-width="2"/></symbol>
+<symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 6.5h16M9 6.5V4.5h6v2M6.5 6.5l1 13a1 1 0 0 0 1 .9h7a1 1 0 0 0 1-.9l1-13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="i-down" viewBox="0 0 24 24"><path d="M12 4v11M7 10.5l5 5 5-5M5 20h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6" fill="none" stroke="currentColor" stroke-width="2"/><path d="M15 15l5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+<symbol id="i-phone" viewBox="0 0 24 24"><rect x="6.5" y="2.5" width="11" height="19" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
+<symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 11v5.5M12 7.6v.2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+<symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></symbol>
+<symbol id="i-dl" viewBox="0 0 24 24"><path d="M12 4v11M7 10.5l5 5 5-5M5 20h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="i-queue" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+<symbol id="i-cloud" viewBox="0 0 24 24"><path d="M7 18.5h10.5a4 4 0 0 0 .6-7.95A6 6 0 0 0 6.6 9.6 4.5 4.5 0 0 0 7 18.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+<symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+<symbol id="i-wifi" viewBox="0 0 24 24"><path d="M2.5 9a14 14 0 0 1 19 0M5.5 12.3a9.5 9.5 0 0 1 13 0M8.6 15.5a5 5 0 0 1 6.8 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="19" r="1.4" fill="currentColor"/></symbol>
+<symbol id="i-batt" viewBox="0 0 24 24"><rect x="2.5" y="7" width="17" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="5" y="9.5" width="8" height="5" rx=".8" fill="currentColor"/><path d="M21.5 10.5v3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+<symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="12" r="3.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M11.5 12H21M17.5 12v3M20 12v2.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+<symbol id="i-seed" viewBox="0 0 24 24"><path d="M12 20V5M7 10l5-5 5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+</defs></svg>
+
+<template id="status"><div class="status"><span>9:30</span><span class="r"><svg width="20" height="20"><use href="#i-wifi"/></svg><svg width="22" height="22"><use href="#i-batt"/></svg></span></div></template>
+<template id="nav"><div class="nav"><div class="on"><svg><use href="#i-dl"/></svg>Downloads</div><div><svg><use href="#i-queue"/></svg>Queues</div><div><svg><use href="#i-cloud"/></svg>Remote Files</div><div><svg><use href="#i-gear"/></svg>Settings</div></div></template>
+
+<!-- T1: Add sheet > Torrent file or magnet, on this phone. -->
+<section class="screen" id="t1">
+  <div data-status></div>
+  <div class="appbar"><div class="ib"><svg width="24" height="24"><use href="#i-close"/></svg></div><div class="t">Add torrent</div></div>
+  <div class="pad">
+    <div class="field"><div class="txt"><div class="l">Magnet or .torrent file</div><div class="v">magnet:?xt=urn:btih:…&amp;dn=Blender open movies</div></div><svg width="22" height="22" style="color:var(--muted)"><use href="#i-file"/></svg></div>
+    <div class="lbl" style="margin-top:4px">Download with</div>
+    <div class="seg"><div class="on"><svg width="18" height="18"><use href="#i-check"/></svg>This phone</div><div>TorBox</div></div>
+    <div class="hint">Peers see this phone's IP address, and it uploads to them while it downloads. Wi-Fi only, as set in Settings.</div>
+    <div class="banner ok"><svg width="22" height="22"><use href="#i-check"/></svg><div><b>30 files · 41.7 GB</b><span>File list found through 34 peers</span></div></div>
+    <div class="lbl">Files · 12 of 30 · 14.9 GB</div>
+    <div class="tree">
+      <div class="tr"><div class="cb part"></div><svg width="20" height="20" style="color:var(--amber)"><use href="#i-folder"/></svg><span class="n">Blender open movies</span><span class="s">41.7 GB</span></div>
+      <div class="tr" style="padding-left:34px"><div class="cb on"><svg width="14" height="14"><use href="#i-check"/></svg></div><svg width="20" height="20" style="color:var(--amber)"><use href="#i-folder"/></svg><span class="n">Sprite Fright</span><span class="s">6.8 GB</span></div>
+      <div class="tr" style="padding-left:34px"><div class="cb on"><svg width="14" height="14"><use href="#i-check"/></svg></div><svg width="20" height="20" style="color:var(--amber)"><use href="#i-folder"/></svg><span class="n">Charge</span><span class="s">5.1 GB</span></div>
+      <div class="tr off" style="padding-left:34px"><div class="cb"></div><svg width="20" height="20" style="color:#8a7440"><use href="#i-folder"/></svg><span class="n">Cosmos Laundromat</span><span class="s">12.3 GB</span></div>
+      <div class="tr off" style="padding-left:34px"><div class="cb"></div><svg width="20" height="20" style="color:#8a7440"><use href="#i-folder"/></svg><span class="n">Spring</span><span class="s">8.9 GB</span></div>
+    </div>
+    <div class="field" style="margin-top:12px"><div class="txt"><div class="l">Save to</div><div class="v">Downloads/Inbound/Torrents</div></div><svg width="22" height="22" style="color:var(--muted)"><use href="#i-folder"/></svg></div>
+  </div>
+  <div class="foot"><div class="btn out">Cancel</div><div class="btn fill"><svg width="20" height="20"><use href="#i-down"/></svg>Download 14.9 GB</div></div>
+  <div class="homebar"></div>
+</section>
+
+<!-- T2: the same screen with TorBox chosen: TorBox fetches, the phone downloads over HTTPS. -->
+<section class="screen" id="t2">
+  <div data-status></div>
+  <div class="appbar"><div class="ib"><svg width="24" height="24"><use href="#i-close"/></svg></div><div class="t">Add torrent</div></div>
+  <div class="pad">
+    <div class="field"><div class="txt"><div class="l">Magnet or .torrent file</div><div class="v">magnet:?xt=urn:btih:…&amp;dn=debian-13.2.0-amd64</div></div><svg width="22" height="22" style="color:var(--muted)"><use href="#i-file"/></svg></div>
+    <div class="lbl" style="margin-top:4px">Download with</div>
+    <div class="seg"><div>This phone</div><div class="on"><svg width="18" height="18"><use href="#i-check"/></svg>TorBox</div></div>
+    <div class="hint">TorBox fetches it with your account; this phone then downloads the files over HTTPS and uploads nothing.</div>
+    <div class="banner ok"><svg width="22" height="22"><use href="#i-bolt"/></svg><div><b>Ready on TorBox · 3 files · 3.9 GB</b><span>Downloads start at once</span></div></div>
+    <div class="lbl">Files · 1 of 3 · 3.9 GB</div>
+    <div class="tree">
+      <div class="tr"><div class="cb on"><svg width="14" height="14"><use href="#i-check"/></svg></div><svg width="20" height="20" style="color:var(--muted)"><use href="#i-file"/></svg><span class="n">debian-13.2.0-amd64-DVD-1.iso</span><span class="s">3.9 GB</span></div>
+      <div class="tr off"><div class="cb"></div><svg width="20" height="20" style="color:#7a7a7a"><use href="#i-file"/></svg><span class="n">SHA256SUMS</span><span class="s">1 KB</span></div>
+      <div class="tr off"><div class="cb"></div><svg width="20" height="20" style="color:#7a7a7a"><use href="#i-file"/></svg><span class="n">SHA256SUMS.sign</span><span class="s">1 KB</span></div>
+    </div>
+    <div class="banner warn" style="margin-top:14px"><svg width="22" height="22"><use href="#i-info"/></svg><div><b>If TorBox doesn't have it yet</b><span>It fetches it first; the download waits on the list as "On TorBox" and starts by itself when it's ready.</span></div></div>
+    <div class="field" style="margin-top:12px"><div class="txt"><div class="l">Save to</div><div class="v">Downloads/Inbound/Disc images</div></div><svg width="22" height="22" style="color:var(--muted)"><use href="#i-folder"/></svg></div>
+  </div>
+  <div class="foot"><div class="btn out">Cancel</div><div class="btn fill"><svg width="20" height="20"><use href="#i-bolt"/></svg>Send to TorBox</div></div>
+  <div class="homebar"></div>
+</section>
+
+<!-- T3: Downloads with torrents, a TorBox job and archives. -->
+<section class="screen" id="t3">
+  <div data-status></div>
+  <div class="search"><svg width="22" height="22"><use href="#i-search"/></svg>Search downloads<div class="hostpill"><svg width="18" height="18"><use href="#i-phone"/></svg>This phone<svg width="16" height="16"><use href="#i-caret"/></svg></div></div>
+  <div class="chips"><div class="chip on">All 14</div><div class="chip">Active 3</div><div class="chip">Torrents 3</div><div class="chip">Finished 8</div><div class="chip">Failed</div></div>
+  <div class="card"><div class="dl"><div class="ico" style="color:var(--blue)"><svg width="22" height="22"><use href="#i-torrent"/></svg></div><div class="txt"><div class="nm">debian-13.2.0-amd64-DVD-1.iso</div><div class="sb">2.5 of 3.9 GB · ↓ 18.6 MB/s · ↑ 1.2 MB/s · 48 seeds</div></div><div class="round"><svg width="20" height="20"><use href="#i-pause"/></svg></div></div><div class="bar"><i style="width:64%"></i></div></div>
+  <div class="card"><div class="dl"><div class="ico" style="color:var(--green)"><svg width="22" height="22"><use href="#i-torrent"/></svg></div><div class="txt"><div class="nm">archlinux-2026.11.01-x86_64.iso</div><div class="sb"><span class="g">Seeding</span> · ↑ 640 KB/s · ratio 0.71 of 1.0</div></div><div class="round"><svg width="20" height="20"><use href="#i-stop"/></svg></div></div><div class="bar g"><i style="width:71%"></i></div></div>
+  <div class="card"><div class="dl"><div class="ico" style="color:var(--violet)"><svg width="22" height="22"><use href="#i-bolt"/></svg></div><div class="txt"><div class="nm">Blender open movies</div><div class="sb"><span class="bl">On TorBox</span> · 37% · then to this phone</div></div><div class="round"><svg width="20" height="20"><use href="#i-pause"/></svg></div></div><div class="bar"><i style="width:37%;background:var(--violet)"></i></div></div>
+  <div class="card"><div class="dl"><div class="ico" style="color:var(--amber)"><svg width="22" height="22"><use href="#i-zip"/></svg></div><div class="txt"><div class="nm">field-recordings-vol3.zip</div><div class="sb"><span class="a">Extracting</span> · 18 of 40 files · 42%</div></div></div><div class="bar a"><i style="width:42%"></i></div></div>
+  <div class="card"><div class="dl"><div class="ico" style="color:var(--amber)"><svg width="22" height="22"><use href="#i-lock"/></svg></div><div class="txt"><div class="nm">project-files.part1.rar</div><div class="sb"><span class="a">Needs a password</span> · 3 parts · 2.1 GB</div></div><div class="small-btn tonal">Enter</div></div></div>
+  <div class="fab"><svg width="22" height="22"><use href="#i-plus"/></svg>Add</div>
+  <div data-nav></div>
+  <div class="homebar"></div>
+</section>
+
+<!-- T4: torrent Details (A6 layout) with Overview, Files, Peers, Trackers. -->
+<section class="screen" id="t4">
+  <div data-status></div>
+  <div class="appbar"><div class="ib"><svg width="24" height="24"><use href="#i-back"/></svg></div><div class="t">debian-13.2.0-amd64-DVD-1.iso</div><div class="ib"><svg width="24" height="24"><use href="#i-more"/></svg></div></div>
+  <div class="sum">
+    <div style="display:flex;gap:14px;align-items:center"><div class="big">64%</div><div><div style="font-size:16px;font-weight:500">↓ 18.6 MB/s · ↑ 1.2 MB/s</div><div class="sb" style="color:#c3d0de">2.5 of 3.9 GB · 1 min 18 s left</div></div></div>
+    <div class="bar" style="height:8px;background:#22324a"><i style="width:64%"></i></div>
+    <div class="acts"><div class="btn fill" style="height:48px;border-radius:24px;font-size:15px"><svg width="20" height="20"><use href="#i-pause"/></svg>Pause</div><div class="circ"><svg width="20" height="20"><use href="#i-stop"/></svg></div><div class="circ"><svg width="20" height="20"><use href="#i-trash"/></svg></div></div>
+  </div>
+  <div class="tabs"><div class="tab on">Overview</div><div class="tab">Files</div><div class="tab">Peers</div><div class="tab">Trackers</div></div>
+  <div class="kv">
+    <div><span>Seeds</span><span>48 of 212</span></div>
+    <div><span>Peers</span><span>9 of 31</span></div>
+    <div><span>Ratio</span><span>0.08 · seed until 1.0 or 48 h</span></div>
+    <div><span>Pieces</span><span>10,124 of 15,820</span></div>
+    <div><span>Saved to</span><span>Downloads/Inbound/Disc images</span></div>
+    <div><span>Network</span><span>Wi-Fi only · port 51413</span></div>
+    <div><span>Added</span><span>Today 14:01, magnet</span></div>
+  </div>
+  <div class="homebar"></div>
+</section>
+
+<!-- T5: My TorBox (Add sheet > TorBox, or Settings > TorBox). -->
+<section class="screen" id="t5">
+  <div data-status></div>
+  <div class="appbar"><div class="ib"><svg width="24" height="24"><use href="#i-back"/></svg></div><div class="t">TorBox</div><div class="ib"><svg width="24" height="24"><use href="#i-search"/></svg></div><div class="ib"><svg width="24" height="24"><use href="#i-more"/></svg></div></div>
+  <div class="chips" style="padding-top:2px"><div class="chip on">All 6</div><div class="chip">Ready 4</div><div class="chip">On TorBox 1</div><div class="chip">Failed 1</div></div>
+  <div class="card"><div class="dl"><div class="ico" style="color:var(--violet)"><svg width="22" height="22"><use href="#i-torrent"/></svg></div><div class="txt"><div class="nm">Blender open movies</div><div class="sb"><span class="bl">Fetching</span> · 37% · 30 files · 41.7 GB</div></div></div><div class="bar"><i style="width:37%;background:var(--violet)"></i></div></div>
+  <div class="card"><div class="dl"><div class="ico" style="color:var(--violet)"><svg width="22" height="22"><use href="#i-torrent"/></svg></div><div class="txt"><div class="nm">debian-13.2.0-amd64</div><div class="sb"><span class="g">Ready</span> · 3 files · 3.9 GB · <span class="g">on this phone</span></div></div><div class="round"><svg width="20" height="20"><use href="#i-right"/></svg></div></div></div>
+  <div class="card"><div class="dl"><div class="ico" style="color:var(--violet)"><svg width="22" height="22"><use href="#i-file"/></svg></div><div class="txt"><div class="nm">conference-talk-1080p.mp4</div><div class="sb"><span class="g">Ready</span> · web download · 1.4 GB</div></div><div class="small-btn"><svg width="16" height="16" style="margin-right:6px"><use href="#i-down"/></svg>Get</div></div></div>
+  <div class="card"><div class="dl"><div class="ico" style="color:var(--violet)"><svg width="22" height="22"><use href="#i-torrent"/></svg></div><div class="txt"><div class="nm">internet-archive-public-domain-audio</div><div class="sb"><span class="g">Ready</span> · 212 files · 8.8 GB</div></div><div class="small-btn"><svg width="16" height="16" style="margin-right:6px"><use href="#i-down"/></svg>Get</div></div></div>
+  <div class="card"><div class="dl"><div class="ico" style="color:var(--violet)"><svg width="22" height="22"><use href="#i-file"/></svg></div><div class="txt"><div class="nm">dataset-2026-11.tar.zst</div><div class="sb"><span class="g">Ready</span> · web download · 640 MB</div></div><div class="small-btn"><svg width="16" height="16" style="margin-right:6px"><use href="#i-down"/></svg>Get</div></div></div>
+  <div class="card"><div class="dl"><div class="ico" style="color:var(--danger)"><svg width="22" height="22"><use href="#i-torrent"/></svg></div><div class="txt"><div class="nm">old-mirror-snapshot</div><div class="sb"><span style="color:var(--danger)">Failed on TorBox</span> · no peers</div></div><div class="round"><svg width="20" height="20"><use href="#i-trash"/></svg></div></div></div>
+  <div class="hint" style="padding:14px 28px 0">Get picks the files and adds them to Downloads. Tap an item for its files; long-press for Delete from TorBox.</div>
+  <div class="homebar"></div>
+</section>
+
+<!-- T6: an archive that needs a password. -->
+<section class="screen" id="t6">
+  <div data-status></div>
+  <div class="search"><svg width="22" height="22"><use href="#i-search"/></svg>Search downloads<div class="hostpill"><svg width="18" height="18"><use href="#i-phone"/></svg>This phone<svg width="16" height="16"><use href="#i-caret"/></svg></div></div>
+  <div class="chips"><div class="chip on">All 14</div><div class="chip">Active 3</div><div class="chip">Torrents 3</div><div class="chip">Finished 8</div></div>
+  <div class="card"><div class="dl"><div class="ico" style="color:var(--amber)"><svg width="22" height="22"><use href="#i-lock"/></svg></div><div class="txt"><div class="nm">project-files.part1.rar</div><div class="sb"><span class="a">Needs a password</span> · 3 parts · 2.1 GB</div></div><div class="small-btn tonal">Enter</div></div></div>
+  <div class="scrim"></div>
+  <div class="sheet">
+    <div class="grab"></div>
+    <h2>Archive password</h2>
+    <p>project-files.part1.rar (3 parts). The 3 saved passwords didn't open it.</p>
+    <div class="pw"><div class="txt"><div class="l">Password</div><div class="v">••••••••••</div></div><svg width="22" height="22" style="color:var(--muted)"><use href="#i-key"/></svg></div>
+    <div class="check"><div class="cb on"><svg width="14" height="14"><use href="#i-check"/></svg></div>Save it for other archives</div>
+    <div class="check"><div class="cb"></div>Delete the archive after extracting</div>
+    <div class="sb" style="margin-top:14px;white-space:normal">Extracts to Downloads/Inbound/project-files</div>
+    <div style="display:flex;gap:12px;margin-top:18px"><div class="btn out" style="flex:1">Not now</div><div class="btn fill">Extract</div></div>
+  </div>
+  <div class="homebar"></div>
+</section>
+
+<!-- T7: Settings > Torrents, TorBox and archives (a new C7 entry). -->
+<section class="screen" id="t7">
+  <div data-status></div>
+  <div class="appbar"><div class="ib"><svg width="24" height="24"><use href="#i-back"/></svg></div><div class="t">Torrents, TorBox, archives</div></div>
+  <div class="group" style="margin-top:4px">Torrents on this phone</div>
+  <div class="set">
+    <div class="sr"><div class="txt"><div class="t">Download torrents here</div><div class="d">Off: magnets go to TorBox</div></div><div class="sw on"></div></div>
+    <div class="sr"><div class="txt"><div class="t">Wi-Fi only</div><div class="d">Peers never use mobile data</div></div><div class="sw on"></div></div>
+    <div class="sr"><div class="txt"><div class="t">Seeding</div><div class="d">Until ratio 1.0 or 48 hours, Wi-Fi and charging</div></div><svg class="chev" width="20" height="20"><use href="#i-right"/></svg></div>
+    <div class="sr"><div class="txt"><div class="t">Connections and limits</div><div class="d">Port 51413, DHT, encryption, speed</div></div><svg class="chev" width="20" height="20"><use href="#i-right"/></svg></div>
+  </div>
+  <div class="group">TorBox</div>
+  <div class="set">
+    <div class="sr"><div class="txt"><div class="t">Account</div><div class="d">Key saved in the Android keystore</div></div><div class="small-btn tonal">Change</div></div>
+    <div class="sr"><div class="txt"><div class="t">Send magnets to TorBox first</div><div class="d">Add torrent opens with TorBox chosen</div></div><div class="sw"></div></div>
+  </div>
+  <div class="group">Archives</div>
+  <div class="set">
+    <div class="sr"><div class="txt"><div class="t">Extract when finished</div><div class="d">zip, rar, 7z, tar and split sets</div></div><div class="sw on"></div></div>
+    <div class="sr"><div class="txt"><div class="t">Delete the archive after extracting</div></div><div class="sw"></div></div>
+    <div class="sr"><div class="txt"><div class="t">Saved passwords</div><div class="d">3, tried in order</div></div><svg class="chev" width="20" height="20"><use href="#i-right"/></svg></div>
+  </div>
+  <div class="homebar"></div>
+</section>
+
+<script>
+const st = document.getElementById('status').innerHTML, nv = document.getElementById('nav').innerHTML;
+document.querySelectorAll('[data-status]').forEach(el => el.outerHTML = st);
+document.querySelectorAll('[data-nav]').forEach(el => el.outerHTML = nv);
+const show = () => { const id = (location.hash || '#t1').slice(1); document.querySelectorAll('.screen').forEach(s => s.classList.toggle('on', s.id === id)); };
+addEventListener('hashchange', show); show();
+</script>
+</body>
+</html>

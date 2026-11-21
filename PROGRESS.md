@@ -5,6 +5,9 @@
 "great mockups, I approve. but leave the redesign for last and just implement remaining missing big features."
 Mockups r1-r6 are approved. The Remote Files redesign now comes after the remaining big features; the next one is
 ANDROID.9 (TorBox, torrents, archives).
+Owner decisions the same day: the phone runs TorBox, torrents and archive extraction in its own Host, and the same
+screens control a paired PC or server when one is selected ("Both"; replaces the unapproved controller-only plan in
+the `android-app` copy). Mockups first, for the owner's approval.
 
 ## Remote Files redesign: owner decisions, 2026-11-21
 
