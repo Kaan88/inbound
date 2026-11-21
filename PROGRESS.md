@@ -15,9 +15,9 @@ start ticked; a paired host refuses a new key from the phone (enter it on that h
 after Android ends the app. The settings line said "Key saved in the Android keystore" as the mockup does, but the phone
 Host keeps the key encrypted with its own key file, not the Keystore; it now says "Key saved on this phone, encrypted"
 until the owner decides. The 7-Zip build for the archives step (`7zzs`, static arm64) ran on the S24 and is pinned in
-the APK check. Open: TorBox answers the phone's cache check with AUTH_ERROR, so Add torrent shows "Couldn't check TorBox's cache"
-(as the desktop does when a check fails) and the cache-hit screen is not yet seen on real data. The phone stores and
-reads the key the same way as its other secrets; the owner is asked to paste the key again. Keyboard spaces in a magnet
+the APK check. An AUTH_ERROR seen first was a wrong key (owner). With the right key, on the S24 with real data, nothing sent: a cached
+magnet shows "Ready on TorBox · 3 files · 276 MB" with its file tree, an unknown one "Not on TorBox yet", and logcat from
+the app holds no key (captures `t-add-hit`, `t-add-miss` in `artifacts/android-app/pairs/android9-torbox-20261121/`). Keyboard spaces in a magnet
 (Samsung's keyboard adds one after "?") are now dropped.
 
 ## Owner: redesign mockups approved, redesign moved to last, 2026-11-21
