@@ -577,7 +577,7 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
         catch (Exception ex) when (ex is RemoteProviderException or HttpRequestException or IOException ||
                                    (ex is OperationCanceledException && !cancellationToken.IsCancellationRequested))
         {
-            _log?.Invoke($"A cache check before adding failed: {ex.GetType().Name}.");
+            _log?.Invoke($"A cache check before adding failed: {ex.GetType().Name}{(ex is RemoteProviderException failure ? $" ({failure.Kind}{(failure.ProviderCode is { } code ? ", " + code : "")})" : "")}.");
             return classified;
         }
     }

@@ -7,7 +7,18 @@ The owner approved mockups t1-t7 ("Approved, build them"). Order: TorBox (plain 
 of each screen against a paired PC or server, then the side-by-side comparison on the phone and a Fable review.
 Step 1 committed (`7d668412`): the phone's Host composes TorBox as the desktop does (provider, remote jobs, commands;
 logcat masks the key and signed links), and the TorBox client no longer serializes by reflection (NativeAOT). TorBox
-tests pass (323). Screens are being built.
+tests pass (323). Step 2, TorBox screens (Add torrent with TorBox, My TorBox, the key sheet, the settings page; t2, t5,
+t7's TorBox group): built and tried on the S24 with the owner's key, which the owner typed on the phone. Not yet in this
+step, recorded for the owner: the field takes a magnet only (the .torrent picker comes with the torrents step); the
+"Send magnets to TorBox first" switch is saved but has no effect until torrents exist; all files of a cached torrent
+start ticked; a paired host refuses a new key from the phone (enter it on that host); an open Add torrent is not restored
+after Android ends the app. The settings line said "Key saved in the Android keystore" as the mockup does, but the phone
+Host keeps the key encrypted with its own key file, not the Keystore; it now says "Key saved on this phone, encrypted"
+until the owner decides. The 7-Zip build for the archives step (`7zzs`, static arm64) ran on the S24 and is pinned in
+the APK check. Open: TorBox answers the phone's cache check with AUTH_ERROR, so Add torrent shows "Couldn't check TorBox's cache"
+(as the desktop does when a check fails) and the cache-hit screen is not yet seen on real data. The phone stores and
+reads the key the same way as its other secrets; the owner is asked to paste the key again. Keyboard spaces in a magnet
+(Samsung's keyboard adds one after "?") are now dropped.
 
 ## Owner: redesign mockups approved, redesign moved to last, 2026-11-21
 

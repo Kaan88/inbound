@@ -27,6 +27,7 @@ internal sealed class HostSettingsScreen : IDisposable
     private readonly List<View> _controls = new();
     private readonly List<View> _categoryRows = new();
     private readonly View _categoryCard;
+    private readonly View _torBoxRow = null!;
     private View? _page;
     private TextView? _error;
     private Android.App.Dialog? _dialog;
@@ -58,6 +59,11 @@ internal sealed class HostSettingsScreen : IDisposable
             NavigationRow(rows, "Site logins", "Manage sign-ins in Remote Files", Resource.Drawable.ic_settings_site_key,
                 activity.OpenRemoteFilesSource);
         NavigationRow(rows, "Hosts and web UI", "Select or pair a Host", Resource.Drawable.ic_flow_host, () => OpenDetail("hosts"));
+        // Offered only while the shown Host answers remote.* (its hello says so); the hello can come after this screen is built.
+        NavigationRow(rows, TorBoxSettingsPage.Title, "TorBox account and sending magnets", Resource.Drawable.ic_flow_bolt, () => activity.OpenTorBoxSettings());
+        _torBoxRow = _categoryRows[^1];
+        ShowTorBoxRow();
+        downloads.HostHelloChanged += ShowTorBoxRow;
         downloads.SettingsChanged += Refresh;
     }
 
@@ -96,12 +102,20 @@ internal sealed class HostSettingsScreen : IDisposable
         _categoryRows.Add(row);
     }
 
+    private bool TorBoxOffered => DownloadManager.Mobile.TorBox.TorBoxClient.Offered(_downloads.Hello);
+
+    private void ShowTorBoxRow()
+    {
+        if (_disposed) return;
+        _torBoxRow.Visibility = TorBoxOffered ? ViewStates.Visible : ViewStates.Gone;
+    }
+
     public void FilterCategories(string query)
     {
         bool any = false;
         foreach (var row in _categoryRows)
         {
-            bool matches = row.ContentDescription?.Contains(query, StringComparison.OrdinalIgnoreCase) == true;
+            bool matches = row.ContentDescription?.Contains(query, StringComparison.OrdinalIgnoreCase) == true && (row != _torBoxRow || TorBoxOffered);
             row.Visibility = matches ? ViewStates.Visible : ViewStates.Gone;
             any |= matches;
         }
@@ -461,7 +475,7 @@ internal sealed class HostSettingsScreen : IDisposable
     }
     public void Dispose()
     {
-        if (_disposed) return; _disposed = true; _downloads.SettingsChanged -= Refresh; _life.Cancel(); _dialog?.Dismiss(); _dialog = null; _life.Dispose();
+        if (_disposed) return; _disposed = true; _downloads.SettingsChanged -= Refresh; _downloads.HostHelloChanged -= ShowTorBoxRow; _life.Cancel(); _dialog?.Dismiss(); _dialog = null; _life.Dispose();
         _render.Clear(); _controls.Clear(); _page = null; OpenDetailId = null;
     }
 }

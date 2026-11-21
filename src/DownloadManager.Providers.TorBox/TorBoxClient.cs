@@ -211,7 +211,7 @@ public sealed class TorBoxClient :
         foreach (var chunk in hashes.Distinct(StringComparer.OrdinalIgnoreCase).Chunk(100))
         {
             var hashList = new JsonArray();
-            foreach (var hash in chunk) hashList.Add(hash);
+            foreach (var hash in chunk) hashList.Add(JsonValue.Create(hash));
             using var body = new StringContent(new JsonObject { ["hashes"] = hashList }.ToJsonString(), Encoding.UTF8, "application/json");
             using var document = await SendAsync(HttpMethod.Post, $"{Family(kind)}/checkcached?format=object&list_files={(listFiles ? "true" : "false")}", body, false, cancellationToken).ConfigureAwait(false);
             var data = Data(document);

@@ -18,3 +18,18 @@ These files are unmodified, from 7-Zip 26.04 x64, taken from the official releas
 To update: replace the four files from a newer official release, update this table, and run
 the Archives tests. The build copies them to `tools\7-Zip` next to every program that
 references `DownloadManager.Archives`.
+
+## Android (ANDROID.9)
+
+The phone app extracts with the official static Linux build for arm64, `7zzs`, unmodified, from 7-Zip 26.04's
+`https://www.7-zip.org/a/7z2604-linux-arm64.tar.xz` (archive SHA-256
+`5b0ac3aa91c1e3499f011d6af69d7f6b4de3ef2f011d9e2ff44c58ebd04aa388`, the same file the Docker image pins). The
+dynamically linked `7zz` in the same archive needs glibc, which Android doesn't have; `7zzs` ran on the owner's Galaxy
+S24 FE (Android 16) on 2026-11-21. The APK carries it as `lib/arm64-v8a/lib7zz.so`, because Android only runs programs
+from the app's native library folder. The build takes it from `artifacts/android-app/7zip/arm64-v8a/lib7zz.so`
+(ignored by git) and refuses any other bytes.
+
+| File | SHA-256 |
+| --- | --- |
+| 7zzs (shipped as lib7zz.so) | 8f34c72fa4a9a79282b2364308f75d77a928ddf571292a7d030825e53d60e3a7 |
+| android/License.txt (the Linux build's own, shipped as `assets/licenses/7-zip.txt`) | 1790374e5352329cedb46ee3808930a88e9ca2f08b82b10fcf5cf605d2c301b1 |

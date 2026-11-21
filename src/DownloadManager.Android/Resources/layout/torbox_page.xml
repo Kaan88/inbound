@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/torbox_root" android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:background="?android:colorBackground">
+  <LinearLayout android:id="@+id/torbox_top" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="64dp" android:orientation="horizontal" android:gravity="center_vertical" android:paddingLeft="8dp" android:paddingRight="8dp">
+    <ImageButton android:id="@+id/torbox_back" android:layout_width="48dp" android:layout_height="48dp" android:src="@drawable/ic_arrow_back" android:background="?attr/selectableItemBackgroundBorderless" android:contentDescription="Back" />
+    <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginLeft="8dp" android:text="TorBox" android:textAppearance="?attr/textAppearanceTitleLarge" android:textColor="?attr/colorOnSurface" android:accessibilityHeading="true" />
+    <ImageButton android:id="@+id/torbox_search" android:layout_width="48dp" android:layout_height="48dp" android:src="@drawable/ic_search" android:background="?attr/selectableItemBackgroundBorderless" android:contentDescription="Search TorBox" />
+    <ImageButton android:id="@+id/torbox_more" android:layout_width="48dp" android:layout_height="48dp" android:src="@drawable/ic_more" android:background="?attr/selectableItemBackgroundBorderless" android:contentDescription="More actions" />
+  </LinearLayout>
+  <EditText android:id="@+id/torbox_search_input" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginLeft="16dp" android:layout_marginRight="16dp"
+      android:hint="Search TorBox" android:inputType="text" android:singleLine="true" android:imeOptions="actionSearch" android:visibility="gone" />
+  <HorizontalScrollView android:layout_width="match_parent" android:layout_height="wrap_content" android:scrollbars="none" android:layout_marginTop="2dp" android:clipToPadding="false" android:paddingLeft="16dp" android:paddingRight="16dp">
+    <com.google.android.material.chip.ChipGroup android:id="@+id/torbox_chips" android:layout_width="wrap_content" android:layout_height="wrap_content" app:singleLine="true" app:singleSelection="true" app:selectionRequired="true" app:chipSpacingHorizontal="6dp" />
+  </HorizontalScrollView>
+  <TextView android:id="@+id/torbox_error" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginLeft="16dp" android:layout_marginRight="16dp" android:layout_marginTop="8dp" android:visibility="gone" android:accessibilityLiveRegion="polite" android:textColor="?attr/colorError" android:textAppearance="?attr/textAppearanceBodyMedium" />
+  <ScrollView android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:fillViewport="false">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingLeft="16dp" android:paddingRight="16dp" android:paddingTop="4dp" android:paddingBottom="24dp">
+      <LinearLayout android:id="@+id/torbox_list" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" />
+      <TextView android:id="@+id/torbox_empty" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="24dp" android:visibility="gone" android:gravity="center" android:textAppearance="?attr/textAppearanceBodyMedium" android:textColor="?attr/colorOnSurfaceVariant" />
+      <TextView android:id="@+id/torbox_hint" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="14dp" android:paddingLeft="12dp" android:paddingRight="12dp" android:textAppearance="?attr/textAppearanceBodyMedium" android:textSize="13sp" android:textColor="?attr/colorOnSurfaceVariant" />
+    </LinearLayout>
+  </ScrollView>
+</LinearLayout>

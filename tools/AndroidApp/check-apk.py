@@ -1,6 +1,6 @@
 # Checks an Inbound APK before it goes to a phone or the owner (2026-11-18: a release APK from a stale obj folder had no
 # net.dot.jni.nativeaot.NativeAotRuntimeProvider and crashed at start).
-#   python -I tools/AndroidApp/check-apk.py <apk> [--release] [--bundled-rclone]
+#   python -I tools/AndroidApp/check-apk.py <apk> [--release] [--bundled-rclone] [--bundled-7zip]
 # Fails unless: the runtime provider class and our activity are in the dex; the native library exports the TLS trust
 # callback; the launcher icon is there; with --release, the test hooks are not in the native library.
 import hashlib, sys, zipfile
@@ -19,6 +19,13 @@ if release:
                         "InboundRcloneProbe", "hold_remote_files_publication", "remote_files_fixture_port")
              if w.encode("utf-16-le") in so or w.encode() in so]
     checks["no test hooks"] = not hooks
+if "--bundled-7zip" in sys.argv:
+    seven = "lib/arm64-v8a/lib7zz.so"
+    seven_license = "assets/licenses/7-zip.txt"
+    checks["only one packaged 7-Zip, arm64"] = [n for n in names if n.endswith("/lib7zz.so")] == [seven]
+    checks["pinned 7-Zip bytes"] = seven in names and hashlib.sha256(z.read(seven)).hexdigest() == (
+        "8f34c72fa4a9a79282b2364308f75d77a928ddf571292a7d030825e53d60e3a7")
+    checks["7-Zip license"] = seven_license in names and b"GNU LGPL" in z.read(seven_license)
 if "--bundled-rclone" in sys.argv:
     binary = "lib/arm64-v8a/librclone.so"
     license_path = "assets/licenses/rclone.txt"

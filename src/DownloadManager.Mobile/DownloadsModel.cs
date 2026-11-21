@@ -80,6 +80,9 @@ public sealed class DownloadsModel : IDisposable
     /// <summary>Raised on the UI thread after <see cref="Settings"/> changed: the snapshot's, then each settings.changed frame's.</summary>
     public event Action? SettingsChanged;
 
+    /// <summary>Raised on the UI thread for each remote.changed push (a TorBox job or the account changed), from a Host that answers remote.*.</summary>
+    public event Action<RemoteChangedDto>? RemoteChanged;
+
     /// <summary>Opens the session; the snapshot arrives as a frame and is shown through <see cref="Rows"/>.</summary>
     public async Task StartAsync(CancellationToken cancellationToken)
     {
@@ -121,6 +124,13 @@ public sealed class DownloadsModel : IDisposable
                 ApplySettings(settings);
                 SettingsChanged?.Invoke();
             });
+        }
+        else if (m.Type == MessageTypes.RemoteChanged)
+        {
+            RemoteChangedDto change;
+            try { change = m.GetPayload<RemoteChangedDto>(); }
+            catch (Exception e) when (e is System.IO.InvalidDataException or System.Text.Json.JsonException) { return; }
+            _post(() => { if (!Disposed) RemoteChanged?.Invoke(change); });
         }
         else if (m.Type == MessageTypes.JobEvent && _gotSnapshot)
         {

@@ -61,8 +61,8 @@ if ($LASTEXITCODE -ne 0) { throw "dotnet $verb failed ($LASTEXITCODE)" }
 if ($ReleaseSigning) {
     $inputApk = Join-Path $publishDir "app.inbound.android-Signed.apk"
     if (-not (Test-Path -LiteralPath $inputApk -PathType Leaf)) { throw "No new build APK at $inputApk" }
-    & python -I (Join-Path $root "tools/AndroidApp/check-apk.py") $inputApk --release --bundled-rclone
-    if ($LASTEXITCODE -ne 0) { throw "Bundled rclone APK verification failed; refusing to sign." }
+    & python -I (Join-Path $root "tools/AndroidApp/check-apk.py") $inputApk --release --bundled-rclone --bundled-7zip
+    if ($LASTEXITCODE -ne 0) { throw "Bundled rclone or 7-Zip APK verification failed; refusing to sign." }
     $apk = Join-Path $signedOutput "Inbound-android-release.apk"
     & python -I (Join-Path $root "tools/AndroidApp/release-apk.py") sign $apk --input $inputApk --keystore $keystore --password-file $passwordFile --java-sdk $JavaSdkDirectory --android-sdk $AndroidSdkDirectory
     if ($LASTEXITCODE -ne 0) { throw "Release APK signing/verification failed." }
@@ -75,7 +75,7 @@ else {
     if ($Mode -eq 'phone') {
         $checkArguments = @('-I', (Join-Path $root 'tools/AndroidApp/check-apk.py'), $apk)
         if (-not $TestBuild) { $checkArguments += '--release' }
-        if ($checkBundledRclone) { $checkArguments += '--bundled-rclone' }
+        if ($checkBundledRclone) { $checkArguments += '--bundled-rclone'; $checkArguments += '--bundled-7zip' }
         & python @checkArguments
         if ($LASTEXITCODE -ne 0) { throw 'NativeAOT APK verification failed; do not install or distribute this artifact.' }
     }

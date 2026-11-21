@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using DownloadManager.Core.Archives;
 using DownloadManager.Core;
 
@@ -332,7 +333,7 @@ internal sealed class PlacementLog : IDisposable
     public void Record(PlacementEntry entry)
     {
         _stream ??= new FileStream(_path, FileMode.Append, FileAccess.Write, FileShare.Read, 4096, FileOptions.WriteThrough);
-        _stream.Write(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(entry) + "\n"));
+        _stream.Write(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(entry, ArchivesJsonContext.Default.PlacementEntry) + "\n"));
         _stream.Flush(flushToDisk: true);
     }
 
@@ -346,7 +347,7 @@ internal sealed class PlacementLog : IDisposable
         {
             try
             {
-                if (JsonSerializer.Deserialize<PlacementEntry>(line) is { } entry) entries.Add(entry);
+                if (JsonSerializer.Deserialize(line, ArchivesJsonContext.Default.PlacementEntry) is { } entry) entries.Add(entry);
             }
             catch (JsonException)
             {
@@ -357,3 +358,7 @@ internal sealed class PlacementLog : IDisposable
         return entries;
     }
 }
+
+/// <summary>Source-generated, so the journal is written and read the same way in the phone's NativeAOT build (ANDROID.9).</summary>
+[JsonSerializable(typeof(PlacementEntry))]
+internal sealed partial class ArchivesJsonContext : JsonSerializerContext;

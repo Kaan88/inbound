@@ -76,6 +76,26 @@
            Text="Bundled Android rclone SHA-256 mismatch: $(_InboundRcloneActualSha256). See third_party/rclone/SOURCE.md." />
   </Target>
 
+  <!-- ANDROID.9: archives are extracted with the official static 7-Zip for arm64 (7zzs), run from the native library folder
+       like rclone. Pinned bytes; see third_party/7-Zip/SOURCE.md. -->
+  <PropertyGroup Condition="'$(_InboundBundleRclone)' == 'true'">
+    <Inbound7ZipPath Condition="'$(Inbound7ZipPath)' == ''">$(MSBuildProjectDirectory)/../../artifacts/android-app/7zip/arm64-v8a/lib7zz.so</Inbound7ZipPath>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(_InboundBundleRclone)' == 'true'">
+    <AndroidNativeLibrary Include="$(Inbound7ZipPath)" Abi="arm64-v8a" />
+    <AndroidNativeLibraryNoJniPreload Include="lib7zz.so" />
+    <AndroidAsset Include="$(MSBuildProjectDirectory)/../../third_party/7-Zip/android/License.txt" Link="licenses/7-zip.txt" />
+  </ItemGroup>
+  <Target Name="InboundCheckBundled7Zip" BeforeTargets="BeforeBuild" Condition="'$(_InboundBundleRclone)' == 'true'">
+    <Error Condition="!Exists('$(Inbound7ZipPath)') Or $([System.IO.Path]::GetFileName('$(Inbound7ZipPath)')) != 'lib7zz.so'"
+           Text="The standard arm64 APK requires the pinned Android lib7zz.so. See third_party/7-Zip/SOURCE.md or set Inbound7ZipPath." />
+    <GetFileHash Files="$(Inbound7ZipPath)" Algorithm="SHA256">
+      <Output TaskParameter="Hash" PropertyName="_Inbound7ZipActualSha256" />
+    </GetFileHash>
+    <Error Condition="'$(_Inbound7ZipActualSha256)' != '8F34C72FA4A9A79282B2364308F75D77A928DDF571292A7D030825E53D60E3A7'"
+           Text="Bundled Android 7-Zip SHA-256 mismatch: $(_Inbound7ZipActualSha256). See third_party/7-Zip/SOURCE.md." />
+  </Target>
+
   <!-- Debug (emulator): a self-contained APK that adb install can install, not the fast-deployment one. -->
   <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
     <EmbedAssembliesIntoApk>true</EmbedAssembliesIntoApk>

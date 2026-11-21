@@ -38,6 +38,9 @@ public sealed partial class MainActivity : AppCompatActivity
     private FirstRunScreen? _firstRun;
     private DetailsScreen? _details;
     private NewDownloadScreen? _newDownload;
+    private AddTorrentScreen? _addTorrent;
+    private TorBoxScreen? _torBox;
+    private TorBoxSettingsPage? _torBoxSettings;
     private PrefsStore? _prefs;
     private bool _onSettings;
     private bool _onQueues;
@@ -475,6 +478,53 @@ public sealed partial class MainActivity : AppCompatActivity
         if (link is null && saved is null) _newDownload.FocusAddress();
     }
 
+    /// <summary>The shown Host answers remote.* (the phone's own Host does, and so does a paired PC or server that offers it): TorBox can be used.</summary>
+    internal bool HasTorBox => DownloadManager.Mobile.TorBox.TorBoxClient.Offered(_model?.Hello);
+
+    internal DownloadManager.Mobile.TorBox.TorBoxClient? NewTorBoxClient() =>
+        _connection is null ? null : new DownloadManager.Mobile.TorBox.TorBoxClient(_connection);
+
+    /// <summary>Add torrent (t1, t2): the Add sheet's "Torrent file or magnet".</summary>
+    internal void OpenAddTorrent()
+    {
+        if (_nav is null || _model is null || _nav.PageOpen || !HasTorBox || NewTorBoxClient() is not { } client) return;
+        _addTorrent = new AddTorrentScreen(this, _model, client);
+        _nav.Open(_addTorrent.Root, null, null, OnPageClosed, "Add torrent");
+        _addTorrent.FocusMagnet();
+    }
+
+    /// <summary>The TorBox screen (t5), or the key sheet first when no key is saved yet.</summary>
+    internal void OpenTorBox()
+    {
+        if (_nav is null || _model is null || _nav.PageOpen || !HasTorBox || NewTorBoxClient() is not { } client) return;
+        var model = _model;
+        var hostName = Capabilities.IsRemote ? HostName : "";
+        void Open()
+        {
+            if (_nav is null || _nav.PageOpen || IsFinishing || IsDestroyed || !ReferenceEquals(model, _model)) return;
+            _torBox = new TorBoxScreen(this, model, client);
+            _nav.Open(_torBox.Root, null, null, OnPageClosed, "TorBox");
+        }
+
+        Screens.TorBoxUi.Run(this, () => client.AccountAsync(), result =>
+        {
+            var account = result.Ok ? result.Accounts.FirstOrDefault() : null;
+            if (account is { HasKey: true, KeyUnreadable: false } || account is null) Open();
+            else Screens.TorBoxKeySheet.Show(this, client, account.KeyUnreadable, hostName, Open);
+        }, words => ShowMessage(words));
+    }
+
+    /// <summary>"Torrents, TorBox, archives" (t7), from the Settings list.</summary>
+    internal bool OpenTorBoxSettings()
+    {
+        if (_nav is null || _nav.PageOpen || _prefs is null || NewTorBoxClient() is not { } client) return false;
+        _torBoxSettings = new TorBoxSettingsPage(this, client, new DownloadManager.Mobile.TorBox.TorBoxChoice(_prefs));
+        return OpenHostSettingsPage(_torBoxSettings.Root, TorBoxSettingsPage.Title, () => { });
+    }
+
+    internal void ShowDownloadsTab() =>
+        FindViewById<Google.Android.Material.BottomNavigation.BottomNavigationView>(Resource.Id.nav)!.SelectedItemId = Resource.Id.nav_downloads;
+
     /// <summary>Closes <paramref name="page"/> if it is still the open page (a late call for a page already gone does nothing).</summary>
     internal void CloseRowPage(View page) => _nav?.Close(page);
 
@@ -506,6 +556,12 @@ public sealed partial class MainActivity : AppCompatActivity
         _details = null;
         _newDownload?.Dispose();
         _newDownload = null;
+        _addTorrent?.Dispose();
+        _addTorrent = null;
+        _torBox?.Dispose();
+        _torBox = null;
+        _torBoxSettings?.Dispose();
+        _torBoxSettings = null;
         _linkPageLifetime?.Cancel();
         _linkPageGeneration++;
         _browser?.Dispose();

@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading.Channels;
 using DownloadManager.Archives;
 using DownloadManager.Contracts;
@@ -39,7 +40,6 @@ public sealed record ArchiveCoordinatorOptions
 /// </summary>
 public sealed partial class ArchiveCoordinator : IAsyncDisposable, IPackagePasswordKeeper
 {
-    private static readonly JsonSerializerOptions CompareOptions = new();
 
     private readonly DownloadManagerService _service;
     private readonly IArchiveStore _store;
@@ -741,7 +741,8 @@ public sealed partial class ArchiveCoordinator : IAsyncDisposable, IPackagePassw
     }
 
     private static bool SameContent(ArchiveSetRecord left, ArchiveSetRecord right) =>
-        JsonSerializer.Serialize(left, CompareOptions) == JsonSerializer.Serialize(right, CompareOptions);
+        JsonSerializer.Serialize(left, ArchiveCompareJsonContext.Default.ArchiveSetRecord) ==
+        JsonSerializer.Serialize(right, ArchiveCompareJsonContext.Default.ArchiveSetRecord);
 
     /// <summary>Durable first: memory only ever shows what a restart would also find. The caller holds the gate.</summary>
     private async Task SaveLockedAsync(ArchiveSetRecord next)
@@ -770,3 +771,7 @@ public sealed partial class ArchiveCoordinator : IAsyncDisposable, IPackagePassw
         }
     }
 }
+
+/// <summary>Source-generated, so comparing records works in the phone's NativeAOT build (ANDROID.9).</summary>
+[JsonSerializable(typeof(ArchiveSetRecord))]
+internal sealed partial class ArchiveCompareJsonContext : JsonSerializerContext;

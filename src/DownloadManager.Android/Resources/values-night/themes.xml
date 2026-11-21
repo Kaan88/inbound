@@ -45,4 +45,5 @@
   <color name="state_media">#B49AD6</color>
   <color name="state_done_container">#1D3A26</color>
   <color name="state_failed_container">#3D2323</color>
+  <color name="state_waiting_container">#3D2F14</color>
 </resources>
