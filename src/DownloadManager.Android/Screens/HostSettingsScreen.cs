@@ -60,7 +60,7 @@ internal sealed class HostSettingsScreen : IDisposable
                 activity.OpenRemoteFilesSource);
         NavigationRow(rows, "Hosts and web UI", "Select or pair a Host", Resource.Drawable.ic_flow_host, () => OpenDetail("hosts"));
         // Offered only while the shown Host answers remote.* (its hello says so); the hello can come after this screen is built.
-        NavigationRow(rows, TorBoxSettingsPage.Title, "TorBox account, sending magnets and extracting archives", Resource.Drawable.ic_flow_bolt, () => activity.OpenTorBoxSettings());
+        NavigationRow(rows, TorBoxSettingsPage.Title, "Torrents, TorBox account and extracting archives", Resource.Drawable.ic_flow_bolt, () => activity.OpenTorBoxSettings());
         _torBoxRow = _categoryRows[^1];
         ShowTorBoxRow();
         downloads.HostHelloChanged += ShowTorBoxRow;
@@ -102,9 +102,10 @@ internal sealed class HostSettingsScreen : IDisposable
         _categoryRows.Add(row);
     }
 
-    // The page serves both TorBox and archives: it is offered when the shown Host answers either.
+    // The page serves torrents, TorBox and archives: it is offered when the shown Host answers any of them.
     private bool TorBoxOffered => DownloadManager.Mobile.TorBox.TorBoxClient.Offered(_downloads.Hello)
-        || DownloadManager.Mobile.Archives.ArchiveClient.Offered(_downloads.Hello);
+        || DownloadManager.Mobile.Archives.ArchiveClient.Offered(_downloads.Hello)
+        || DownloadManager.Mobile.Torrents.TorrentClient.Offered(_downloads.Hello);
 
     private void ShowTorBoxRow()
     {

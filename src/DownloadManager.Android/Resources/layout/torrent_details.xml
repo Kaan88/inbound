@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/torrent_details_root" android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:background="?android:colorBackground">
+  <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="64dp" android:orientation="horizontal" android:gravity="center_vertical" android:paddingLeft="8dp" android:paddingRight="8dp">
+    <ImageButton android:id="@+id/td_back" android:layout_width="48dp" android:layout_height="48dp" android:src="@drawable/ic_arrow_back" android:background="?attr/selectableItemBackgroundBorderless" android:contentDescription="Back" />
+    <TextView android:id="@+id/td_title" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginLeft="8dp" android:singleLine="true" android:ellipsize="end"
+        android:textAppearance="?attr/textAppearanceTitleLarge" android:textColor="?attr/colorOnSurface" android:accessibilityHeading="true" />
+    <ImageButton android:id="@+id/td_more" android:layout_width="48dp" android:layout_height="48dp" android:src="@drawable/ic_more" android:background="?attr/selectableItemBackgroundBorderless" android:contentDescription="More actions" />
+  </LinearLayout>
+  <ScrollView android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:clipToPadding="false" android:paddingBottom="24dp">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingLeft="16dp" android:paddingRight="16dp">
+      <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content"
+          app:cardCornerRadius="28dp" app:cardElevation="0dp" app:strokeWidth="0dp" app:cardBackgroundColor="?attr/colorSecondaryContainer">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="16dp">
+          <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:paddingLeft="4dp">
+            <TextView android:id="@+id/td_percent" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="52sp" android:textStyle="bold" android:textColor="?attr/colorOnSecondaryContainer" />
+            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginLeft="12dp" android:orientation="vertical">
+              <TextView android:id="@+id/td_rate" android:layout_width="match_parent" android:layout_height="wrap_content" android:textSize="18sp" android:textStyle="bold" android:textColor="?attr/colorOnSecondaryContainer" />
+              <TextView android:id="@+id/td_progress" android:layout_width="match_parent" android:layout_height="wrap_content" android:textSize="13sp" android:textColor="?attr/colorOnSecondaryContainer" />
+            </LinearLayout>
+          </LinearLayout>
+          <com.google.android.material.progressindicator.LinearProgressIndicator android:id="@+id/td_bar" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp"
+              android:max="1000" app:trackThickness="12dp" app:trackCornerRadius="6dp" app:trackStopIndicatorSize="0dp" app:indicatorTrackGapSize="0dp" app:trackColor="?attr/colorSurface" android:importantForAccessibility="no" />
+          <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp" android:orientation="horizontal" android:gravity="center_vertical">
+            <com.google.android.material.button.MaterialButton android:id="@+id/td_main" android:layout_width="0dp" android:layout_height="56dp" android:layout_weight="1" app:iconGravity="textStart" app:cornerRadius="28dp" />
+            <ImageButton android:id="@+id/td_stop" android:layout_width="48dp" android:layout_height="48dp" android:layout_marginStart="8dp" android:background="@drawable/bg_circle_surface" android:src="@drawable/ic_stop_outline" android:contentDescription="Stop" android:visibility="gone" />
+            <ImageButton android:id="@+id/td_delete" android:layout_width="48dp" android:layout_height="48dp" android:layout_marginStart="8dp" android:background="@drawable/bg_circle_surface" android:src="@drawable/ic_remote_trash" android:tint="?attr/colorControlNormal" android:contentDescription="Delete" />
+          </LinearLayout>
+        </LinearLayout>
+      </com.google.android.material.card.MaterialCardView>
+
+      <FrameLayout android:id="@+id/td_tabs_slot" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp" />
+
+      <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp"
+          app:cardCornerRadius="28dp" app:cardElevation="0dp" app:strokeWidth="0dp" app:cardBackgroundColor="?attr/colorSurfaceContainer">
+        <LinearLayout android:id="@+id/td_content" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingLeft="20dp" android:paddingRight="20dp" android:paddingTop="8dp" android:paddingBottom="8dp" />
+      </com.google.android.material.card.MaterialCardView>
+      <com.google.android.material.button.MaterialButton android:id="@+id/td_apply_files" android:layout_width="match_parent" android:layout_height="56dp" android:layout_marginTop="12dp" android:visibility="gone" app:icon="@drawable/ic_download" app:iconGravity="textStart" app:cornerRadius="28dp" />
+      <TextView android:id="@+id/td_note" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:visibility="gone" android:accessibilityLiveRegion="polite" android:textAppearance="?attr/textAppearanceBodyMedium" android:textColor="?attr/colorError" />
+    </LinearLayout>
+  </ScrollView>
+</LinearLayout>

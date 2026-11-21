@@ -11,6 +11,7 @@ using AndroidX.RecyclerView.Widget;
 using DownloadManager.Contracts;
 using DownloadManager.Mobile;
 using DownloadManager.Mobile.Archives;
+using DownloadManager.Mobile.Torrents;
 using Google.Android.Material.Chip;
 using Google.Android.Material.ProgressIndicator;
 
@@ -83,6 +84,8 @@ internal sealed partial class DownloadsScreen
         _archives.Changed += _adapter.RefreshAll;
         _model.ArchiveChanged += _archives.Apply;
         _model.HostHelloChanged += LoadArchives;
+        // The Torrents chip shows while the Host has torrents (or one is in the list): the hello can come after this screen is built.
+        _model.HostHelloChanged += OnSummary;
         LoadArchives();
         // Lists: 200 ms fade and move. Rows never reorder: a row only comes in at the top or leaves.
         _recycler.SetItemAnimator(new DefaultItemAnimator { AddDuration = 200, MoveDuration = 200, RemoveDuration = 200, ChangeDuration = 0, SupportsChangeAnimations = false });
@@ -194,6 +197,7 @@ internal sealed partial class DownloadsScreen
         _passwordSheet = null;
         _model.ArchiveChanged -= _archives.Apply;
         _model.HostHelloChanged -= LoadArchives;
+        _model.HostHelloChanged -= OnSummary;
         _archives.Changed -= _adapter.RefreshAll;
         _model.SettingsChanged -= RefreshScheduledRows;
         _queueTimingUi.RemoveCallbacks(_queueTimingExpiry);
@@ -264,6 +268,8 @@ internal sealed partial class DownloadsScreen
     private void OnSummary()
     {
         foreach (var (f, chip) in _chipFor) chip.Text = _list.ChipLabel(f);
+        if (_chipFor.TryGetValue(DownloadFilter.Torrents, out var torrents))
+            torrents.Visibility = TorrentClient.Offered(_model.Hello) || _list.Count(DownloadFilter.Torrents) > 0 || _list.Filter == DownloadFilter.Torrents ? ViewStates.Visible : ViewStates.Gone;
         var s = _list.Summary;
         _details.Text = s.Details;
         _graph.SetData(s.History);
@@ -356,10 +362,22 @@ internal sealed partial class DownloadsScreen
             case RowAction.Resume: Fire(_model.ResumeAsync(row.Id)); break;
             case RowAction.Retry: Fire(_model.RetryAsync(row.Id)); break;
             case RowAction.RefreshLink: _activity.ShowRefreshLink(row); break;
+            case RowAction.StopSeeding: StopSeeding(row); break;
             case RowAction.ShowInFolder when _activity.Capabilities.CanShowInFolder:
                 if (!Outside.ShowDownloadFolder(_activity)) _activity.ShowMessage("No app on this phone can show the folder.");
                 break;
         }
+    }
+
+    /// <summary>The Stop button of a seeding torrent: it stays finished in the list and stops uploading (torrent.seed Off).</summary>
+    private void StopSeeding(JobRow row)
+    {
+        if (_activity.NewTorrentClient() is not { } client) return;
+        TorBoxUi.Run(_activity, () => client.SeedAsync(row.Id, false), result =>
+        {
+            if (_disposed) return;
+            if (!result.Ok) _activity.ShowMessage(string.IsNullOrWhiteSpace(result.Error) ? "Seeding was not stopped." : result.Error.Trim());
+        }, words => { if (!_disposed) _activity.ShowMessage(words); });
     }
 
     private void Fire(Task<CommandResult> command) =>
@@ -466,6 +484,7 @@ internal sealed partial class DownloadsScreen
             {
                 if (_row is not { } r) return;
                 if (_s._list.Selecting) _s._list.Toggle(r);
+                else if (r.Job.Torrent is not null) _s._activity.OpenTorrentDetails(r, Card);
                 else _s._activity.OpenDetails(r, Card);
             };
             v.LongClick += (_, e) =>
@@ -502,7 +521,8 @@ internal sealed partial class DownloadsScreen
             _name.Text = row.Name;
             // An archive set on this row (its first volume) says what extraction is doing, with its lead word coloured (t3).
             var info = _s._archives.InfoFor(row.Id);
-            var subtitle = info?.Subtitle ?? _s.SubtitleFor(row);
+            var torrent = info is null ? TorrentRowInfo.For(row.Job, _s._model.Settings) : null;
+            var subtitle = info?.Subtitle ?? torrent?.Subtitle ?? _s.SubtitleFor(row);
             var variant = Motion.Attr(ctx, Resource.Attribute.colorOnSurfaceVariant);
             if (info is not null)
             {
@@ -515,6 +535,15 @@ internal sealed partial class DownloadsScreen
                 };
                 var styled = new Android.Text.SpannableString(subtitle);
                 styled.SetSpan(new Android.Text.Style.ForegroundColorSpan(new Android.Graphics.Color(tone)), 0, info.Lead.Length, Android.Text.SpanTypes.ExclusiveExclusive);
+                _subtitle.SetText(styled, Android.Widget.TextView.BufferType.Spannable);
+                _subtitle.SetTextColor(new Android.Graphics.Color(variant));
+            }
+            else if (torrent is { Tone: not TorrentTone.Neutral })
+            {
+                // "Seeding" in green, "Choose files to download" in amber; the rest of the line stays plain (t3).
+                var tone = ctx.GetColor(torrent.Tone == TorrentTone.Done ? Resource.Color.state_done : Resource.Color.state_waiting);
+                var styled = new Android.Text.SpannableString(subtitle);
+                styled.SetSpan(new Android.Text.Style.ForegroundColorSpan(new Android.Graphics.Color(tone)), 0, torrent.Lead.Length, Android.Text.SpanTypes.ExclusiveExclusive);
                 _subtitle.SetText(styled, Android.Widget.TextView.BufferType.Spannable);
                 _subtitle.SetTextColor(new Android.Graphics.Color(variant));
             }
@@ -545,6 +574,17 @@ internal sealed partial class DownloadsScreen
                 _icon.SetImageResource(info.Icon == ArchiveIcon.Lock ? Resource.Drawable.ic_browser_lock : Resource.Drawable.ic_archive);
                 _icon.ImageTintList = Android.Content.Res.ColorStateList.ValueOf(new Android.Graphics.Color(ctx.GetColor(Resource.Color.state_waiting)));
             }
+            else if (row.Job.Torrent is not null)
+            {
+                _icon.SetImageResource(Resource.Drawable.ic_torrent);
+                var tint = torrent?.Tone switch
+                {
+                    TorrentTone.Done => ctx.GetColor(Resource.Color.state_done),
+                    TorrentTone.Amber => ctx.GetColor(Resource.Color.state_waiting),
+                    _ => Motion.Attr(ctx, row.Group == RowGroup.Active ? Resource.Attribute.colorPrimary : Resource.Attribute.colorOnSurfaceVariant),
+                };
+                _icon.ImageTintList = Android.Content.Res.ColorStateList.ValueOf(new Android.Graphics.Color(tint));
+            }
             else
             {
                 var fileIcon = FileIcons.For(FileKinds.Of(row.Name));
@@ -570,6 +610,7 @@ internal sealed partial class DownloadsScreen
             _bar.Visibility = row.ShowBar ? ViewStates.Visible : ViewStates.Gone;
             if (!row.ShowBar) return;
             _bar.SetIndicatorColor(row.Kind == StatusKind.Failed ? ctx.GetColor(Resource.Color.state_failed)
+                : row.Kind == StatusKind.Done ? ctx.GetColor(Resource.Color.state_done)
                 : Motion.Attr(ctx, row.Group == RowGroup.Paused ? Resource.Attribute.colorOnSurfaceVariant : Resource.Attribute.colorPrimary));
             if (row.Indeterminate) { if (!_bar.Indeterminate) _bar.Indeterminate = true; return; }
             if (_bar.Indeterminate) _bar.Indeterminate = false;
@@ -597,6 +638,7 @@ internal sealed partial class DownloadsScreen
                 RowAction.Retry => (Resource.Drawable.ic_refresh, "Retry"),
                 RowAction.RefreshLink => (Resource.Drawable.ic_refresh, "Refresh link for"),
                 RowAction.ShowInFolder when _s._activity.Capabilities.CanShowInFolder => (Resource.Drawable.ic_flow_folder, "Show in folder"),
+                RowAction.StopSeeding => (Resource.Drawable.ic_stop_outline, "Stop seeding"),
                 _ => (0, ""),
             };
             _action.Visibility = _s.Selecting ? ViewStates.Gone : icon == 0 ? ViewStates.Invisible : ViewStates.Visible;

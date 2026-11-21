@@ -1,5 +1,31 @@
 # Progress — session handoff
 
+## Owner: release after feature parity, before the redesign, 2026-11-21
+
+"after feature parity, before ui work. make a new release": once ANDROID.9 is complete (torrents on the phone, then
+the paired-host pass and the side-by-side check), make a new release (after the Fable review), and only then start
+the Remote Files redesign (r1–r6).
+
+## ANDROID.9 step 4, torrents on the phone, 2026-11-22
+
+The phone's Host now runs torrents with the libtorrent worker built for Android (`native/torrent-worker/build-android.sh`:
+NDK, API 29, static libtorrent 2.1.2, OpenSSL 3.6.5, Boost 1.92.0; needs only Android's libc, libm and libdl), shipped as
+`lib/arm64-v8a/libinbound-torrent.so`, pinned in the csproj and `check-apk.py --bundled-torrent`, licenses as APK assets
+(`third_party/torrent-worker/SOURCE.md`). It runs inside the app sandbox (the 7-Zip lesson): on the S24 the Debian 13.8.0
+netinst (795 MB, owner-approved) downloaded by magnet at about 3 MB/s from 5 seeds, seeded, stopped seeding and was
+deleted with its file; its SHA-256 matched Debian's SHA256SUMS. The .torrent was picked with the system picker and listed
+by its bytes: `torrent.inspect` gained `Data` (base64), as `torrent.add` has, so a paired Host can list a file on the
+phone too; an older Host is told apart by its empty-input answer and gets the whole file (integration and Mobile tests).
+Screens t1, t3, t4 and t7's Torrents group were built by a Sonnet worker and reviewed here; fixes from the phone pass: a
+tracker error now says why (as on the desktop, addresses hidden), "File list found" without "through 0 peers", t4 shows
+both rates, the whole "Saved to" path, and Stop seeding as the main button while seeding. This network can't reach
+Debian's own tracker (port 6969 times out from the PC too), so the magnet carried a second tracker.
+
+Deviations to show the owner: a pasted magnet is handed to the Host at once with "ask when ready" to find its file list
+(the Host has no other way), so it shows in Downloads while Add torrent is open and is removed on Cancel; seeding rows
+count as Finished, not Active; no torrent download limit exists, so Connections and limits has the upload limit only.
+Owner question: the t7 "Wi-Fi only" switch and "Wi-Fi and charging" for seeding need Host settings that don't exist.
+
 ## ANDROID.9 build started, 2026-11-21
 
 Owner decision (archives step): t6 and t7 show a list of saved archive passwords tried in order and a per-archive

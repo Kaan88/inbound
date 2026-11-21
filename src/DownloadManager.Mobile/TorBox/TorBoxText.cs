@@ -4,7 +4,6 @@ namespace DownloadManager.Mobile.TorBox;
 public static class TorBoxText
 {
     public const string HostRefused = "The Host did not accept the TorBox request.";
-    public const string ThisPhoneLater = "Torrents on this phone come in the next update.";
     public const string NoKey = "Add your TorBox API key in Settings to send a magnet to TorBox.";
     public const string KeyUnreadable = "The saved TorBox key can't be read any more. Enter it again in Settings.";
     public const string NotMagnet = "Paste a magnet link (it starts with magnet:?).";

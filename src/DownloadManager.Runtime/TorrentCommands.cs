@@ -144,7 +144,9 @@ public sealed partial class DownloadManagerService
         if (TorrentsRefusal() is { } refused) return new TorrentInspectResult { Error = refused };
         var (input, error) = request.FromJobId is { } fromJob
             ? await ReadTorrentFileJobAsync(fromJob, caller, cancellationToken).ConfigureAwait(false)
-            : await ReadTorrentInputAsync(request.Input, caller, cancellationToken).ConfigureAwait(false);
+            : string.IsNullOrWhiteSpace(request.Data)
+                ? await ReadTorrentInputAsync(request.Input, caller, cancellationToken).ConfigureAwait(false)
+                : ReadTorrentData(request.Data);
         if (input is null) return new TorrentInspectResult { Error = error };
         if (caller is not null && await DescribeTorrentAddressesAsync(input, cancellationToken).ConfigureAwait(false) is { } local)
             return new TorrentInspectResult { Error = local };

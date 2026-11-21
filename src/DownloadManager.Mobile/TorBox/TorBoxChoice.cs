@@ -12,8 +12,9 @@ public sealed class TorBoxChoice(IKeyValueStore store)
     }
 
     /// <summary>
-    /// True when Add torrent opens with TorBox chosen. Torrents on the phone are not there yet, so TorBox is chosen whenever it is
-    /// offered; the switch matters once both are.
+    /// True when Add torrent opens with TorBox chosen: when only TorBox can take the torrent, or when both can and the switch says TorBox
+    /// first. <paramref name="phoneTorrentsOffered"/> is true when the Host has torrents and they are turned on ("Download torrents here"),
+    /// so with them off (the default) TorBox is chosen, as the setting's own words say: "Off: magnets go to TorBox".
     /// </summary>
     public bool OpensWithTorBox(bool torBoxOffered, bool phoneTorrentsOffered) =>
         torBoxOffered && (SendFirst || !phoneTorrentsOffered);

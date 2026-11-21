@@ -8,7 +8,7 @@
   <ScrollView android:id="@+id/torrent_scroll" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:fillViewport="false">
     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingLeft="16dp" android:paddingRight="16dp" android:paddingBottom="16dp">
       <com.google.android.material.textfield.TextInputLayout android:id="@+id/magnet_layout" style="@style/Widget.Inbound.NewDownload.Field" android:layout_width="match_parent" android:layout_height="wrap_content"
-          android:hint="Magnet link" app:endIconMode="custom" app:endIconDrawable="@drawable/ic_paste" app:endIconContentDescription="Paste from the clipboard">
+          android:hint="Magnet or .torrent file" app:endIconMode="custom" app:endIconDrawable="@drawable/ic_file" app:endIconContentDescription="Choose a .torrent file">
         <com.google.android.material.textfield.TextInputEditText android:id="@+id/magnet" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="textUri|textNoSuggestions" android:singleLine="true" android:ellipsize="end" android:importantForAutofill="no" />
       </com.google.android.material.textfield.TextInputLayout>
 

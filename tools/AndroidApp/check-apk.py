@@ -1,6 +1,6 @@
 # Checks an Inbound APK before it goes to a phone or the owner (2026-11-18: a release APK from a stale obj folder had no
 # net.dot.jni.nativeaot.NativeAotRuntimeProvider and crashed at start).
-#   python -I tools/AndroidApp/check-apk.py <apk> [--release] [--bundled-rclone] [--bundled-7zip]
+#   python -I tools/AndroidApp/check-apk.py <apk> [--release] [--bundled-rclone] [--bundled-7zip] [--bundled-torrent]
 # Fails unless: the runtime provider class and our activity are in the dex; the native library exports the TLS trust
 # callback; the launcher icon is there; with --release, the test hooks are not in the native library.
 import hashlib, sys, zipfile
@@ -27,6 +27,14 @@ if "--bundled-7zip" in sys.argv:
         "41a3efa6bba849c70c1625d572507f34b42ef05c7530215e60afea74fa38de74")
     checks["7-Zip license"] = seven_license in names and b"GNU LGPL" in z.read(seven_license)
     checks["7-Zip unRAR license"] = "assets/licenses/7-zip-unrar.txt" in names
+if "--bundled-torrent" in sys.argv:
+    worker = "lib/arm64-v8a/libinbound-torrent.so"
+    checks["only one packaged torrent worker, arm64"] = [n for n in names if n.endswith("/libinbound-torrent.so")] == [worker]
+    checks["pinned torrent worker bytes"] = worker in names and hashlib.sha256(z.read(worker)).hexdigest() == (
+        "7258c4f920237e58ecb1be3d61d3bf20c52057012a57cbc98373777f56ce1565")
+    checks["libtorrent license"] = "assets/licenses/libtorrent.txt" in names and b"Arvid Norberg" in z.read("assets/licenses/libtorrent.txt")
+    checks["OpenSSL license"] = "assets/licenses/openssl.txt" in names and b"Apache License" in z.read("assets/licenses/openssl.txt")
+    checks["Boost license"] = "assets/licenses/boost.txt" in names and b"Boost Software License" in z.read("assets/licenses/boost.txt")
 if "--bundled-rclone" in sys.argv:
     binary = "lib/arm64-v8a/librclone.so"
     license_path = "assets/licenses/rclone.txt"

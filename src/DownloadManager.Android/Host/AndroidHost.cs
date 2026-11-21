@@ -69,7 +69,7 @@ internal sealed record AndroidRemote(RemoteProviderSetup Setup, RemoteJobCoordin
 
 /// <summary>
 /// The Host core on Android, in this process: DownloadManagerService + HostCommandDispatcher composed as
-/// src/DownloadManager.Server/ServerApp.cs composes them, with TorBox and Archives and minus the HTTP front and Torrents. A client is an
+/// src/DownloadManager.Server/ServerApp.cs composes them, with TorBox, Archives and Torrents and minus the HTTP front. A client is an
 /// <see cref="InProcessSession"/> talking to the dispatcher with the same IpcMessage envelopes a pipe or WebSocket carries.
 /// For now it lives and dies with the process (no foreground service yet).
 /// </summary>
@@ -159,13 +159,18 @@ internal sealed class AndroidHost : IAsyncDisposable
         var nativeLibraries = Android.App.Application.Context.ApplicationInfo?.NativeLibraryDir;
         var bundledSevenZip = nativeLibraries is null ? null : Path.Combine(nativeLibraries, "lib7zz.so");
         var canExtract = File.Exists(bundledSevenZip);
+        // The APK's libtorrent worker (NDK build, as libinbound-torrent.so). Without it torrents are unavailable, as on a desktop
+        // build without the worker; nothing starts until a torrent job runs.
+        var bundledTorrent = nativeLibraries is null ? null : Path.Combine(nativeLibraries, "libinbound-torrent.so");
         RemoteProviderSetup? remoteSetup = null;
         try
         {
             remoteSetup = RemoteProviderSetup.Create(paths, engine, log.Info);
             log.Secrets = remoteSetup.Registry;
             service = new DownloadManagerService(paths, jobStore, checkpointStore, settingsStore, engine, log.Info, sleepPrevention: sleep,
-                linkBroker: remoteSetup.Broker, linkSecrets: remoteSetup.Registry)
+                linkBroker: remoteSetup.Broker, linkSecrets: remoteSetup.Registry,
+                torrentEngine: DownloadManager.Torrents.TorrentSetup.Create(paths.Root, new TorrentStore(paths), log.Info,
+                    findWorker: () => File.Exists(bundledTorrent) ? bundledTorrent : null))
             {
                 // Unknown power holds charging and battery-saver queues until the first report.
                 PlatformReportsQueuePower = true,

@@ -39,8 +39,10 @@ public sealed class AddSheet : BottomSheetDialogFragment
         };
         var rows = v.FindViewById<LinearLayout>(Resource.Id.add_source_rows)!;
         var torBox = Activity is MainActivity tb && tb.HasTorBox;
+        // Torrents on the Host itself or TorBox: either one makes Add torrent useful.
+        var torrent = torBox || Activity is MainActivity tt && tt.HasTorrents;
         Source(Resource.Drawable.ic_add_source_torrent, "Torrent file or magnet", "Choose which files to fetch",
-            torBox ? () => { var a = Activity as MainActivity; Dismiss(); a?.OpenAddTorrent(); } : null);
+            torrent ? () => { var a = Activity as MainActivity; Dismiss(); a?.OpenAddTorrent(); } : null);
         Source(Resource.Drawable.ic_add_source_cloud, "From a site", "Browse SFTP, WebDAV or cloud storage",
             Activity is MainActivity host && host.HasRemoteFilesSource ? () => { Dismiss(); host.OpenRemoteFilesSource(); } : null);
         Source(Resource.Drawable.ic_flow_bolt, "TorBox", "Send a link or torrent to your TorBox account",

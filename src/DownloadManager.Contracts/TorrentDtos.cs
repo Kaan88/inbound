@@ -131,6 +131,9 @@ public sealed class TorrentInspectRequest
     /// <summary>T10: in place of <see cref="Input"/>, the finished download whose file is a .torrent file
     /// (<see cref="JobDto.TorrentFileReady"/>). An older Host ignores it and reads <see cref="Input"/>.</summary>
     public Guid? FromJobId { get; set; }
+    /// <summary>ANDROID.9: a .torrent file's bytes (base64) in place of <see cref="Input"/>, as <see cref="TorrentAddRequest.Data"/>:
+    /// a file on the client's device, which the Host cannot read. An older Host ignores it and reads <see cref="Input"/>.</summary>
+    public string? Data { get; set; }
 }
 
 public sealed class TorrentInspectResult

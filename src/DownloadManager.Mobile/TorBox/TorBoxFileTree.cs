@@ -30,7 +30,8 @@ public sealed class TorBoxFileTree
     private readonly TorBoxNode _root = new("", null);
 
     /// <param name="collapseBelow">With more files than this, folders below the top level start closed.</param>
-    public TorBoxFileTree(IEnumerable<RemoteFileDto> files, int collapseBelow = 50)
+    /// <param name="initiallyChosen">The file ids that start chosen (a torrent's wanted files); null chooses every choosable file.</param>
+    public TorBoxFileTree(IEnumerable<RemoteFileDto> files, int collapseBelow = 50, IReadOnlySet<string>? initiallyChosen = null)
     {
         foreach (var file in files)
         {
@@ -51,7 +52,7 @@ public sealed class TorBoxFileTree
             };
             folder.Children.Add(leaf);
             _files.Add(leaf);
-            if (leaf.Selectable) _selected.Add(leaf.FileId!);
+            if (leaf.Selectable && (initiallyChosen is null || initiallyChosen.Contains(leaf.FileId!))) _selected.Add(leaf.FileId!);
         }
 
         Total(_root);

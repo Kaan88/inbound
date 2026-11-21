@@ -5,6 +5,8 @@ using Android.OS;
 using Android.Util;
 using Android.Views;
 using Android.Widget;
+using AndroidX.Activity.Result;
+using AndroidX.Activity.Result.Contract;
 using AndroidX.AppCompat.App;
 using AndroidX.Core.View;
 using DownloadManager.Mobile;
@@ -41,6 +43,9 @@ public sealed partial class MainActivity : AppCompatActivity
     private AddTorrentScreen? _addTorrent;
     private TorBoxScreen? _torBox;
     private TorBoxSettingsPage? _torBoxSettings;
+    private TorrentDetailsScreen? _torrentDetails;
+    private ActivityResultLauncher? _torrentPicker;
+    private Action<Android.Net.Uri?>? _torrentPicked;
     private PrefsStore? _prefs;
     private bool _onSettings;
     private bool _onQueues;
@@ -54,6 +59,8 @@ public sealed partial class MainActivity : AppCompatActivity
     protected override void OnCreate(Bundle? savedInstanceState)
     {
         base.OnCreate(savedInstanceState);
+        // The .torrent chooser of Add torrent: registered now, before the activity starts, as the result API requires.
+        _torrentPicker = RegisterForActivityResult(new ActivityResultContracts.StartActivityForResult(), new TorrentPickResult(this));
         WindowCompat.SetDecorFitsSystemWindows(Window!, false); // edge to edge
         SetContentView(Resource.Layout.main);
         _prefs = new PrefsStore(this);
@@ -490,13 +497,56 @@ public sealed partial class MainActivity : AppCompatActivity
     internal DownloadManager.Mobile.Archives.ArchiveClient? NewArchiveClient() =>
         _connection is null ? null : new DownloadManager.Mobile.Archives.ArchiveClient(_connection);
 
-    /// <summary>Add torrent (t1, t2): the Add sheet's "Torrent file or magnet".</summary>
+    /// <summary>The shown Host answers torrent.* (its hello lists "torrents"); whether they are turned on is its setting.</summary>
+    internal bool HasTorrents => DownloadManager.Mobile.Torrents.TorrentClient.Offered(_model?.Hello);
+
+    internal DownloadManager.Mobile.Torrents.TorrentClient? NewTorrentClient() =>
+        _connection is null ? null : new DownloadManager.Mobile.Torrents.TorrentClient(_connection);
+
+    /// <summary>Add torrent (t1, t2): the Add sheet's "Torrent file or magnet", with This phone (the Host's own torrents) and/or TorBox.</summary>
     internal void OpenAddTorrent()
     {
-        if (_nav is null || _model is null || _nav.PageOpen || !HasTorBox || NewTorBoxClient() is not { } client) return;
-        _addTorrent = new AddTorrentScreen(this, _model, client);
+        if (_nav is null || _model is null || _prefs is null || _nav.PageOpen || !(HasTorBox || HasTorrents)) return;
+        _addTorrent = new AddTorrentScreen(this, _model, HasTorBox ? NewTorBoxClient() : null, HasTorrents ? NewTorrentClient() : null,
+            new DownloadManager.Mobile.TorBox.TorBoxChoice(_prefs));
         _nav.Open(_addTorrent.Root, null, null, OnPageClosed, "Add torrent");
         _addTorrent.FocusMagnet();
+    }
+
+    /// <summary>A torrent's details (t4), from its row in Downloads.</summary>
+    internal void OpenTorrentDetails(JobRow row, View? card)
+    {
+        if (_nav is null || _model is null || _nav.PageOpen || NewTorrentClient() is not { } client) return;
+        var connection = _connection;
+        _torrentDetails = new TorrentDetailsScreen(this, _model, row, client, () => connection is not DownloadManager.Mobile.Remote.IRemoteStatus remote
+            || remote.State.Status == DownloadManager.Mobile.Remote.RemoteConnectionStatus.Connected);
+        _nav.Open(_torrentDetails.Root, card, () => _downloads?.CardOf(row), OnPageClosed, "Torrent details");
+    }
+
+    /// <summary>Opens the system's chooser for a .torrent file; <paramref name="picked"/> gets its address (null when none was chosen). False when there is no chooser.</summary>
+    internal bool PickTorrentFile(Action<Android.Net.Uri?> picked)
+    {
+        if (_torrentPicker is null) return false;
+        var intent = new Intent(Intent.ActionOpenDocument);
+        intent.AddCategory(Intent.CategoryOpenable);
+        intent.SetType("*/*");
+        // application/x-bittorrent, and the octet-stream that many file providers give a .torrent file.
+        intent.PutExtra(Intent.ExtraMimeTypes, new[] { "application/x-bittorrent", "application/octet-stream" });
+        _torrentPicked = picked;
+        try { _torrentPicker.Launch(intent); }
+        catch (ActivityNotFoundException) { _torrentPicked = null; return false; }
+        return true;
+    }
+
+    private sealed class TorrentPickResult(MainActivity owner) : Java.Lang.Object, IActivityResultCallback
+    {
+        public void OnActivityResult(Java.Lang.Object? result)
+        {
+            var picked = owner._torrentPicked;
+            owner._torrentPicked = null;
+            if (result is not ActivityResult outcome || outcome.ResultCode != (int)Result.Ok) return;
+            picked?.Invoke(outcome.Data?.Data);
+        }
     }
 
     /// <summary>The TorBox screen (t5), or the key sheet first when no key is saved yet.</summary>
@@ -523,9 +573,10 @@ public sealed partial class MainActivity : AppCompatActivity
     /// <summary>"Torrents, TorBox, archives" (t7), from the Settings list.</summary>
     internal bool OpenTorBoxSettings()
     {
-        if (_nav is null || _nav.PageOpen || _prefs is null || !(HasTorBox || HasArchives)) return false;
+        if (_nav is null || _nav.PageOpen || _prefs is null || _model is null || _connection is null || !(HasTorBox || HasArchives || HasTorrents)) return false;
         _torBoxSettings = new TorBoxSettingsPage(this, HasTorBox ? NewTorBoxClient() : null, HasArchives ? NewArchiveClient() : null,
-            new DownloadManager.Mobile.TorBox.TorBoxChoice(_prefs));
+            new DownloadManager.Mobile.TorBox.TorBoxChoice(_prefs), HasTorrents, _model,
+            new QueueSettingsModel(_model, _connection, requireCapabilities: Capabilities.IsRemote));
         return OpenHostSettingsPage(_torBoxSettings.Root, TorBoxSettingsPage.Title, () => { });
     }
 
@@ -569,6 +620,8 @@ public sealed partial class MainActivity : AppCompatActivity
         _torBox = null;
         _torBoxSettings?.Dispose();
         _torBoxSettings = null;
+        _torrentDetails?.Dispose();
+        _torrentDetails = null;
         _linkPageLifetime?.Cancel();
         _linkPageGeneration++;
         _browser?.Dispose();
@@ -644,6 +697,7 @@ public sealed partial class MainActivity : AppCompatActivity
 #endif
         Updates.AndroidUpdates.OnAppVisible();
         _details?.SetVisible(true);
+        _torrentDetails?.SetVisible(true);
     }
 
     protected override void OnStop()
@@ -654,6 +708,7 @@ public sealed partial class MainActivity : AppCompatActivity
 #endif
         InboundBackground.SetVisible(false);
         _details?.SetVisible(false); // no polling while nothing is shown (findings 11, 15)
+        _torrentDetails?.SetVisible(false);
         base.OnStop();
     }
 

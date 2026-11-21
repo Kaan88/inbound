@@ -316,6 +316,27 @@ public sealed partial class HostCommandDispatcherTests
     }
 
     [Fact]
+    public async Task ATorrentFileFromTheClientsDeviceIsInspectedByItsBytes()
+    {
+        var service = await TorrentServiceAsync();
+        var dispatcher = Dispatcher(service);
+        var (bytes, hash) = SingleFileTorrent("film.mkv", 100_000);
+        async Task<TorrentInspectResult> Inspect(TorrentInspectRequest request) =>
+            (await AskAsync(dispatcher, Session(), TorrentMessageTypes.Inspect, request)).GetPayload<TorrentInspectResult>();
+
+        var inspect = await Inspect(new TorrentInspectRequest { Data = Convert.ToBase64String(bytes) });
+        Assert.True(inspect.Ok, inspect.Error);
+        Assert.Equal(("torrentFile", hash, "film.mkv", 100_000L), (inspect.Kind, inspect.InfoHash, inspect.Name, inspect.TotalBytes));
+        Assert.Equal(0, Assert.Single(inspect.Files!).Index);
+
+        Assert.False((await Inspect(new TorrentInspectRequest { Data = "not base64!" })).Ok);
+        Assert.False((await Inspect(new TorrentInspectRequest { Data = Convert.ToBase64String("not bencode"u8.ToArray()) })).Ok);
+        // The Android client tells an older Host (which ignores Data) by this answer to an empty Input.
+        Assert.Equal("Enter a magnet link or choose a .torrent file.", (await Inspect(new TorrentInspectRequest())).Error);
+        Assert.Empty(service.GetSnapshot().Jobs);
+    }
+
+    [Fact]
     public async Task BadTorrentInputIsRefusedWithAReason()
     {
         var service = await TorrentServiceAsync();

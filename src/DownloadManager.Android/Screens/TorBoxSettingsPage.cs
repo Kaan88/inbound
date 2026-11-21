@@ -3,7 +3,9 @@ using Android.Views;
 using Android.Widget;
 using DownloadManager.Contracts;
 using DownloadManager.Mobile.Archives;
+using DownloadManager.Mobile;
 using DownloadManager.Mobile.TorBox;
+using DownloadManager.Mobile.Torrents;
 using Google.Android.Material.Button;
 using Google.Android.Material.Card;
 using Google.Android.Material.MaterialSwitch;
@@ -11,9 +13,10 @@ using Google.Android.Material.MaterialSwitch;
 namespace Inbound.App.Screens;
 
 /// <summary>
-/// "Torrents, TorBox, archives" (t7). The TorBox group (when the Host offers TorBox): the Account row (the key is entered in a masked sheet
+/// "Torrents, TorBox, archives" (t7). The Torrents group first (when the Host answers torrent.*): Download torrents here, Seeding and
+/// Connections and limits, which are the Host's own torrent settings. The TorBox group (when the Host offers TorBox): the Account row (the key is entered in a masked sheet
 /// and never shown again) and "Send magnets to TorBox first". The Archives group (when it offers extraction): Extract when finished and
-/// Delete the archive after extracting. The Torrents group comes with its own step; Saved passwords waits for a Host that stores them.
+/// Delete the archive after extracting. Saved passwords is the Host's list.
 /// </summary>
 internal sealed class TorBoxSettingsPage
 {
@@ -25,16 +28,24 @@ internal sealed class TorBoxSettingsPage
     private TextView? _status;
     private MaterialSwitch? _extractSwitch, _deleteSwitch;
     private TextView? _toolNote, _savedLine;
-    private bool _hasKey, _disposed, _settingArchives;
+    private readonly DownloadsModel _downloads;
+    private readonly QueueSettingsModel _settings;
+    private MaterialSwitch? _hereSwitch;
+    private TextView? _hereSub, _seedingSub, _connectionsSub;
+    private bool _hasKey, _disposed, _settingArchives, _renderingTorrents, _savingTorrents;
 
     /// <param name="client">Null when the Host does not offer TorBox: the TorBox group is left out.</param>
     /// <param name="archives">Null when the Host does not offer extraction: the Archives group is left out.</param>
-    public TorBoxSettingsPage(MainActivity activity, TorBoxClient? client, ArchiveClient? archives, TorBoxChoice choice)
+    /// <param name="torrentsOffered">The Host answers torrent.*: the Torrents group is shown.</param>
+    public TorBoxSettingsPage(MainActivity activity, TorBoxClient? client, ArchiveClient? archives, TorBoxChoice choice, bool torrentsOffered,
+        DownloadsModel downloads, QueueSettingsModel settings)
     {
         _activity = activity;
         _client = client;
         _archives = archives;
         _choice = choice;
+        _downloads = downloads;
+        _settings = settings;
         var dp = (int d) => Motion.Dp(activity, d);
         int Attr(int a) => Motion.Attr(activity, a);
 
@@ -60,6 +71,7 @@ internal sealed class TorBoxSettingsPage
         scroll.AddView(body);
         Root.AddView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
 
+        if (torrentsOffered) BuildTorrents(body);
         if (client is not null) BuildTorBox(body);
         if (archives is not null) BuildArchives(body);
     }
@@ -90,6 +102,80 @@ internal sealed class TorBoxSettingsPage
         row.Background = new TypedValueHolder(_activity).SelectableBackground();
         row.Click += (_, _) => { if (toggle.Enabled) toggle.Toggle(); };
         return toggle;
+    }
+
+    /// <summary>
+    /// The Torrents group (t7). All three rows are the Host's settings, so the title names the Host: "this phone" only when it is the phone.
+    /// The mockup's "Wi-Fi only" switch and the "Wi-Fi and charging" words are left out: the Host has no torrent-specific network or charging
+    /// setting yet (owner decision pending).
+    /// </summary>
+    private void BuildTorrents(LinearLayout body)
+    {
+        var rows = Group(body, TorrentText.GroupTitle(!_activity.Capabilities.IsRemote, _activity.HostName));
+        Row(rows, "Download torrents here", out _hereSub, out var hereRow);
+        _hereSwitch = new MaterialSwitch(_activity) { ContentDescription = "Download torrents here" };
+        hereRow.AddView(_hereSwitch);
+        hereRow.Clickable = true;
+        hereRow.Focusable = true;
+        hereRow.Background = new TypedValueHolder(_activity).SelectableBackground();
+        hereRow.Click += (_, _) => { if (_hereSwitch.Enabled) _hereSwitch.Toggle(); };
+        _hereSwitch.CheckedChange += (_, e) =>
+        {
+            if (_renderingTorrents || _savingTorrents) return;
+            SaveTorrents(s => s.TorrentsEnabled = e.IsChecked);
+        };
+        NavRow(rows, "Seeding", out _seedingSub, () => TorrentSettingsSheets.ShowSeeding(_activity, _downloads, _settings));
+        NavRow(rows, "Connections and limits", out _connectionsSub, () => TorrentSettingsSheets.ShowConnections(_activity, _downloads, _settings));
+        _downloads.SettingsChanged += RenderTorrents;
+        RenderTorrents();
+    }
+
+    /// <summary>Draws the rows from the Host's settings as the list last had them; also after a change was refused, so the switch falls back.</summary>
+    private void RenderTorrents()
+    {
+        if (_disposed || _hereSwitch is null) return;
+        var settings = _downloads.Settings;
+        _renderingTorrents = true;
+        _hereSwitch.Checked = settings.TorrentsEnabled;
+        _renderingTorrents = false;
+        _hereSwitch.Enabled = !_savingTorrents && _downloads.SnapshotShown && _settings.CanWriteSafely;
+        _hereSub!.Text = TorrentText.DownloadHereSubtitle(settings.TorrentsEnabled, _client is not null);
+        _seedingSub!.Text = TorrentText.SeedingSubtitle(settings);
+        _connectionsSub!.Text = TorrentText.ConnectionsSubtitle(settings);
+    }
+
+    private void SaveTorrents(Action<SettingsDto> edit)
+    {
+        _savingTorrents = true;
+        _hereSwitch!.Enabled = false;
+        TorBoxUi.Run(_activity, () => _settings.UpdateSettingAsync(edit), result =>
+        {
+            if (_disposed) return;
+            _savingTorrents = false;
+            if (result.Ok && _settings.LastResult is { } latest) _downloads.ApplySettingsResult(latest);
+            else if (!result.Ok) _activity.ShowMessage(string.IsNullOrWhiteSpace(result.Error) ? "The Host did not accept that setting." : result.Error.Trim());
+            RenderTorrents();
+        }, words =>
+        {
+            if (_disposed) return;
+            _savingTorrents = false;
+            _activity.ShowMessage(words);
+            RenderTorrents();
+        });
+    }
+
+    /// <summary>A row with a chevron that opens something (a sheet).</summary>
+    private void NavRow(LinearLayout rows, string title, out TextView subtitle, Action open)
+    {
+        Row(rows, title, out subtitle, out var row);
+        var chevron = new ImageView(_activity) { ImportantForAccessibility = ImportantForAccessibility.No };
+        chevron.SetImageResource(Resource.Drawable.ic_chevron_right);
+        chevron.ImageTintList = Android.Content.Res.ColorStateList.ValueOf(new Color(Motion.Attr(_activity, Resource.Attribute.colorOnSurfaceVariant)));
+        row.AddView(chevron, new LinearLayout.LayoutParams(Motion.Dp(_activity, 20), Motion.Dp(_activity, 20)));
+        row.Clickable = true;
+        row.Focusable = true;
+        row.Background = new TypedValueHolder(_activity).SelectableBackground();
+        row.Click += (_, _) => open();
     }
 
     private void BuildTorBox(LinearLayout body)
@@ -178,7 +264,11 @@ internal sealed class TorBoxSettingsPage
 
     public LinearLayout Root { get; }
 
-    public void Dispose() => _disposed = true;
+    public void Dispose()
+    {
+        _disposed = true;
+        _downloads.SettingsChanged -= RenderTorrents;
+    }
 
     private TextView Row(LinearLayout parent, string title, out TextView subtitle, out LinearLayout row)
     {

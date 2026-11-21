@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using DownloadManager.Contracts;
+using DownloadManager.Mobile.Torrents;
 
 namespace DownloadManager.Mobile;
 
@@ -10,7 +11,7 @@ public enum StatusKind { Active, Done, Failed, Waiting, Neutral }
 public enum RowGroup { Active, Queued, Paused, Finished, Failed }
 
 /// <summary>What the button at the end of a row does.</summary>
-public enum RowAction { None, Pause, Resume, Retry, ShowInFolder, RefreshLink }
+public enum RowAction { None, Pause, Resume, Retry, ShowInFolder, RefreshLink, StopSeeding }
 
 /// <summary>One row of the Downloads screen. Raises PropertyChanged on the UI thread only (the model posts).</summary>
 public sealed class JobRow : INotifyPropertyChanged
@@ -128,6 +129,23 @@ public sealed class JobRow : INotifyPropertyChanged
                 Subtitle = "Queued" + (total is > 0 ? " · " + Fmt.Bytes(total.Value) : "");
                 break;
         }
+        if (j.Torrent is { } torrent) ApplyTorrent(j, torrent);
         if (queueChanged) PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Job)));
+    }
+
+    /// <summary>A torrent's row (t3): its own words, a Stop button while it seeds, and none while it waits for a choice of files.</summary>
+    private void ApplyTorrent(JobDto j, TorrentDto torrent)
+    {
+        if (torrent.AwaitingFileChoice)
+        {
+            Kind = StatusKind.Waiting; Action = RowAction.None; ShowBar = false; Indeterminate = false;
+        }
+        else if (TorrentText.IsSeeding(j))
+        {
+            // A finished torrent that shares: a full green bar and a Stop button (the file is complete, so Show in folder is not its button).
+            Kind = StatusKind.Done; Action = RowAction.StopSeeding; ShowBar = true; Indeterminate = false; Progress = 1;
+        }
+
+        if (TorrentRowInfo.For(j, null) is { } info) Subtitle = info.Subtitle;
     }
 }

@@ -97,6 +97,29 @@
            Text="Bundled Android 7-Zip SHA-256 mismatch: $(_Inbound7ZipActualSha256). See third_party/7-Zip/SOURCE.md." />
   </Target>
 
+  <!-- ANDROID.9: the libtorrent worker for the phone's own torrents, built by native/torrent-worker/build-android.sh (NDK,
+       static libtorrent, OpenSSL, Boost and libc++) and run from the native library folder like 7-Zip. Pinned bytes; see
+       third_party/torrent-worker/SOURCE.md. -->
+  <PropertyGroup Condition="'$(_InboundBundleRclone)' == 'true'">
+    <InboundTorrentWorkerPath Condition="'$(InboundTorrentWorkerPath)' == ''">$(MSBuildProjectDirectory)/../../artifacts/android-app/torrent/arm64-v8a/libinbound-torrent.so</InboundTorrentWorkerPath>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(_InboundBundleRclone)' == 'true'">
+    <AndroidNativeLibrary Include="$(InboundTorrentWorkerPath)" Abi="arm64-v8a" />
+    <AndroidNativeLibraryNoJniPreload Include="libinbound-torrent.so" />
+    <AndroidAsset Include="$(MSBuildProjectDirectory)/../../third_party/torrent-worker/android/libtorrent.txt" Link="licenses/libtorrent.txt" />
+    <AndroidAsset Include="$(MSBuildProjectDirectory)/../../third_party/torrent-worker/android/boost.txt" Link="licenses/boost.txt" />
+    <AndroidAsset Include="$(MSBuildProjectDirectory)/../../third_party/torrent-worker/android/openssl.txt" Link="licenses/openssl.txt" />
+  </ItemGroup>
+  <Target Name="InboundCheckBundledTorrentWorker" BeforeTargets="BeforeBuild" Condition="'$(_InboundBundleRclone)' == 'true'">
+    <Error Condition="!Exists('$(InboundTorrentWorkerPath)') Or $([System.IO.Path]::GetFileName('$(InboundTorrentWorkerPath)')) != 'libinbound-torrent.so'"
+           Text="The standard arm64 APK requires the pinned Android libinbound-torrent.so. See third_party/torrent-worker/SOURCE.md or set InboundTorrentWorkerPath." />
+    <GetFileHash Files="$(InboundTorrentWorkerPath)" Algorithm="SHA256">
+      <Output TaskParameter="Hash" PropertyName="_InboundTorrentWorkerActualSha256" />
+    </GetFileHash>
+    <Error Condition="'$(_InboundTorrentWorkerActualSha256)' != '7258C4F920237E58ECB1BE3D61D3BF20C52057012A57CBC98373777F56CE1565'"
+           Text="Bundled Android torrent worker SHA-256 mismatch: $(_InboundTorrentWorkerActualSha256). See third_party/torrent-worker/SOURCE.md." />
+  </Target>
+
   <!-- Debug (emulator): a self-contained APK that adb install can install, not the fast-deployment one. -->
   <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
     <EmbedAssembliesIntoApk>true</EmbedAssembliesIntoApk>
@@ -126,6 +149,7 @@
     <ProjectReference Include="..\DownloadManager.Mobile\DownloadManager.Mobile.csproj" />
     <!-- ANDROID.9: the phone's own Host runs TorBox jobs, as the desktop and the server do. -->
     <ProjectReference Include="..\DownloadManager.Providers.TorBox\DownloadManager.Providers.TorBox.csproj" />
+    <ProjectReference Include="..\DownloadManager.Torrents\DownloadManager.Torrents.csproj" />
     <Compile Include="..\DownloadManager.Host\RemoteProviderSetup.cs" Link="Host\RemoteProviderSetup.cs" />
   </ItemGroup>
 

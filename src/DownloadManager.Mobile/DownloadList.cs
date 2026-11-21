@@ -5,7 +5,7 @@ using System.ComponentModel;
 namespace DownloadManager.Mobile;
 
 /// <summary>The state views of the Downloads screen (its filter chips). Paused downloads are in <see cref="All"/> only, as in the mockup.</summary>
-public enum DownloadFilter { All, Active, Queued, Finished, Failed }
+public enum DownloadFilter { All, Active, Torrents, Queued, Finished, Failed }
 
 /// <summary>What the summary card at the top of Downloads shows.</summary>
 public sealed record DownloadSummary(double Rate, int Active, int Queued, double? SecondsLeft, IReadOnlyList<float> History)
@@ -105,6 +105,7 @@ public sealed class DownloadList : IDisposable
     {
         DownloadFilter.All => true,
         DownloadFilter.Active => r.Group == RowGroup.Active,
+        DownloadFilter.Torrents => r.Job.Torrent is not null,
         DownloadFilter.Queued => r.Group == RowGroup.Queued,
         DownloadFilter.Finished => r.Group == RowGroup.Finished,
         DownloadFilter.Failed => r.Group == RowGroup.Failed,
