@@ -284,6 +284,7 @@ public sealed partial class DownloadManagerService
         // The loaded settings and a network reported before now decide whether downloads are held; tell listeners if so.
         AnnounceMeteredWait();
         StartSchedulerLoop();
+        ApplyTorrentConditions();
         ResumeSeedingAfterStart();
     }
 
@@ -1763,6 +1764,8 @@ public sealed partial class DownloadManagerService
             TorrentDht = settings.TorrentDht,
             TorrentPex = settings.TorrentPex,
             TorrentLsd = settings.TorrentLsd,
+            TorrentOnlyOnUnmeteredNetwork = settings.TorrentOnlyOnUnmeteredNetwork,
+            TorrentSeedOnlyOnUnmeteredAndCharging = settings.TorrentSeedOnlyOnUnmeteredAndCharging,
             TorrentEncryption = settings.TorrentEncryption,
             TorrentSeedsAtOnce = settings.TorrentSeedsAtOnce,
             TorrentConnectionsPerTorrent = settings.TorrentConnectionsPerTorrent,
@@ -4493,6 +4496,15 @@ public sealed partial class DownloadManagerService
 
     private void Schedule()
     {
+        ScheduleCore();
+        // ANDROID.9: a torrent queued since says it waits for Wi-Fi (cheap, and nothing at all off the phone).
+        bool apply;
+        lock (_sync) apply = _initialized && TorrentConditionsMayApplyLocked();
+        if (apply) ApplyTorrentConditions();
+    }
+
+    private void ScheduleCore()
+    {
         List<JobRuntime> toStart;
         // A queue stopped here by its quota is announced like one stopped mid-download, so clients (the phone's keep-alive)
         // don't go on counting it as running.
@@ -4550,8 +4562,8 @@ public sealed partial class DownloadManagerService
                          .Where(r => !r.AdmissionSuspended && !r.AddressRefreshPending && !r.Starting && (r.Runner is null || r.Runner.IsCompleted) &&
                                      r.Job.State == DownloadState.Queued &&
                                      r.Job.StartMode != StartMode.Later &&
-                                     // A torrent waits in its queue while torrents are off.
-                                     (r.Job.Torrent is null || (TorrentsAvailable && _settings.TorrentsEnabled)))
+                                     // A torrent waits in its queue while torrents are off, or for Wi-Fi (ANDROID.9).
+                                     (r.Job.Torrent is null || (TorrentsAvailable && _settings.TorrentsEnabled && !TorrentNetworkHoldsLocked())))
                          .OrderByDescending(r => r.Job.Priority)
                          .ThenBy(r => fileOrder.GetValueOrDefault((r.Job.QueueId, r.Job.Id), int.MaxValue))
                          .ThenBy(r => r.Job.CreatedAt))
@@ -6057,6 +6069,7 @@ public sealed partial class DownloadManagerService
                 SeedGoal = torrent.SeedGoal ?? TorrentSeedGoals.Global,
                 SeedGoalValue = torrent.SeedGoal is TorrentSeedGoals.Ratio or TorrentSeedGoals.Hours ? torrent.SeedGoalValue : null,
                 Sequential = torrent.Sequential,
+                WaitingFor = torrent.WaitingFor,
             } : null,
             ClientRequestId = job.ClientRequestId,
             OwnerExtensionId = job.OwnerExtensionId,
@@ -6160,6 +6173,8 @@ public sealed partial class DownloadManagerService
             TorrentDht = settings.TorrentDht,
             TorrentPex = settings.TorrentPex,
             TorrentLsd = settings.TorrentLsd,
+            TorrentOnlyOnUnmeteredNetwork = settings.TorrentOnlyOnUnmeteredNetwork,
+            TorrentSeedOnlyOnUnmeteredAndCharging = settings.TorrentSeedOnlyOnUnmeteredAndCharging,
             TorrentEncryption = TorrentEncryptionModes.IsKnown(settings.TorrentEncryption) ? settings.TorrentEncryption : TorrentEncryptionModes.Prefer,
             TorrentSeedsAtOnce = settings.TorrentSeedsAtOnce,
             TorrentConnectionsPerTorrent = settings.TorrentConnectionsPerTorrent,

@@ -68,6 +68,8 @@ public sealed class TorrentJobInfo
     /// <summary>Why seeding last stopped by itself with a fault (a file check that found damage, say); cleared when it seeds again.</summary>
     public string? SeedingStoppedNote { get; set; }
 
+    /// <summary>ANDROID.9: why it waits for the phone's network or charger (queued for Wi-Fi, or seeding held); null otherwise.</summary>
+    [JsonIgnore] public string? WaitingFor { get; set; }
     [JsonIgnore] public int Peers { get; set; }
     [JsonIgnore] public int Seeds { get; set; }
     [JsonIgnore] public double UploadRate { get; set; }

@@ -157,7 +157,7 @@ internal sealed class AddTorrentScreen
         if (_withGroup.CheckedButtonId != (_phoneMode ? Resource.Id.with_phone : Resource.Id.with_torbox))
             _withGroup.Check(_phoneMode ? Resource.Id.with_phone : Resource.Id.with_torbox);
         _withHint.Text = _phoneMode
-            ? TorrentText.PhoneHint(!_activity.Capabilities.IsRemote, _activity.HostName)
+            ? TorrentText.PhoneHint(!_activity.Capabilities.IsRemote, _activity.HostName, _activity.Capabilities.IsRemote, _host.Settings)
             : TorBoxText.TorBoxHint(!_activity.Capabilities.IsRemote, _activity.HostName);
     }
 

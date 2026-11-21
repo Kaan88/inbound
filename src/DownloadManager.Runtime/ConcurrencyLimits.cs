@@ -73,6 +73,7 @@ public sealed partial class DownloadManagerService
 
         foreach (var runtime in flagged) Raise(runtime, "updated");
         AnnounceMeteredWait();
+        ApplyTorrentConditions();
     }
 
     /// <summary>
@@ -114,6 +115,18 @@ public sealed partial class DownloadManagerService
             // A runner in its completion tail (state already Completed, runner not yet done) is never sent back to the queue.
             .Where(r => (r.Starting || r.Runner is { IsCompleted: false }) && !r.PauseRequested && !r.CancelRequested && !r.Job.IsTerminal)
             .ToList();
+        if (TorrentNetworkHoldsLocked())
+        {
+            // ANDROID.9: torrents only on Wi-Fi: a running torrent goes back to its queue (it resumes from its pieces).
+            foreach (var runtime in running.Where(r => r.Job.Torrent is not null).ToList())
+            {
+                if (WhyNotPreemptable(runtime) is not null) continue;
+                PreemptLocked(runtime);
+                requeued.Add(runtime);
+                running.Remove(runtime);
+            }
+        }
+
         var queueDefaults = _settings.Queues.FirstOrDefault(q => q.Id == _settings.DefaultQueueId) ?? _settings.Queues[0];
         int QueueKey(JobRuntime r) => r.Job.IsQueued ? (_settings.Queues.FirstOrDefault(q => q.Id == r.Job.QueueId) ?? queueDefaults).Id : -1;
         int QueueMax(JobRuntime r) => r.Job.IsQueued

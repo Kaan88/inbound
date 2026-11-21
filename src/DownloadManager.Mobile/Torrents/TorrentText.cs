@@ -24,12 +24,15 @@ public sealed class TorrentRowInfo
         if (TorrentText.IsSeeding(job))
         {
             var parts = new List<string>();
-            if (torrent.UploadRate >= 1) parts.Add("↑ " + Fmt.Rate(torrent.UploadRate));
+            // Held seeding (Wi-Fi or charging) is still Seeding, but nothing uploads, so the reason replaces the rate.
+            if (TorrentText.Waiting(torrent) is { } held) parts.Add(held);
+            else if (torrent.UploadRate >= 1) parts.Add("↑ " + Fmt.Rate(torrent.UploadRate));
             parts.Add("ratio " + TorrentText.Ratio(torrent.Ratio) + TorrentText.OfGoal(torrent, settings));
             return new TorrentRowInfo { Lead = "Seeding", Rest = string.Join(" · ", parts), Tone = TorrentTone.Done };
         }
 
-        if (!TorrentText.IsActive(job)) return null;
+        if (!TorrentText.IsActive(job))
+            return job.State != "completed" && TorrentText.Waiting(torrent) is { } waiting ? new TorrentRowInfo { Lead = waiting, Tone = TorrentTone.Amber } : null;
         if (torrent.Checking || job.State == "verifying") return new TorrentRowInfo { Lead = "Checking files" };
         if (!torrent.HasMetadata)
             return new TorrentRowInfo { Lead = "Getting file list", Rest = TorrentText.Peers(torrent.Peers) };
@@ -62,6 +65,19 @@ public static class TorrentText
     /// <summary>The line under "Download with" while This phone is chosen.</summary>
     public static string PhoneHint(bool phoneHost, string hostName) =>
         $"Peers see {(phoneHost ? "this phone" : hostName)}'s IP address, and it uploads to them while it downloads.";
+
+    /// <summary>"Waiting for Wi-Fi" or "Waiting for charging" as the Host says it (a queued torrent, or held seeding); null when it is not waiting.</summary>
+    public static string? Waiting(TorrentDto? torrent) => string.IsNullOrWhiteSpace(torrent?.WaitingFor) ? null : torrent.WaitingFor.Trim();
+
+    /// <summary>The "Wi-Fi only" switch and hint apply to this phone's own Host only: the setting is not available through a paired PC or server.</summary>
+    public static bool WifiOnlyApplies(bool remoteHost, SettingsDto? settings) => !remoteHost && settings is { TorrentOnlyOnUnmeteredNetwork: true };
+
+    /// <summary>The line under "Download with" in Add torrent: the phone hint, then "Wi-Fi only, as set in Settings." when that setting is on.</summary>
+    public static string PhoneHint(bool phoneHost, string hostName, bool remoteHost, SettingsDto? settings) =>
+        PhoneHint(phoneHost, hostName) + (WifiOnlyApplies(remoteHost, settings) ? " Wi-Fi only, as set in Settings." : "");
+
+    public const string WifiOnlyTitle = "Wi-Fi only";
+    public const string WifiOnlySubtitle = "Peers never use mobile data";
 
     public static bool IsActive(JobDto job) => job.State is "connecting" or "downloading" or "verifying";
 
@@ -124,8 +140,14 @@ public static class TorrentText
     /// <summary>"48 h" (whole hours) or "1.5 h".</summary>
     public static string Hours(double hours) => hours.ToString("0.#", CultureInfo.InvariantCulture) + " h";
 
-    /// <summary>The Seeding row of t7: "Until ratio 1.0 or 48 hours" (the network and charging part of the mockup waits for a Host setting).</summary>
-    public static string SeedingSubtitle(SettingsDto settings)
+    /// <summary>The Seeding row of t7: "Until ratio 1.0 or 48 hours, Wi-Fi and charging". The last part is only for this phone's own Host (the setting is pipe-only).</summary>
+    public static string SeedingSubtitle(SettingsDto settings, bool remoteHost = false)
+    {
+        var text = SeedingLimits(settings);
+        return settings.TorrentSeedAfterDownload && !remoteHost && settings.TorrentSeedOnlyOnUnmeteredAndCharging ? text + ", Wi-Fi and charging" : text;
+    }
+
+    private static string SeedingLimits(SettingsDto settings)
     {
         if (!settings.TorrentSeedAfterDownload) return "Stops when the download is done";
         var ratio = settings.TorrentSeedRatio > 0;
@@ -177,6 +199,7 @@ public static class TorrentText
         var torrent = job.Torrent;
         var downRate = job.BytesPerSecond is >= 1 && IsActive(job) ? job.BytesPerSecond.Value : 0;
         var upRate = torrent?.UploadRate >= 1 ? torrent.UploadRate : 0;
+        if (Waiting(torrent) is { } waiting && !IsActive(job)) return waiting;
         if (IsSeeding(job)) return upRate > 0 ? "↑ " + Fmt.Rate(upRate) : "Seeding";
         if (downRate <= 0 && upRate <= 0) return job.State == "paused" ? "Paused" : IsActive(job) ? "Starting…" : "";
         return "↓ " + Fmt.Rate(downRate) + " · ↑ " + Fmt.Rate(upRate);
@@ -195,7 +218,7 @@ public static class TorrentText
     /// <summary>The Overview tab's lines. A line whose figure the Host did not give is left out.</summary>
     /// <param name="savedTo">The folder as the screen writes it (already shortened for a phone).</param>
     public static IReadOnlyList<TorrentLine> Overview(JobDto job, TorrentDetailsResult? details, TorrentTrackersResult? trackers,
-        TorrentPiecesResult? pieces, SettingsDto? settings, string savedTo, DateTimeOffset now)
+        TorrentPiecesResult? pieces, SettingsDto? settings, string savedTo, DateTimeOffset now, bool remoteHost = false)
     {
         var lines = new List<TorrentLine>();
         var torrent = job.Torrent ?? new TorrentDto();
@@ -209,10 +232,19 @@ public static class TorrentText
         else if (details is { PieceCount: > 0 })
             lines.Add(new TorrentLine("Pieces", details.PieceCount.ToString("N0", CultureInfo.InvariantCulture)));
         if (savedTo.Length > 0) lines.Add(new TorrentLine("Saved to", savedTo));
-        // The Wi-Fi only part of this line waits for a Host setting (owner decision pending).
-        if (settings is { TorrentListenPort: > 0 }) lines.Add(new TorrentLine("Network", "port " + settings.TorrentListenPort.ToString(CultureInfo.InvariantCulture)));
+        var network = NetworkText(settings, remoteHost);
+        if (network.Length > 0) lines.Add(new TorrentLine("Network", network));
         lines.Add(new TorrentLine("Added", AddedText(details?.AddedAt is { } at && at != default ? at : job.CreatedAt, torrent.Source, now)));
         return lines;
+    }
+
+    /// <summary>"Wi-Fi only · port 51413", "port 51413", "Wi-Fi only" or "" when there is nothing to say. Wi-Fi only is this phone's own Host only.</summary>
+    public static string NetworkText(SettingsDto? settings, bool remoteHost)
+    {
+        var parts = new List<string>();
+        if (WifiOnlyApplies(remoteHost, settings)) parts.Add(WifiOnlyTitle);
+        if (settings is { TorrentListenPort: > 0 }) parts.Add("port " + settings.TorrentListenPort.ToString(CultureInfo.InvariantCulture));
+        return string.Join(" · ", parts);
     }
 
     /// <summary>"48 of 212": connected, then the most any tracker counts when that is more.</summary>

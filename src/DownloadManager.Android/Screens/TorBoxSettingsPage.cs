@@ -30,7 +30,7 @@ internal sealed class TorBoxSettingsPage
     private TextView? _toolNote, _savedLine;
     private readonly DownloadsModel _downloads;
     private readonly QueueSettingsModel _settings;
-    private MaterialSwitch? _hereSwitch;
+    private MaterialSwitch? _hereSwitch, _wifiSwitch;
     private TextView? _hereSub, _seedingSub, _connectionsSub;
     private bool _hasKey, _disposed, _settingArchives, _renderingTorrents, _savingTorrents;
 
@@ -106,8 +106,7 @@ internal sealed class TorBoxSettingsPage
 
     /// <summary>
     /// The Torrents group (t7). All three rows are the Host's settings, so the title names the Host: "this phone" only when it is the phone.
-    /// The mockup's "Wi-Fi only" switch and the "Wi-Fi and charging" words are left out: the Host has no torrent-specific network or charging
-    /// setting yet (owner decision pending).
+    /// The "Wi-Fi only" switch and the "Wi-Fi and charging" words are pipe-only Host settings, so a paired PC or server does not show them.
     /// </summary>
     private void BuildTorrents(LinearLayout body)
     {
@@ -124,6 +123,24 @@ internal sealed class TorBoxSettingsPage
             if (_renderingTorrents || _savingTorrents) return;
             SaveTorrents(s => s.TorrentsEnabled = e.IsChecked);
         };
+        if (!_activity.Capabilities.IsRemote)
+        {
+            // Pipe-only on the Host, so a paired PC or server does not show this row.
+            Row(rows, TorrentText.WifiOnlyTitle, out var wifiSub, out var wifiRow);
+            wifiSub.Text = TorrentText.WifiOnlySubtitle;
+            _wifiSwitch = new MaterialSwitch(_activity) { ContentDescription = TorrentText.WifiOnlyTitle };
+            wifiRow.AddView(_wifiSwitch);
+            wifiRow.Clickable = true;
+            wifiRow.Focusable = true;
+            wifiRow.Background = new TypedValueHolder(_activity).SelectableBackground();
+            wifiRow.Click += (_, _) => { if (_wifiSwitch.Enabled) _wifiSwitch.Toggle(); };
+            _wifiSwitch.CheckedChange += (_, e) =>
+            {
+                if (_renderingTorrents || _savingTorrents) return;
+                SaveTorrents(s => s.TorrentOnlyOnUnmeteredNetwork = e.IsChecked);
+            };
+        }
+
         NavRow(rows, "Seeding", out _seedingSub, () => TorrentSettingsSheets.ShowSeeding(_activity, _downloads, _settings));
         NavRow(rows, "Connections and limits", out _connectionsSub, () => TorrentSettingsSheets.ShowConnections(_activity, _downloads, _settings));
         _downloads.SettingsChanged += RenderTorrents;
@@ -139,8 +156,16 @@ internal sealed class TorBoxSettingsPage
         _hereSwitch.Checked = settings.TorrentsEnabled;
         _renderingTorrents = false;
         _hereSwitch.Enabled = !_savingTorrents && _downloads.SnapshotShown && _settings.CanWriteSafely;
+        if (_wifiSwitch is not null)
+        {
+            _renderingTorrents = true;
+            _wifiSwitch.Checked = settings.TorrentOnlyOnUnmeteredNetwork;
+            _renderingTorrents = false;
+            _wifiSwitch.Enabled = _hereSwitch.Enabled;
+        }
+
         _hereSub!.Text = TorrentText.DownloadHereSubtitle(settings.TorrentsEnabled, _client is not null);
-        _seedingSub!.Text = TorrentText.SeedingSubtitle(settings);
+        _seedingSub!.Text = TorrentText.SeedingSubtitle(settings, _activity.Capabilities.IsRemote);
         _connectionsSub!.Text = TorrentText.ConnectionsSubtitle(settings);
     }
 
@@ -148,6 +173,7 @@ internal sealed class TorBoxSettingsPage
     {
         _savingTorrents = true;
         _hereSwitch!.Enabled = false;
+        if (_wifiSwitch is not null) _wifiSwitch.Enabled = false;
         TorBoxUi.Run(_activity, () => _settings.UpdateSettingAsync(edit), result =>
         {
             if (_disposed) return;

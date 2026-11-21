@@ -4534,6 +4534,8 @@ public sealed partial class MainWindow : Window
             TorrentDht = source.TorrentDht,
             TorrentPex = source.TorrentPex,
             TorrentLsd = source.TorrentLsd,
+            TorrentOnlyOnUnmeteredNetwork = source.TorrentOnlyOnUnmeteredNetwork,
+            TorrentSeedOnlyOnUnmeteredAndCharging = source.TorrentSeedOnlyOnUnmeteredAndCharging,
             TorrentEncryption = source.TorrentEncryption,
             TorrentSeedsAtOnce = source.TorrentSeedsAtOnce,
             TorrentConnectionsPerTorrent = source.TorrentConnectionsPerTorrent,

@@ -117,6 +117,7 @@ public sealed partial class DownloadManagerService
         var on = TorrentsOn;
         var onEngine = engine?.IsSeeding(runtime.Job.Id) == true;
         bool clear;
+        var held = false;
         lock (_sync)
         {
             // A stop or a removal that came while this start waited for the gate took it out of the pending set.
@@ -136,6 +137,23 @@ public sealed partial class DownloadManagerService
                 runtime.Job.Touch();
             }
 
+            // ANDROID.9: seeding only on Wi-Fi while charging: it counts as seeding and waits for the worker until the rule lets go.
+            if (refusal is null && SeedHoldReasonLocked() is { } why)
+            {
+                held = true;
+                _seedHeld.Add(runtime.Job.Id);
+                if (runtime.Job.Torrent!.WaitingFor != why)
+                {
+                    runtime.Job.Torrent.WaitingFor = why;
+                    runtime.Job.Touch();
+                }
+            }
+            else if (refusal is null)
+            {
+                _seedHeld.Remove(runtime.Job.Id);
+                runtime.Job.Torrent!.WaitingFor = null;
+            }
+
             clear = refusal is not null && runtime.Job.Torrent is { Seeding: true } && !onEngine;
         }
 
@@ -148,6 +166,7 @@ public sealed partial class DownloadManagerService
 
         await PersistAsync(runtime, CancellationToken.None).ConfigureAwait(false);
         Raise(runtime, "updated");
+        if (held) return null;
         string? error;
         try
         {
@@ -217,7 +236,9 @@ public sealed partial class DownloadManagerService
         {
             // T8: it sends nothing more, also when its job has gone.
             _speedHistory.UploadStopped(jobId, DateTimeOffset.UtcNow);
+            _seedHeld.Remove(jobId);
             if (!_jobs.TryGetValue(jobId, out runtime) || runtime.Job.Torrent is not { } info) return;
+            info.WaitingFor = null;
             var noted = failure is { Length: > 0 } && info.SeedingStoppedNote != failure;
             if (!info.Seeding && !noted) return;
             if (noted) info.SeedingStoppedNote = failure;
@@ -254,6 +275,11 @@ public sealed partial class DownloadManagerService
     {
         // A Host that is closing keeps the flag, so seeding goes on after the next start.
         if (_shuttingDown) return;
+        lock (_sync)
+        {
+            if (reason == TorrentSeedingEnd.Stopped && _seedHeld.Contains(jobId)) return;
+        }
+
         if (reason != TorrentSeedingEnd.Stopped) _log?.Invoke($"Torrent job {jobId}: seeding ended ({reason}): {message}");
         // A fault is said on the row (walk 2026-11-12: a recheck that found damage left only "Completed"); it is saved
         // even when seeding was already off, so a late fault isn't lost.

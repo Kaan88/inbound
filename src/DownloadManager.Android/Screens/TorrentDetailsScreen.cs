@@ -355,7 +355,7 @@ internal sealed class TorrentDetailsScreen
     {
         // t4: the folder as Add torrent's Save to writes it ("Download/Torrents/Compressed"), not only its last part.
         var savedTo = SavePathWords.ForField(_details?.DestinationDirectory ?? _row.Job.DestinationDirectory ?? "");
-        var lines = TorrentText.Overview(_row.Job, _details, _trackers, _pieces, _model.Settings, savedTo, DateTimeOffset.Now);
+        var lines = TorrentText.Overview(_row.Job, _details, _trackers, _pieces, _model.Settings, savedTo, DateTimeOffset.Now, _activity.Capabilities.IsRemote);
         // Updated in place while the same rows are there, so TalkBack keeps its place while the torrent runs.
         if (_overview.Count == lines.Count && _content.ChildCount == lines.Count && lines.Select(l => l.Label).SequenceEqual(_overview.Select(o => o.Label)))
         {

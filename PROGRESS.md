@@ -25,6 +25,28 @@ Deviations to show the owner: a pasted magnet is handed to the Host at once with
 (the Host has no other way), so it shows in Downloads while Add torrent is open and is removed on Cancel; seeding rows
 count as Finished, not Active; no torrent download limit exists, so Connections and limits has the upload limit only.
 Owner question: the t7 "Wi-Fi only" switch and "Wi-Fi and charging" for seeding need Host settings that don't exist.
+Owner answer (2026-11-22): "Add both to the Host".
+
+## ANDROID.9: torrents on Wi-Fi, seeding on Wi-Fi while charging, 2026-11-22
+
+Two Host settings, both on by default and pipe-only (a paired PC or server doesn't show them):
+`TorrentOnlyOnUnmeteredNetwork` keeps torrents in their queue on a metered network ("Waiting for Wi-Fi"), sends a
+running one back, and has no "Use data" lift. `TorrentSeedOnlyOnUnmeteredAndCharging` takes a seeding torrent off the
+worker while the network is metered or the phone isn't charging; it stays marked seeding with "Waiting for Wi-Fi" or
+"Waiting for charging" (`TorrentDto.WaitingFor`) and goes back by itself. A stop while held ends it. Only a platform
+that reports the network and power (Android) is ever held; the desktop never is. Code: `Runtime/TorrentConditions.cs`,
+`ConcurrencyLimits.cs`, `TorrentSeeding.cs`. Tests: `HostCommandDispatcherTorrentConditionsTests` (3), the 127
+torrent, seeding and queue dispatcher tests, Mobile 619. The full integration run: 2111 passed, golden frames
+regenerated (the new fields, plus `sitesCachedFirstPage` and the archive `savedPasswords` count from earlier commits
+that had left the file stale), `BrowserRefreshDoesNotPublishUntilSaveAndFinishesCommitAfterCallerCancellation` failed
+once in the full run and passed alone (flaky, not touched here).
+Phone (S24, APK `43318906`, check-apk 16/16): t7 "Wi-Fi only · Peers never use mobile data" switch and the Seeding row
+"Until ratio 1.0 or 48 hours, Wi-Fi and charging"; the Seeding sheet's "Only on Wi-Fi while charging" toggle; the t1
+hint ends "Wi-Fi only, as set in Settings." The t4 Network row ("Wi-Fi only · port N") and the waiting rows are covered
+by Mobile tests; no torrent was on the phone. Captures `wifi-t7`, `wifi-seeding-sheet`, `wifi-t1` in
+`artifacts/android-app/pairs/android9-torbox-20261121/`.
+Deviations to show the owner: the Seeding sheet toggle label and the waiting row text (amber; held seeding reads
+"Seeding · Waiting for charging · ratio 0.71") are not in the mockups.
 
 ## ANDROID.9 build started, 2026-11-21
 

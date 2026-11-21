@@ -117,13 +117,13 @@ public sealed class TorrentTests
     [Fact]
     public void Seed_goals_are_written_as_the_mockup_does()
     {
-        Assert.Equal("seed until 1.0 or 48 h", TorrentText.SeedUntil("global", null, new SettingsDto { TorrentSeedAfterDownload = true, TorrentSeedRatio = 1, TorrentSeedHours = 48 }));
+        Assert.Equal("seed until 1.0 or 48 h", TorrentText.SeedUntil("global", null, new SettingsDto { TorrentSeedAfterDownload = true, TorrentSeedRatio = 1, TorrentSeedHours = 48, TorrentSeedOnlyOnUnmeteredAndCharging = false }));
         Assert.Equal("seed until 2.5", TorrentText.SeedUntil("ratio", 2.5, null));
         Assert.Equal("seed for 12 h", TorrentText.SeedUntil("hours", 12, null));
         Assert.Equal("seeds until stopped", TorrentText.SeedUntil("never", null, null));
         Assert.Equal("doesn't seed", TorrentText.SeedUntil("global", null, new SettingsDto { TorrentSeedAfterDownload = false }));
-        Assert.Equal("Until ratio 1.0 or 48 hours", TorrentText.SeedingSubtitle(new SettingsDto { TorrentSeedAfterDownload = true, TorrentSeedRatio = 1, TorrentSeedHours = 48 }));
-        Assert.Equal("Until ratio 2.5", TorrentText.SeedingSubtitle(new SettingsDto { TorrentSeedAfterDownload = true, TorrentSeedRatio = 2.5, TorrentSeedHours = 0 }));
+        Assert.Equal("Until ratio 1.0 or 48 hours", TorrentText.SeedingSubtitle(new SettingsDto { TorrentSeedAfterDownload = true, TorrentSeedRatio = 1, TorrentSeedHours = 48, TorrentSeedOnlyOnUnmeteredAndCharging = false }));
+        Assert.Equal("Until ratio 2.5", TorrentText.SeedingSubtitle(new SettingsDto { TorrentSeedAfterDownload = true, TorrentSeedRatio = 2.5, TorrentSeedHours = 0, TorrentSeedOnlyOnUnmeteredAndCharging = false }));
         Assert.Equal("Stops when the download is done", TorrentText.SeedingSubtitle(new SettingsDto { TorrentSeedAfterDownload = false }));
     }
 
@@ -155,7 +155,7 @@ public sealed class TorrentTests
         var trackers = new TorrentTrackersResult { Ok = true, Trackers = [new TorrentTrackerDto { Seeds = 212, Peers = 31 }, new TorrentTrackerDto { Seeds = -1, Peers = -1 }] };
         var pieces = new TorrentPiecesResult { Ok = true, Count = 15820, Have = 10124 };
         var details = new TorrentDetailsResult { Ok = true, PieceCount = 15820, AddedAt = new DateTimeOffset(2026, 11, 21, 14, 1, 0, TimeSpan.Zero) };
-        var settings = new SettingsDto { TorrentSeedAfterDownload = true, TorrentSeedRatio = 1, TorrentSeedHours = 48, TorrentListenPort = 51413 };
+        var settings = new SettingsDto { TorrentSeedAfterDownload = true, TorrentSeedRatio = 1, TorrentSeedHours = 48, TorrentListenPort = 51413, TorrentOnlyOnUnmeteredNetwork = false };
         var now = details.AddedAt.AddMinutes(30);
         var lines = TorrentText.Overview(job, details, trackers, pieces, settings, "Downloads / Disc images", now).ToDictionary(l => l.Label, l => l.Value);
         Assert.Equal("48 of 212", lines["Seeds"]);
@@ -487,5 +487,48 @@ public sealed class TorrentTests
         // The JSON round trip of the request is what the Host reads.
         var json = JsonSerializer.Serialize(TorrentClient.MagnetRequest(Magnet, null), IpcJsonContext.Default.TorrentAddRequest);
         Assert.Contains("askWhenReady", json);
+    }
+
+    [Fact]
+    public void WifiAndChargingWords()
+    {
+        var on = new SettingsDto { TorrentSeedAfterDownload = true, TorrentSeedRatio = 1, TorrentSeedHours = 48 };
+        Assert.Equal("Until ratio 1.0 or 48 hours, Wi-Fi and charging", TorrentText.SeedingSubtitle(on));
+        Assert.Equal("Until ratio 1.0 or 48 hours", TorrentText.SeedingSubtitle(on, remoteHost: true));
+        Assert.Equal("Until ratio 1.0 or 48 hours", TorrentText.SeedingSubtitle(new SettingsDto { TorrentSeedAfterDownload = true, TorrentSeedRatio = 1, TorrentSeedHours = 48, TorrentSeedOnlyOnUnmeteredAndCharging = false }));
+        Assert.Equal("Stops when the download is done", TorrentText.SeedingSubtitle(new SettingsDto { TorrentSeedAfterDownload = false }));
+
+        var wifi = new SettingsDto { TorrentOnlyOnUnmeteredNetwork = true, TorrentListenPort = 51413 };
+        Assert.Equal("Wi-Fi only · port 51413", TorrentText.NetworkText(wifi, false));
+        Assert.Equal("port 51413", TorrentText.NetworkText(wifi, true));
+        Assert.Equal("Wi-Fi only", TorrentText.NetworkText(new SettingsDto { TorrentOnlyOnUnmeteredNetwork = true }, false));
+        Assert.Equal("", TorrentText.NetworkText(new SettingsDto { TorrentOnlyOnUnmeteredNetwork = false }, false));
+        Assert.Equal("", TorrentText.NetworkText(null, false));
+
+        var hint = "Peers see this phone's IP address, and it uploads to them while it downloads.";
+        Assert.Equal(hint + " Wi-Fi only, as set in Settings.", TorrentText.PhoneHint(true, "", false, wifi));
+        Assert.Equal(hint, TorrentText.PhoneHint(true, "", true, wifi));
+        Assert.Equal(hint, TorrentText.PhoneHint(true, "", false, new SettingsDto { TorrentOnlyOnUnmeteredNetwork = false }));
+        Assert.Equal(hint, TorrentText.PhoneHint(true, "", false, null));
+    }
+
+    [Fact]
+    public void WaitingForShowsOnRowsAndDetails()
+    {
+        var queued = Torrent("queued", (_, t) => t.WaitingFor = "Waiting for Wi-Fi");
+        var row = TorrentRowInfo.For(queued, null)!;
+        Assert.Equal("Waiting for Wi-Fi", row.Subtitle);
+        Assert.Equal(TorrentTone.Amber, row.Tone);
+        Assert.Equal("Waiting for Wi-Fi", TorrentText.RateLine(queued));
+        Assert.Null(TorrentRowInfo.For(Torrent("queued"), null));
+
+        var held = Torrent("completed", (_, t) => { t.Seeding = true; t.Ratio = 0.71; t.WaitingFor = "Waiting for charging"; });
+        Assert.Equal("Seeding · Waiting for charging · ratio 0.71", TorrentRowInfo.For(held, null)!.Subtitle);
+        Assert.Equal("Waiting for charging", TorrentText.RateLine(held));
+        Assert.Equal("Seeding · ↑ 1.2 MB/s · ratio 0.71", TorrentRowInfo.For(Torrent("completed", (_, t) => { t.Seeding = true; t.Ratio = 0.71; }), null)!.Subtitle);
+
+        // A blank WaitingFor is not a wait.
+        Assert.Null(TorrentText.Waiting(new TorrentDto { WaitingFor = " " }));
+        Assert.Null(TorrentRowInfo.For(Torrent("queued", (_, t) => t.WaitingFor = ""), null));
     }
 }

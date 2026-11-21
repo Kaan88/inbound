@@ -323,6 +323,11 @@ public sealed class SettingsDto
     public bool TorrentPex { get; set; } = true;
     /// <summary>T3: local peer discovery (LSD). Always off for a private torrent.</summary>
     public bool TorrentLsd { get; set; }
+    /// <summary>ANDROID.9: torrents download only on a network the platform reports not metered (the phone's Wi-Fi only).
+    /// An older Host leaves it out and reads as true, the default.</summary>
+    public bool TorrentOnlyOnUnmeteredNetwork { get; set; } = true;
+    /// <summary>ANDROID.9: finished torrents seed only on a not-metered network while charging (where the platform reports power).</summary>
+    public bool TorrentSeedOnlyOnUnmeteredAndCharging { get; set; } = true;
     /// <summary>T3: <c>prefer</c> (encrypted when the peer can), <c>require</c> (encrypted only; peers that can't are left
     /// out) or <c>off</c> (plain only).</summary>
     public string TorrentEncryption { get; set; } = "prefer";

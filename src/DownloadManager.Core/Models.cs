@@ -732,6 +732,16 @@ public sealed class AppSettings
     public bool TorrentPex { get; set; } = true;
     /// <summary>T3: local peer discovery (LSD) on this network. Off by default, as before T3.</summary>
     public bool TorrentLsd { get; set; }
+    /// <summary>
+    /// ANDROID.9 (owner, 2026-11-22): torrents download only on a network the platform reports not metered (the phone's
+    /// "Wi-Fi only"), with no "Use data" lift. On by default; a platform that never reports the network (desktop) is never held.
+    /// </summary>
+    public bool TorrentOnlyOnUnmeteredNetwork { get; set; } = true;
+    /// <summary>
+    /// ANDROID.9: finished torrents seed only on a not-metered network while charging; otherwise their seeding waits and goes
+    /// on by itself. Only where the platform reports power (the phone). On by default.
+    /// </summary>
+    public bool TorrentSeedOnlyOnUnmeteredAndCharging { get; set; } = true;
     /// <summary>T3: <c>prefer</c>, <c>require</c> or <c>off</c> (<see cref="TorrentEncryptionModes"/>).</summary>
     public string TorrentEncryption { get; set; } = TorrentEncryptionModes.Prefer;
     /// <summary>T3: how many finished torrents seed at once; 0 is all of them.</summary>

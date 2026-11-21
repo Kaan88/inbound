@@ -96,6 +96,8 @@ public sealed class TorrentDto
     public double? SeedGoalValue { get; set; }
     /// <summary>T3: downloads its pieces in order.</summary>
     public bool Sequential { get; set; }
+    /// <summary>ANDROID.9: "Waiting for Wi-Fi" (queued, or its seeding held) or "Waiting for charging" (seeding held); null otherwise.</summary>
+    public string? WaitingFor { get; set; }
 }
 
 public sealed class TorrentFileDto

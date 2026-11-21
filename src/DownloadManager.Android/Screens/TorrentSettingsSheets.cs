@@ -25,15 +25,20 @@ internal static class TorrentSettingsSheets
     private const long MostUploadKilobytes = 10_000_000;
 
     /// <summary>Keep sharing after the download, and when to stop: TorrentSeedAfterDownload, TorrentSeedRatio, TorrentSeedHours.</summary>
-    // The "Wi-Fi and charging" part of the mockup's subtitle is left out: the Host has no torrent-specific network or charging setting yet (owner decision pending).
     public static void ShowSeeding(MainActivity activity, DownloadsModel downloads, QueueSettingsModel settings)
     {
         var current = downloads.Settings;
         var sheet = new Sheet(activity, "Seeding", "A finished torrent keeps uploading to other peers until it reaches the first limit below. Each torrent can have its own limits on its details.");
         var seed = sheet.Switch("Keep sharing after the download", current.TorrentSeedAfterDownload);
+        // Pipe-only on the Host: not offered while a paired PC or server is managed.
+        var charging = activity.Capabilities.IsRemote ? null : sheet.Switch("Only on Wi-Fi while charging", current.TorrentSeedOnlyOnUnmeteredAndCharging);
         var ratio = sheet.Field("Stop at ratio (0 for no ratio limit)", Text(current.TorrentSeedRatio), decimalNumber: true);
         var hours = sheet.Field("Stop after hours (0 for no time limit)", Text(current.TorrentSeedHours), decimalNumber: true);
-        void Enable() => ratio.Enabled = hours.Enabled = seed.Checked;
+        void Enable()
+        {
+            ratio.Enabled = hours.Enabled = seed.Checked;
+            if (charging is not null) charging.Enabled = seed.Checked;
+        }
         seed.CheckedChange += (_, _) => Enable();
         Enable();
         sheet.OnSave(() =>
@@ -41,8 +46,9 @@ internal static class TorrentSettingsSheets
             if (!TryNumber(ratio, out var r) || r is < 0 or > MostRatio) return sheet.Problem("Enter a ratio from 0 to 100 (0 is no ratio limit).");
             if (!TryNumber(hours, out var h) || h is < 0 or > MostHours) return sheet.Problem("Enter hours from 0 to 8760 (0 is no time limit).");
             var on = seed.Checked;
+            var chargingOn = charging?.Checked ?? current.TorrentSeedOnlyOnUnmeteredAndCharging;
             if (on && r == 0 && h == 0) return sheet.Problem("Seeding needs a ratio or a time limit; both can't be 0.");
-            sheet.Save(settings, downloads, s => { s.TorrentSeedAfterDownload = on; s.TorrentSeedRatio = r; s.TorrentSeedHours = h; });
+            sheet.Save(settings, downloads, s => { s.TorrentSeedAfterDownload = on; s.TorrentSeedRatio = r; s.TorrentSeedHours = h; if (charging is not null) s.TorrentSeedOnlyOnUnmeteredAndCharging = chargingOn; });
             return true;
         });
         sheet.Show();

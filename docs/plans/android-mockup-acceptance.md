@@ -51,7 +51,7 @@ ANDROID.9 mockups, approved by the owner (2026-11-21, "Approved, build them"): `
 `t-torrents-torbox-archives.html`. The phone does the work in its own Host; with another host selected the same
 screens act on that host (owner: "Both").
 
-ANDROID.9 results on the S24 (phone Host, real data, 2026-11-21), side by side with the mockups still to do: t2 cache hit and miss, t5, t7 TorBox group: built. t3 archive rows (needs a password, extracted), t6 (both checkboxes), t7 Archives group with Saved passwords: built. Torrents (2026-11-22): t1 phone mode (.torrent picked and listed, magnet "File list found", Download 795 MB), t3 torrent rows
+ANDROID.9 results on the S24 (phone Host, real data, 2026-11-21), side by side with the mockups still to do: t7 "Wi-Fi only" switch, Seeding "Wi-Fi and charging" and the t1 Wi-Fi hint built and seen on the S24 (2026-11-22, `wifi-t7`, `wifi-seeding-sheet`, `wifi-t1`). t2 cache hit and miss, t5, t7 TorBox group: built. t3 archive rows (needs a password, extracted), t6 (both checkboxes), t7 Archives group with Saved passwords: built. Torrents (2026-11-22): t1 phone mode (.torrent picked and listed, magnet "File list found", Download 795 MB), t3 torrent rows
 (downloading with ↓ and seeds, green Seeding with ratio and a stop button, Torrents chip), t4 (card, Overview rows, Files,
 Trackers; Stop seeding in the main button's place while it seeds, which the mockup doesn't draw), t7 Torrents group: built
 (captures `t1-*`, `t3-*`, `t4-*`, `t7-torrents-off`). Left out pending the owner: t7 "Wi-Fi only", the Wi-Fi part of t4's

@@ -78,6 +78,9 @@ public static class WebSettingsRules
         nameof(SettingsDto.ShowCompletionDialog),
         nameof(SettingsDto.AllowLocalNetwork),
         nameof(SettingsDto.DownloadOnlyOnUnmeteredNetwork),
+        // ANDROID.9: the phone's own network and charger rules for torrents, as the one above.
+        nameof(SettingsDto.TorrentOnlyOnUnmeteredNetwork),
+        nameof(SettingsDto.TorrentSeedOnlyOnUnmeteredAndCharging),
         nameof(SettingsDto.PreventSleepWhileDownloading),
         // Turning torrents on makes the PC take connections from peers, and the handler is Windows' own setting; the
         // port and the router request open the PC to the network (and a firewall rule is made for that port).
