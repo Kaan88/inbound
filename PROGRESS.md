@@ -37,6 +37,8 @@ through `sites.transfer.start`), items 1-3, 8 and 9, and a thin loading bar. Ope
 locations has no Host transfer (Host relay, or staging through the phone's Download folder); the phone pane opens at
 Download, not Download/Inbound; folder downloads use a normal transfer with "skip" conflicts; no pull-to-refresh
 (Refresh is in the menu).
+Owner decision (2026-11-22), on r6: the Host relays a copy between two locations (rclone copies remote to remote
+through the Host, no staging on the phone), as recommended over staging through the phone's Download folder.
 
 ## ANDROID.9: torrents on Wi-Fi, seeding on Wi-Fi while charging, 2026-11-22
 
