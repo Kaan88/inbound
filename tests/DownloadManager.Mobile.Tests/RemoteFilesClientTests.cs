@@ -248,4 +248,19 @@ public sealed class RemoteFilesClientTests
         }
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
+
+    [Fact]
+    public async Task ACopyStartSendsTheConflictTheUserChose()
+    {
+        var host = new FakeHostConnection
+        {
+            Reply = request => IpcMessage.Create(SitesMessageTypes.TransferResult, new SiteTransferResultDto
+            {
+                Ok = true, Transfer = new SiteTransferDto { Id = "batch", Direction = "copy" }
+            }, request.Id)
+        };
+        var client = new RemoteFilesClient(host);
+        await client.StartCopyAsync("drive", "/a", [new SiteItemDto { Name = "x" }], "nas", "/b", default, "keepBoth");
+        Assert.Equal("keepBoth", Assert.Single(host.Sent).GetPayload<SiteTransferStartRequest>().Conflict);
+    }
 }

@@ -56,13 +56,13 @@ public sealed class RemoteFilesClient
     /// that offers <see cref="SiteTransferStartRequest.RemoteCopyCapability"/>; an older one refuses the direction.
     /// </summary>
     public Task<SiteTransferResultDto> StartCopyAsync(string sourceSiteId, string sourceFolder, IReadOnlyCollection<SiteItemDto> items,
-        string targetSiteId, string targetFolder, CancellationToken cancellationToken = default)
+        string targetSiteId, string targetFolder, CancellationToken cancellationToken = default, string conflict = RemoteConflicts.Skip)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceSiteId);
         ArgumentException.ThrowIfNullOrWhiteSpace(targetSiteId);
         ArgumentNullException.ThrowIfNull(items);
         if (items.Count == 0) throw new ArgumentException("Choose something to copy.", nameof(items));
-        return StartTransferAsync(RemoteTransfers.Copy(sourceSiteId, sourceFolder, items, targetSiteId, targetFolder), cancellationToken);
+        return StartTransferAsync(RemoteTransfers.Copy(sourceSiteId, sourceFolder, items, targetSiteId, targetFolder, conflict), cancellationToken);
     }
 
     public Task<SiteChangeResultDto> DeleteFilesAsync(SiteChangeRequest request, CancellationToken cancellationToken = default)

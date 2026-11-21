@@ -215,14 +215,14 @@ public static class RemoteTransfers
     /// Files already at the target are skipped, as the pane's other transfers do.
     /// </summary>
     public static SiteTransferStartRequest Copy(string sourceSiteId, string sourceFolder, IEnumerable<SiteItemDto> items,
-        string targetSiteId, string targetFolder) => new()
+        string targetSiteId, string targetFolder, string conflict = RemoteConflicts.Skip) => new()
     {
         SiteId = sourceSiteId,
         Direction = "copy",
         RemoteFolder = RemoteCrumbs.Normalize(sourceFolder),
         DestinationSiteId = targetSiteId,
         DestinationFolder = RemoteCrumbs.Normalize(targetFolder),
-        Conflict = "skip",
+        Conflict = conflict,
         Names = [.. items.Select(item => new SiteTransferNameDto { Name = item.Name, IsFolder = item.IsFolder })],
     };
 
@@ -269,5 +269,40 @@ public sealed record SftpKeyReview(SftpKeyCase Case, IReadOnlyList<SiteHostKeyDt
         if (fingerprint.Length <= 24) return fingerprint;
         int half = (fingerprint.Length + 1) / 2;
         return fingerprint[..half] + "\n" + fingerprint[half..];
+    }
+}
+
+/// <summary>
+/// What a transfer does when a name is already at the target, asked once per batch and only when the target's loaded
+/// listing shows a clash (owner, 2026-11-22). The values are the Host's conflict names.
+/// </summary>
+public static class RemoteConflicts
+{
+    public const string Skip = "skip";
+    public const string Replace = "replace";
+    public const string KeepBoth = "keepBoth";
+
+    /// <summary>
+    /// The selected items (top level) whose names are already in <paramref name="targetListing"/>. A null listing (none loaded,
+    /// or the target is not one a pane lists) means no check: nothing clashes. Names compare ignoring case, so a doubtful
+    /// match asks rather than overwrites.
+    /// </summary>
+    public static List<SiteItemDto> Clashes(IEnumerable<SiteItemDto> selected, IEnumerable<SiteItemDto>? targetListing)
+    {
+        if (targetListing is null) return [];
+        var existing = new HashSet<string>(targetListing.Select(item => item.Name), StringComparer.OrdinalIgnoreCase);
+        return [.. selected.Where(item => existing.Contains(item.Name))];
+    }
+
+    /// <summary>
+    /// "3 files already exist in Home NAS/photos", "report.pdf already exists in ...", "2 folders already exist in ...",
+    /// "4 items already exist in ..." (files and folders mixed).
+    /// </summary>
+    public static string Title(IReadOnlyList<SiteItemDto> clashing, string place)
+    {
+        if (clashing.Count == 1) return $"{clashing[0].Name} already exists in {place}";
+        int folders = clashing.Count(item => item.IsFolder);
+        string noun = folders == 0 ? "files" : folders == clashing.Count ? "folders" : "items";
+        return $"{clashing.Count} {noun} already exist in {place}";
     }
 }

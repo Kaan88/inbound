@@ -463,7 +463,55 @@ internal sealed partial class RemoteFilesScreen
 
     private Task StartSelectionTransferAsync(Pane source, Pane target) => StartTransferAsync(source, target, SelectedItems(source));
 
-    private async Task StartTransferAsync(Pane source, Pane target, IReadOnlyList<SiteItemDto> items)
+    /// <summary>
+    /// Asks only when a selected name is already in the target folder as this pane shows it (no extra request), once per
+    /// batch. A clash made after the pane loaded is left to the Host's handling of the chosen conflict.
+    /// </summary>
+    private Task StartTransferAsync(Pane source, Pane target, IReadOnlyList<SiteItemDto> items)
+    {
+        if (!SameHost() || _mutation || _sheet is not null || items.Count is 0 or > 100 || items.Any(item => !SafeName(item.Name))) return Task.CompletedTask;
+        var mode = RemoteTransfers.Mode(source.IsPhone, target.IsPhone);
+        var clashing = RemoteConflicts.Clashes(items, TargetListing(mode, target));
+        if (clashing.Count == 0) return StartTransferCoreAsync(source, target, items, RemoteConflicts.Skip);
+        ShowConflictSheet(RemoteConflicts.Title(clashing, TargetPlace(target)), conflict => _ = StartTransferCoreAsync(source, target, items, conflict));
+        return Task.CompletedTask;
+    }
+
+    /// <summary>The target's loaded rows, or null when no pane lists the destination folder (then nothing is checked).</summary>
+    private IReadOnlyList<SiteItemDto>? TargetListing(RemoteTransferMode mode, Pane target)
+    {
+        if (target.Loading || target.Error is not null || target.NeedsSignIn || target.KeyProblem) return null;
+        return mode switch
+        {
+            RemoteTransferMode.Upload or RemoteTransferMode.LocationToLocation => target.Rows,
+            RemoteTransferMode.Download when _phoneHost && target.IsPhone && RemoteTransfers.DownloadRelative(target.Path) is not null => target.Rows,
+            _ => null,
+        };
+    }
+
+    private string TargetPlace(Pane target)
+    {
+        if (target.IsPhone) return RemoteFileList.Destination("This phone", target.Path);
+        string root = PaneRoot(target), path = RemoteCrumbs.Normalize(target.Path);
+        string relative = root != "/" && path.StartsWith(root, StringComparison.Ordinal) ? path[root.Length..] : path;
+        return RemoteFileList.Destination(PaneName(target), relative);
+    }
+
+    private void ShowConflictSheet(string title, Action<string> choose)
+    {
+        var dialog = NewSheet(out var content);
+        var heading = FolderText(title, 16, Resource.Attribute.colorOnSurface);
+        heading.SetPadding(Dp(24), Dp(6), Dp(24), Dp(12));
+        content.AddView(heading);
+        SheetRow(content, Resource.Drawable.ic_remote_arrow, "Skip", "Leave the existing ones as they are", () => choose(RemoteConflicts.Skip));
+        SheetRow(content, Resource.Drawable.ic_remote_transfer, "Replace", "Overwrite the existing ones", () => choose(RemoteConflicts.Replace));
+        SheetRow(content, Resource.Drawable.ic_remote_plus, "Keep both", "Save the new ones under a different name", () => choose(RemoteConflicts.KeepBoth));
+        SheetDivider(content);
+        SheetRow(content, Resource.Drawable.ic_remote_caret, "Cancel", null, () => { });
+        ShowSheet(dialog);
+    }
+
+    private async Task StartTransferCoreAsync(Pane source, Pane target, IReadOnlyList<SiteItemDto> items, string conflict)
     {
         if (!SameHost() || _mutation || items.Count is 0 or > 100 || items.Any(item => !SafeName(item.Name))) return;
         var mode = RemoteTransfers.Mode(source.IsPhone, target.IsPhone);
@@ -479,7 +527,7 @@ internal sealed partial class RemoteFilesScreen
             if (mode == RemoteTransferMode.LocationToLocation)
             {
                 // r6: one batch, straight from one location to the other through the Host; nothing comes to this phone.
-                var result = await _client.StartCopyAsync(source.Site!.Id, source.Path, items, target.Site!.Id, target.Path, _life.Token);
+                var result = await _client.StartCopyAsync(source.Site!.Id, source.Path, items, target.Site!.Id, target.Path, _life.Token, conflict);
                 if (!SameHost()) return;
                 if (!result.Ok || result.Transfer is null) failure = result.Message ?? "The Host did not start this transfer.";
                 else batches++;
@@ -491,8 +539,8 @@ internal sealed partial class RemoteFilesScreen
                 {
                     var result = await _client.StartTransferAsync(new SiteTransferStartRequest
                     {
-                        SiteId = source.Site!.Id, Direction = "download", RemoteFolder = source.Path, LocalFolder = folder, SafeSingleDownload = true,
-                        Conflict = "skip", Names = [new SiteTransferNameDto { Name = file.Name, IsFolder = false }]
+                        SiteId = source.Site!.Id, Direction = "download", RemoteFolder = source.Path, LocalFolder = folder, SafeSingleDownload = conflict == RemoteConflicts.Skip,
+                        Conflict = conflict, Names = [new SiteTransferNameDto { Name = file.Name, IsFolder = false }]
                     }, _life.Token);
                     if (!SameHost()) return;
                     if (!result.Ok || result.Transfer is null) { failure = result.Message ?? "The Host did not start this transfer."; break; }
@@ -503,7 +551,7 @@ internal sealed partial class RemoteFilesScreen
                 {
                     var result = await _client.StartTransferAsync(new SiteTransferStartRequest
                     {
-                        SiteId = source.Site!.Id, Direction = "download", RemoteFolder = source.Path, LocalFolder = folder, Conflict = "skip",
+                        SiteId = source.Site!.Id, Direction = "download", RemoteFolder = source.Path, LocalFolder = folder, Conflict = conflict,
                         Names = folders.Select(item => new SiteTransferNameDto { Name = item.Name, IsFolder = true }).ToList()
                     }, _life.Token);
                     if (!SameHost()) return;
@@ -516,7 +564,7 @@ internal sealed partial class RemoteFilesScreen
                 var result = await _client.StartTransferAsync(new SiteTransferStartRequest
                 {
                     SiteId = target.Site!.Id, Direction = "upload", RemoteFolder = target.Path,
-                    LocalFolder = System.IO.Path.Combine(phoneRoot, RemoteTransfers.DownloadRelative(source.Path) ?? ""), Conflict = "skip",
+                    LocalFolder = System.IO.Path.Combine(phoneRoot, RemoteTransfers.DownloadRelative(source.Path) ?? ""), Conflict = conflict,
                     Names = items.Select(item => new SiteTransferNameDto { Name = item.Name, IsFolder = item.IsFolder }).ToList()
                 }, _life.Token);
                 if (!SameHost()) return;

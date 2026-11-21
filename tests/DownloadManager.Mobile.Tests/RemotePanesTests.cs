@@ -229,4 +229,40 @@ public sealed class RemotePanesTests
         Assert.Equal(SitesMessageTypes.Count, host.Sent[3].Type);
         Assert.Equal(SitesMessageTypes.Delete, host.Sent[4].Type);
     }
+
+    [Fact]
+    public void ClashesFindSelectedNamesAlreadyInTheLoadedTargetListingIgnoringCase()
+    {
+        var clashes = RemoteConflicts.Clashes([File("a.jpg"), File("B.jpg"), Folder("Trip"), File("new.jpg")],
+            [File("A.JPG"), File("b.jpg"), File("Trip"), File("other.jpg")]);
+        Assert.Equal(["a.jpg", "B.jpg", "Trip"], clashes.Select(item => item.Name));
+    }
+
+    [Fact]
+    public void NoLoadedTargetListingMeansNoClashAndNoCheck()
+    {
+        Assert.Empty(RemoteConflicts.Clashes([File("a.jpg")], null));
+        Assert.Empty(RemoteConflicts.Clashes([File("a.jpg")], []));
+        Assert.Empty(RemoteConflicts.Clashes([], [File("a.jpg")]));
+    }
+
+    [Fact]
+    public void ClashTitlesCountFilesFoldersOrItemsAndNameASingleOne()
+    {
+        const string place = "Home NAS/photos";
+        Assert.Equal("report.pdf already exists in Home NAS/photos", RemoteConflicts.Title([File("report.pdf")], place));
+        Assert.Equal("Trip already exists in Home NAS/photos", RemoteConflicts.Title([Folder("Trip")], place));
+        Assert.Equal("3 files already exist in Home NAS/photos", RemoteConflicts.Title([File("a"), File("b"), File("c")], place));
+        Assert.Equal("2 folders already exist in Home NAS/photos", RemoteConflicts.Title([Folder("a"), Folder("b")], place));
+        Assert.Equal("2 items already exist in Home NAS/photos", RemoteConflicts.Title([File("a"), Folder("b")], place));
+    }
+
+    [Fact]
+    public void ACopyCarriesTheChosenConflictAndSkipsByDefault()
+    {
+        var items = new[] { File("a") };
+        Assert.Equal("skip", RemoteTransfers.Copy("x", "/", items, "y", "/").Conflict);
+        Assert.Equal(RemoteConflicts.Replace, RemoteTransfers.Copy("x", "/", items, "y", "/", RemoteConflicts.Replace).Conflict);
+        Assert.Equal(RemoteConflicts.KeepBoth, RemoteTransfers.Copy("x", "/", items, "y", "/", RemoteConflicts.KeepBoth).Conflict);
+    }
 }
