@@ -12,6 +12,30 @@ The owner also requires successful real-account sign-in after expiry before 0.0.
 
 **Owner rejection (2026-11-21):** "remote files mockups do not match, remote files tab look, design and usage is not acceptable." The C3 and C4 rows and the Remote Files secondary surfaces below no longer count as accepted. Their evidence was emulator captures of fixtures built to copy the mockup; redo them on real locations and on the owner's phone.
 
+**Real-phone capture (2026-11-21).** Owner's S24 FE, Inbound 0.0.10, This phone Host, real Drive, Dropbox, OneDrive and SFTP locations, dark theme. Captures (private folder names, not committed): `artifacts/android-app/pairs/remote-files-real-20261121/`. Differences from `c3-sites.png`, `c4-site-browser.png` and the design (C4 is "a remote file browser with Site and This phone tabs"):
+
+Locations (C3)
+1. The amber transfer banner is always shown, as "No active transfers"; the mockup shows it only while transfers run.
+2. Every cloud location has the same generic cloud icon and the raw rclone remote name in lower case ("drive", "onedrive"); the mockup names the service ("Google Drive") and its state.
+3. The SFTP row shows no free space (mockup: "SFTP · nas.local · 1.2 TB free").
+4. Opening the saved SFTP location asked again to trust its server key; the fingerprint wraps mid-string with a stray last character on its own line.
+
+Folder (C4, Site tab)
+5. Opening Drive's top folder showed plain "Loading…" text for about 20 s with no progress indicator; subfolders took 4–5 s.
+6. No breadcrumb at the top folder; inside a subfolder only the current folder appears ("Archive"), with no parent chips or chevrons to go up.
+7. The bottom bar is always shown: "0 files · 0 B", a greyed "To this phone" and a delete icon that looks enabled with nothing selected. The mockup bar summarises a selection.
+8. The destination reads "To Downloads"; the mockup shows the real category folder ("To Downloads/Inbound/Music").
+9. Files are not sorted by name or date (2 Nov, 2 Nov, 2 Nov, 3 Nov, 5 Oct, 12 Oct, 12 Oct, 8 Apr).
+10. Item counts show for some folders and not others.
+11. A tap only selects; there is no way to open or preview a file, and the menu has only Refresh folder and Transfers (no select all, sort, new folder, rename or delete for folders).
+12. Long names are cut in the middle on one line.
+
+This phone tab
+13. It is a download-folder picker ("Use this download folder"), not the phone side of a two-sided browser: no files, no sizes, no upload action, and the bottom bar disappears.
+14. Its rows are cards while the Site tab's are flat rows; the folder glyph renders as a flat bar; every row repeats "Folder · on this phone".
+
+Back from a subfolder returned to its parent, as expected.
+
 **Status (2026-11-20, before that rejection):** Review passed source, native visuals and flows for all four documented Android 0.0.9 parity batches. The final signed candidate and scoped evidence are recorded in [PROGRESS.md](../../PROGRESS.md). No owner decision remains open within the parity scope.
 
 Scope is the implemented Android UI in `src/DownloadManager.Android/Screens/`

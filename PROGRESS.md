@@ -1,5 +1,9 @@
 # Progress — session handoff
 
+## Remote Files captured on the owner's phone, 2026-11-21
+
+With the owner's go-ahead, captured the Remote Files tab on the S24 FE (SM-S721B, API 37, Inbound 0.0.10) with its real Drive, Dropbox, OneDrive and SFTP locations. Display baseline (adaptive brightness on, brightness 60, timeout unchanged) was saved, brightness set to minimum, and the baseline restored and read back afterwards. Two files were selected and deselected; nothing was downloaded, deleted or changed, and the SFTP key prompt was cancelled, not trusted. The 14 differences from the mockups are listed in the [matrix](docs/plans/android-mockup-acceptance.md); the main ones are an always-on transfer banner and selection bar, no provider names or icons, about 20 s of blank loading at Drive's top folder, no breadcrumb path, unsorted files, no way to open a file, and a This phone tab that is only a download-folder picker. Captures stay in the ignored `artifacts/android-app/pairs/remote-files-real-20261121/` because they show private folder names.
+
 ## Claude takes the Android work back, 2026-11-21
 
 The owner returned the Android work to Claude. Checked branch currency: this branch was even with origin at `c745317f`; `main` has 192 commits not here (desktop 0.9.0 and later) and this branch 235 not on `main`, split at `cb07f7b6`; `android-app` has one commit past origin and uncommitted ANDROID.9 work (inventory in the [handoff](docs/plans/android-parity-handoff.md)). Commits `49f5663c..c745317f` were made outside Claude sessions; they are now the first open entry in the [Fable review queue](docs/plans/android-fable-review-queue.md). The separate Android progress, handoff and review files and `AGENTS.md` were removed (they remain in git history); their operating knowledge moved to [docs/android-operating-notes.md](docs/android-operating-notes.md). `CLAUDE.md` delegation now uses Claude models (Haiku/Sonnet workers, Opus reviews, Fable at milestone end).
