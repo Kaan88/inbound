@@ -27,6 +27,17 @@ count as Finished, not Active; no torrent download limit exists, so Connections 
 Owner question: the t7 "Wi-Fi only" switch and "Wi-Fi and charging" for seeding need Host settings that don't exist.
 Owner answer (2026-11-22): "Add both to the Host".
 
+## Remote Files redesign r1-r6: first build on its own branch, 2026-11-22
+
+The owner asked for more agents, especially for the redesign. A Sonnet agent built r1-r6 on branch
+`android-remote-files-redesign` (commit `1332726f`, on top of `8aeef6a2`), kept apart until after the release, as
+the owner decided. Built and unit-tested only (Mobile 637); not yet run, reviewed by Opus, or compared on the phone.
+Includes R1/M1 (trust every offered SFTP key, a changed key needs a ticked confirmation), R3, R4 (real phone upload
+through `sites.transfer.start`), items 1-3, 8 and 9, and a thin loading bar. Open for the owner: r6 copy between two
+locations has no Host transfer (Host relay, or staging through the phone's Download folder); the phone pane opens at
+Download, not Download/Inbound; folder downloads use a normal transfer with "skip" conflicts; no pull-to-refresh
+(Refresh is in the menu).
+
 ## ANDROID.9: torrents on Wi-Fi, seeding on Wi-Fi while charging, 2026-11-22
 
 Two Host settings, both on by default and pipe-only (a paired PC or server doesn't show them):
