@@ -816,7 +816,14 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
         var timing = new BrowseTiming();
 
         Listing listing;
-        if (offset > 0 && !request.Refresh)
+        if (offset == 0 && !request.Refresh && request.Listing is not null
+            && CachedListing(site.Id, path, request.Listing) is { } held
+            && held.ChronologicalFiles == request.ChronologicalFiles && held.SiteRevision == site.Revision)
+        {
+            // The folder just shown, asked again for its folder counts: the server isn't listed a second time.
+            listing = held;
+        }
+        else if (offset > 0 && !request.Refresh)
         {
             // A later page comes from the first page's listing or not at all: a fresh listing sliced at the old offset could
             // repeat or skip items.
@@ -901,6 +908,8 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
         }
     }
 
+    private const int FolderCountsAtOnce = 4;
+
     private async Task AddFolderCountsAsync(SiteRecord site, string path, List<SiteItemDto> page, CancellationToken cancellationToken)
     {
         var folders = page.Where(item => item.IsFolder && SitePaths.NameProblem(item.Name) is null).Take(8).ToArray();
@@ -911,8 +920,11 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
         {
             using var lease = await AcquireAsync(budget.Token).ConfigureAwait(false);
             var fs = await SiteRemote.BuildAsync(site, lease.Client, budget.Token).ConfigureAwait(false);
-            foreach (var folder in folders)
+            // A few at once: one after another, a cloud server's half-second lists left most folders uncounted at the budget.
+            using var slots = new SemaphoreSlim(FolderCountsAtOnce);
+            await Task.WhenAll(folders.Select(async folder =>
             {
+                await slots.WaitAsync(budget.Token).ConfigureAwait(false);
                 try
                 {
                     var reply = await lease.Client.CallAsync("operations/list", new JsonObject
@@ -924,7 +936,8 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
                     if (reply["list"] is JsonArray items) folder.ChildCount = items.Count;
                 }
                 catch (RcloneCallException) { /* Count is optional; keep the folder browsable. */ }
-            }
+                finally { slots.Release(); }
+            })).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { }
         catch (Exception e) when (e is RcloneCallException or RcloneUnavailableException or SiteStoreException) { }

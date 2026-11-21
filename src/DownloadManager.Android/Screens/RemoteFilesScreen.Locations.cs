@@ -2,10 +2,12 @@ using ColorStateList = Android.Content.Res.ColorStateList;
 using Android.Graphics;
 using Android.Views;
 using Android.Widget;
+using Android.Text;
 using DownloadManager.Contracts;
 using DownloadManager.Mobile;
 using Google.Android.Material.Button;
 using Google.Android.Material.Card;
+using Google.Android.Material.Dialog;
 
 namespace Inbound.App.Screens;
 
@@ -364,11 +366,69 @@ internal sealed partial class RemoteFilesScreen
     {
         var menu = new PopupMenu(_activity, anchor);
         menu.Menu!.Add(0, 1, 0, "Remove location");
+        if (SiteKindCatalog.SignsIn(site.Kind) && _secureHostConnection) menu.Menu!.Add(0, 2, 1, "Own client ID");
         menu.MenuItemClick += (_, e) =>
         {
             if (e.Item?.ItemId == 1) ConfirmRemove(site);
+            else if (e.Item?.ItemId == 2) ShowClientIdDialog(site);
         };
         menu.Show();
+    }
+
+    /// <summary>
+    /// The desktop's "Your own client ID" for a location that signs in. A new ID signs the location out, as on the desktop:
+    /// the old sign-in belongs to the other registration.
+    /// </summary>
+    private void ShowClientIdDialog(SiteDto site)
+    {
+        if (!SameHost() || _busy || _confirm is not null || !_secureHostConnection) return;
+        var body = new LinearLayout(_activity) { Orientation = Orientation.Vertical };
+        body.SetPadding(Motion.Dp(_activity, 20), Motion.Dp(_activity, 8), Motion.Dp(_activity, 20), 0);
+        body.AddView(Label(OwnClientIdNote + " A new client ID signs this location out; sign in again afterwards.", 14,
+            Resource.Attribute.colorOnSurfaceVariant));
+        var id = new EditText(_activity) { Hint = "Your own client ID (optional)", Text = site.ClientId ?? "", SaveEnabled = false };
+        id.SetSingleLine(true);
+        id.ContentDescription = "Your own client ID (optional)";
+        body.AddView(id);
+        var secret = _clientSecret = new EditText(_activity)
+        {
+            Hint = site.HasClientSecret ? "Client secret saved; type to replace" : "Its client secret (optional)",
+            SaveEnabled = false,
+        };
+        secret.SetSingleLine(true);
+        secret.InputType = InputTypes.ClassText | InputTypes.TextVariationPassword;
+        secret.ContentDescription = "Client secret (optional)";
+        if (Android.OS.Build.VERSION.SdkInt >= Android.OS.BuildVersionCodes.O) secret.ImportantForAutofill = ImportantForAutofill.No;
+        body.AddView(secret);
+        var problem = Label("", 14, Resource.Attribute.colorError);
+        body.AddView(problem);
+        var dialog = new MaterialAlertDialogBuilder(_activity).SetTitle("Own client ID")!.SetView(body)!
+            .SetNegativeButton("Cancel", (Android.Content.IDialogInterfaceOnClickListener?)null)!
+            .SetPositiveButton("Save", (Android.Content.IDialogInterfaceOnClickListener?)null)!
+            .Create();
+        _confirm = dialog;
+        dialog.DismissEvent += (_, _) =>
+        {
+            if (ReferenceEquals(_confirm, dialog)) _confirm = null;
+            ClearPassword();
+        };
+        dialog.ShowEvent += (_, _) => dialog.GetButton((int)Android.Content.DialogButtonType.Positive)!.Click += (_, _) =>
+        {
+            var clientId = id.Text?.Trim() ?? "";
+            var typed = secret.Text ?? "";
+            if (ClientIdProblem(clientId, typed) is { } message) { problem.Text = message; return; }
+            var request = new SiteSaveRequest
+            {
+                Id = site.Id, Name = site.Name, Kind = site.Kind, AuthMethod = "signIn",
+                RemoteFolder = site.RemoteFolder, LocalFolder = site.LocalFolder,
+                ClientId = clientId.Length == 0 ? null : clientId,
+                // As on the desktop: empty keeps the stored secret while the ID stays; no ID removes it.
+                ClientSecret = typed.Length > 0 ? typed : clientId.Length == 0 ? "" : null,
+            };
+            dialog.Dismiss();
+            _ = SaveLocationAsync(request);
+        };
+        dialog.Show();
     }
 
     private static int LocationIcon(string kind) => kind.ToLowerInvariant() switch

@@ -189,6 +189,37 @@ What this shows:
 Next measurement, before the Host fixes: one run with rclone at DEBUG to see retries and 403 rate-limit answers, and
 the same folders timed on the desktop at the same time with the same account.
 
+## Cause found and fixed, 2026-11-21
+
+One run with rclone at DEBUG (temporary build, not committed) showed Google answering the phone's Drive calls with
+`403 RATE_LIMIT_EXCEEDED` for rclone's shared client project (`defaultPerMinutePerProject`, global), and rclone backing
+off and retrying. The desktop's Drive site has the owner's own client ID and secret; the phone's had none, because the
+phone app had no way to enter them (they existed only in the desktop's site dialog and the shared Host code). Same
+account on the desktop through the CLI at the same time: 0.5-0.7 s for every top-level subfolder, about 1 s for the
+top folder.
+
+Fixed:
+- The phone's Add location form for Drive, OneDrive and Dropbox has the optional client ID and secret, with the
+  desktop's rules, and a cloud location's long-press menu has "Own client ID" to set them on an existing location (a
+  new ID signs it out, as on the desktop). Owner-approved addition to the mockups (2026-11-21, "those don't exist on
+  phone"). The owner set the ID on the phone and signed in again.
+- P1: the phone asks for a folder without counts; the counts follow in a second request that the Host answers from
+  the listing it still holds (`sitesCachedFirstPage`), so the server isn't listed twice. Older Hosts keep the
+  one-request behaviour.
+- Folder counts run 4 at a time, so they finish inside the 2 s budget instead of being cut after two or three.
+
+After, on the S24 FE with the owner's client ID:
+
+| Open | Rows shown | Counts filled after |
+| --- | --- | --- |
+| Drive top folder (66 items), first after app start | 2.1 s (list 1.7 s) | +1.0 s |
+| Top folder again (3 times) | 0.9-1.3 s | +0.8-0.9 s |
+| Subfolders (17, 8 and 10 items) | 0.5-0.6 s | +1.1 s when they hold folders |
+
+Still open from step 2: P2 (rclone stops after 60 s idle, so a later open pays the 0.3 s start and a fresh Drive
+backend), P5 (Back reads the folder again), P4, M4, P6, P3. rclone also suggests storing Drive's `root_folder_id` to
+save a call at each backend start.
+
 ## Fixed so far
 
 Step 4 moved ahead of step 2 at the owner's request ("fix desktop related issues too", 2026-11-21). Uncommitted

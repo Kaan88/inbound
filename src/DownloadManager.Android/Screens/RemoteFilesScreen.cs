@@ -34,6 +34,8 @@ internal sealed partial class RemoteFilesScreen : IDisposable
     private readonly Action<bool> _showBottomNavigation;
     private bool _folderFullScreen;
     private CancellationTokenSource? _browseRequest;
+    private CancellationTokenSource? _countsRequest;
+    private readonly Func<bool> _cachedFirstPage;
     private bool _browseRequiresSignIn;
     private readonly LinearLayout _content;
     private readonly FrameLayout _surface;
@@ -53,14 +55,16 @@ internal sealed partial class RemoteFilesScreen : IDisposable
     private bool _summaryRequestInFlight;
     private List<SiteTransferDto> _transfers = [];
     private EditText? _password;
+    private EditText? _clientSecret;
     private AndroidX.AppCompat.App.AlertDialog? _confirm;
 
     public View View { get; }
 
     public RemoteFilesScreen(MainActivity activity, IHostConnection connection, string? connectionStamp, bool secureHostConnection,
-        Func<bool> safeDownloads, Func<bool> deleteFiles, Action<bool> showBottomNavigation)
+        Func<bool> safeDownloads, Func<bool> deleteFiles, Func<bool> cachedFirstPage, Action<bool> showBottomNavigation)
     {
         _activity = activity;
+        _cachedFirstPage = cachedFirstPage;
         _client = new RemoteFilesClient(connection);
         _safeDownloads = safeDownloads;
         _deleteFiles = deleteFiles;
@@ -151,6 +155,7 @@ internal sealed partial class RemoteFilesScreen : IDisposable
         CloseCloudSignInUi();
         ClearPassword();
         _browseRequest?.Cancel();
+        _countsRequest?.Cancel();
         _confirm?.Dismiss();
         _confirm = null;
         _life.Cancel();
@@ -186,6 +191,7 @@ internal sealed partial class RemoteFilesScreen : IDisposable
     private void CancelCurrent()
     {
         _browseRequest?.Cancel();
+        _countsRequest?.Cancel();
         _browseRequiresSignIn = false;
         _generation++;
         _busy = false;
@@ -218,6 +224,10 @@ internal sealed partial class RemoteFilesScreen : IDisposable
         if (!SameHost() || _busy || _site is null) return;
         using var browse = CancellationTokenSource.CreateLinkedTokenSource(_life.Token);
         _browseRequest = browse;
+        _countsRequest?.Cancel();
+        // A Host that keeps the listing answers first without folder counts, which follow (2 s less per open).
+        bool lazyCounts = _cachedFirstPage();
+        bool fillCounts = false;
         int generation = ++_generation;
         string siteId = _site.Id;
         int offset = append ? _items.Count : 0;
@@ -236,7 +246,7 @@ internal sealed partial class RemoteFilesScreen : IDisposable
             var result = await _client.BrowseAsync(new SiteBrowseRequest
             {
                 Id = siteId, Path = path, Offset = offset, Limit = PageSize,
-                Listing = listing, Refresh = refresh, ChronologicalFiles = true, IncludeFolderCounts = true,
+                Listing = listing, Refresh = refresh, ChronologicalFiles = true, IncludeFolderCounts = !lazyCounts,
                 IncludeFreeSpace = !append && _site.Kind == SiteKindCatalog.Sftp
             }, browse.Token);
             replied = Environment.TickCount64 - started;
@@ -274,6 +284,7 @@ internal sealed partial class RemoteFilesScreen : IDisposable
             _listing = result.Listing;
             _items.AddRange(result.Items);
             _total = result.Items.Count == 0 ? _items.Count : Math.Max(result.Total, _items.Count);
+            fillCounts = lazyCounts && !string.IsNullOrEmpty(_listing) && result.Items.Any(item => item.IsFolder);
             if (_total > _items.Count && string.IsNullOrEmpty(_listing))
             {
                 _error = "This Host did not provide a listing token. Refresh to try again.";
@@ -290,7 +301,42 @@ internal sealed partial class RemoteFilesScreen : IDisposable
                 _busy = false; Render();
                 // Remote Files speed work (2026-11-21): reply and first drawn rows, no names or paths.
                 Android.Util.Log.Info(InboundApplication.Tag, $"Remote Files browse: reply {replied} ms, rows drawn {Environment.TickCount64 - started} ms, {_items.Count} rows" + (append ? ", next page" : ""));
+                if (fillCounts && _path is not null && _listing is not null)
+                    _ = FillFolderCountsAsync(generation, siteId, _path, _listing, offset, _items.Count - offset);
             }
+        }
+    }
+
+    /// <summary>Folder counts for rows already shown, from the listing the Host still holds (review P1).</summary>
+    private async Task FillFolderCountsAsync(int generation, string siteId, string path, string listing, int offset, int count)
+    {
+        using var counts = CancellationTokenSource.CreateLinkedTokenSource(_life.Token);
+        _countsRequest?.Cancel();
+        _countsRequest = counts;
+        try
+        {
+            var result = await _client.BrowseAsync(new SiteBrowseRequest
+            {
+                Id = siteId, Path = path, Offset = offset, Limit = count, Listing = listing,
+                ChronologicalFiles = true, IncludeFolderCounts = true,
+            }, counts.Token);
+            if (_closed || generation != _generation || !result.Ok || result.Listing != listing || result.Offset != offset) return;
+            bool changed = false;
+            for (int i = 0; i < result.Items.Count && offset + i < _items.Count; i++)
+            {
+                var shown = _items[offset + i];
+                var counted = result.Items[i];
+                if (!shown.IsFolder || counted.ChildCount is not { } children || shown.Name != counted.Name || shown.ChildCount == children) continue;
+                shown.ChildCount = children;
+                changed = true;
+            }
+            if (changed && !_busy) Render();
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception) { /* Counts are optional; the folder stays as shown. */ }
+        finally
+        {
+            if (ReferenceEquals(_countsRequest, counts)) _countsRequest = null;
         }
     }
 
@@ -625,7 +671,18 @@ internal sealed partial class RemoteFilesScreen : IDisposable
     {
         if (_password is not null) _password.Text = "";
         _password = null;
+        if (_clientSecret is not null) _clientSecret.Text = "";
+        _clientSecret = null;
     }
+
+    internal const string OwnClientIdNote =
+        "Optional: your own app registration (client ID and secret) from the provider's developer console, instead of rclone's shared one, which rclone says is being retired.";
+
+    /// <summary>The desktop's rules for an own app registration (SitesRules.SignInRequest); null when it is fine.</summary>
+    internal static string? ClientIdProblem(string clientId, string secret) =>
+        clientId.Length > 256 || !clientId.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '-' or '_')
+            ? "A client ID is letters, digits, dots, dashes and underscores."
+            : clientId.Length == 0 && secret.Length > 0 ? "A client secret needs its client ID." : null;
 
     private void RenderAddLocation()
     {
@@ -701,6 +758,16 @@ internal sealed partial class RemoteFilesScreen : IDisposable
             AddText("Locations cannot be added over an unencrypted or unverified Host connection. Connect to this Host with HTTPS first.", 14, Resource.Attribute.colorOnSurfaceVariant);
         if (password is not null && Android.OS.Build.VERSION.SdkInt >= Android.OS.BuildVersionCodes.O)
             password.ImportantForAutofill = ImportantForAutofill.No;
+        if (cloud) AddText(OwnClientIdNote, 14, Resource.Attribute.colorOnSurfaceVariant);
+        var clientId = cloud ? Field("Your own client ID (optional)", InputTypes.ClassText) : null;
+        var clientSecret = _clientSecret = cloud ? Field("Its client secret (optional)",
+            InputTypes.ClassText | InputTypes.TextVariationPassword) : null;
+        if (clientSecret is not null)
+        {
+            clientSecret.Enabled = _secureHostConnection;
+            if (Android.OS.Build.VERSION.SdkInt >= Android.OS.BuildVersionCodes.O)
+                clientSecret.ImportantForAutofill = ImportantForAutofill.No;
+        }
         var allowHttp = new CheckBox(_activity)
         {
             Text = "Allow HTTP: not encrypted. Credentials and files can be read or changed in transit.",
@@ -780,6 +847,10 @@ internal sealed partial class RemoteFilesScreen : IDisposable
                 ? providers[picker.SelectedItemPosition].Value : SiteKindCatalog.AwsProvider;
             if (string.IsNullOrWhiteSpace(name.Text))
             { validation.Text = nameRequired; return; }
+            var ownClientId = clientId?.Text?.Trim() ?? "";
+            var ownSecret = clientSecret?.Text ?? "";
+            if (cloud && ClientIdProblem(ownClientId, ownSecret) is { } clientProblem)
+            { validation.Text = clientProblem; return; }
             if (s3 && (string.IsNullOrWhiteSpace(user?.Text) || string.IsNullOrWhiteSpace(password?.Text)))
             { validation.Text = s3KeysRequired; return; }
             if (s3 && provider != SiteKindCatalog.AwsProvider && text.Length == 0)
@@ -812,7 +883,9 @@ internal sealed partial class RemoteFilesScreen : IDisposable
                 Region = string.IsNullOrWhiteSpace(region?.Text) ? null : region.Text.Trim(),
                 Host = server?.Text?.Trim() ?? "", Port = port, RemoteFolder = remoteFolder?.Text?.Trim() ?? "",
                 LocalFolder = string.IsNullOrWhiteSpace(localFolder?.Text) ? null : localFolder.Text.Trim(),
-                User = user?.Text?.Trim() ?? "", Password = string.IsNullOrEmpty(password?.Text) ? null : password.Text
+                User = user?.Text?.Trim() ?? "", Password = string.IsNullOrEmpty(password?.Text) ? null : password.Text,
+                ClientId = cloud && ownClientId.Length > 0 ? ownClientId : null,
+                ClientSecret = cloud && ownSecret.Length > 0 ? ownSecret : null,
             };
             ClearPassword();
             _ = SaveLocationAsync(request);
@@ -822,7 +895,7 @@ internal sealed partial class RemoteFilesScreen : IDisposable
 
     private async Task SaveLocationAsync(SiteSaveRequest request)
     {
-        if (!SameHost() || _busy || !_secureHostConnection) { request.Password = null; return; }
+        if (!SameHost() || _busy || !_secureHostConnection) { request.Password = null; request.ClientSecret = null; return; }
         int generation = ++_generation;
         _busy = true; _error = null;
         Render();
@@ -849,6 +922,7 @@ internal sealed partial class RemoteFilesScreen : IDisposable
         finally
         {
             request.Password = null;
+            request.ClientSecret = null;
             if (!_closed && generation == _generation) { _busy = false; Render(); }
         }
     }

@@ -71,6 +71,28 @@ public sealed partial class SiteTransfersEndToEndTests
     }
 
     [SiteTransfersFact]
+    public async Task AFirstPageAskedAgainWithItsListingComesFromTheHeldListing()
+    {
+        var (commands, siteId) = await OpenSiteAsync(StartServer(slow: false));
+        var first = await Call<SiteBrowseResultDto>(commands, SitesMessageTypes.Browse, new SiteBrowseRequest { Id = siteId, Path = "/pub" });
+        Assert.True(first.Ok, first.Message);
+        // The counts follow-up (review P1): the same listing, not a new one read from the server.
+        var again = await Call<SiteBrowseResultDto>(commands, SitesMessageTypes.Browse,
+            new SiteBrowseRequest { Id = siteId, Path = "/pub", Listing = first.Listing, IncludeFolderCounts = true });
+        Assert.True(again.Ok, again.Message);
+        Assert.Equal(first.Listing, again.Listing);
+        Assert.Equal(first.Items.Select(i => i.Name), again.Items.Select(i => i.Name));
+        // Refresh, or a listing the Host no longer holds, reads the server again.
+        var refreshed = await Call<SiteBrowseResultDto>(commands, SitesMessageTypes.Browse,
+            new SiteBrowseRequest { Id = siteId, Path = "/pub", Listing = first.Listing, Refresh = true });
+        Assert.NotEqual(first.Listing, refreshed.Listing);
+        var unknown = await Call<SiteBrowseResultDto>(commands, SitesMessageTypes.Browse,
+            new SiteBrowseRequest { Id = siteId, Path = "/pub", Listing = "0123456789abcdef0123456789abcdef" });
+        Assert.True(unknown.Ok, unknown.Message);
+        Assert.NotEqual("0123456789abcdef0123456789abcdef", unknown.Listing);
+    }
+
+    [SiteTransfersFact]
     public async Task FileOnlyDeleteRejectsAStaleListingAfterAnEndpointEdit()
     {
         int port = StartServer(slow: false);

@@ -656,6 +656,11 @@ public sealed class SitesChangedDto
 /// </summary>
 public sealed class SiteBrowseRequest
 {
+    /// <summary>
+    /// The Host reads a first page from the listing named by <see cref="Listing"/> while it still holds it, so a client can
+    /// show a folder first and ask for its folder counts afterwards without the server being listed again.
+    /// </summary>
+    public const string CachedFirstPageCapability = "sitesCachedFirstPage";
     public bool IncludeFreeSpace { get; set; }
     public string Id { get; set; } = "";
     public string? Path { get; set; }

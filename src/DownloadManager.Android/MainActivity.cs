@@ -335,6 +335,7 @@ public sealed partial class MainActivity : AppCompatActivity
             _remoteFiles = new RemoteFilesScreen(this, _connection, _linkHostStamp, secureHostConnection,
                 () => _model?.Hello?.Capabilities.Contains(DownloadManager.Contracts.SiteTransferStartRequest.SafeSingleDownloadCapability) == true,
                 () => _model?.Hello?.Capabilities.Contains(DownloadManager.Contracts.SiteChangeRequest.DeleteFilesCapability) == true,
+                () => _model?.Hello?.Capabilities.Contains(DownloadManager.Contracts.SiteBrowseRequest.CachedFirstPageCapability) == true,
                 visible => FindViewById<View>(Resource.Id.nav)!.Visibility = visible ? ViewStates.Visible : ViewStates.Gone);
             InsetsListener.Pad(_remoteFiles.View, top: true, bottom: false);
             remoteFilesPage.AddView(_remoteFiles.View);

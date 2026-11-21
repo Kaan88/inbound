@@ -1,5 +1,17 @@
 # Progress — session handoff
 
+## Remote Files on the phone now lists Drive as fast as the desktop, 2026-11-21
+
+Owner: "desktop lists it so much faster." A run with rclone's debug log showed Google refusing the phone's Drive calls
+with rate-limit errors for rclone's shared client ID; the desktop's site uses the owner's own client ID, and the phone
+app had no field for one. Added the client ID and secret to the phone's cloud location form and an "Own client ID"
+item on a cloud location's menu (owner-approved addition to the mockups), made folder counts follow the rows from the
+listing the Host holds (review P1, `sitesCachedFirstPage`), and run counts 4 at a time. The owner set the ID on the
+phone and signed in again. Drive folders now show in 0.5-1.3 s warm and 2.1 s on the first open (were 0.7-34.5 s);
+desktop through the CLI on the same account: 0.5-1.1 s. Integration Sites tests (with rclone 1.76.0) and Server
+protocol tests pass; the signed APK passed check-apk.py and release verification and is installed on the S24. The
+display baseline was restored and read back. Details: [review](docs/plans/android-review-49f5663c-c745317f.md#cause-found-and-fixed-2026-11-21).
+
 ## Remote Files timing on the phone and shared fixes, 2026-11-21
 
 Timing (fix-order step 1): the Host now logs each browse's stages and the screen its reply and drawing times. On the
