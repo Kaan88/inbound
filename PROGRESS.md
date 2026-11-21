@@ -75,6 +75,27 @@ by Mobile tests; no torrent was on the phone. Captures `wifi-t7`, `wifi-seeding-
 Deviations to show the owner: the Seeding sheet toggle label and the waiting row text (amber; held seeding reads
 "Seeding · Waiting for charging · ratio 0.71") are not in the mockups.
 
+## ANDROID.9: paired-PC pass on the S24, 2026-11-22
+
+A throwaway PC Host ("Paired PC test", the repo's paired-host fixture with the installed torrent worker, synthetic
+password, reached over `adb reverse`), APK `43318906`, real data. Torrent: the Debian netinst magnet (owner's choice),
+inspected by the PC ("1 file · 795 MB"), downloaded in about 20 s, SHA-256 matched Debian's, seeded, Stop seeding gave
+"Not running" on Trackers, Delete with file removed it on the PC. t7 reads "Torrents on Paired PC test", no Wi-Fi rows,
+the PC's port. Archives: Extract on; a locked zip asked for its password (t6), extracted 2 files and the saved count
+went to 1; a plain zip auto-extracted. TorBox: the owner typed their own key ("Key saved on Paired PC test"); the magnet
+read "Not on TorBox yet", Send to TorBox, My TorBox (t5) showed "Ready · on Paired PC test", the PC fetched the 795 MB
+itself (hash matched), then Deleted from TorBox. Afterwards the pairing was removed on the phone, the test Host and its
+temp folder are gone, and the display settings are back to the owner's (adaptive, timeout unchanged). Captures
+`paired-*.png` in `artifacts/android-app/pairs/android9-torbox-20261121/` (not committed).
+Findings, open:
+1. t1's segmented button reads "This phone" on a paired Host; it should name the Host (the mockup shows phone mode only).
+2. No "On TorBox" row in Downloads while TorBox fetches (t3 "On TorBox · 37% · then to this phone"); DownloadsScreen
+   doesn't list those jobs. Not seen on either Host.
+3. ANR when switching from the paired PC back to This phone ("Input dispatching timed out", 10 s); Wait recovered it.
+   The stack wasn't readable on the S24; to reproduce on an emulator.
+4. A long Windows path truncates the archive row, hiding the "renamed" count.
+5. Downloads > Import a list shows "Unavailable" on a paired Host.
+
 ## ANDROID.9 build started, 2026-11-21
 
 Owner decision (archives step): t6 and t7 show a list of saved archive passwords tried in order and a per-archive
