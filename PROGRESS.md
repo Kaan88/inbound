@@ -39,6 +39,14 @@ Download, not Download/Inbound; folder downloads use a normal transfer with "ski
 (Refresh is in the menu).
 Owner decision (2026-11-22), on r6: the Host relays a copy between two locations (rclone copies remote to remote
 through the Host, no staging on the phone), as recommended over staging through the phone's Download folder.
+Built on the redesign branch (`4abeaf29`, `601b6aab`, by an Opus agent; spot-checked: a copy never uses a local
+path, every local-path use is download-only): `sites.transfer.start` with `Direction = "copy"` and new
+`DestinationSiteId`/`DestinationFolder`, capability `sitesRemoteCopy`, copy batches saved as schema 3 so an older Host
+leaves them alone; rclone `operations/copyfile` with both sites' settings in the call body (no secrets on a command
+line or in a file). Tests: 4 end-to-end copy tests on two `rclone serve sftp` servers, Integration 2149 passed (1
+flaky certificate test, passed alone 3 times), Mobile 640. Not run on a phone yet. Golden frames on the two branches
+will need regenerating at the merge. Open for the owner: the phone's copy always skips existing files (offer Replace or
+Keep both?); the desktop, web UI and CLI list a copy batch by direction and source only (give them a copy display?).
 
 ## ANDROID.9: torrents on Wi-Fi, seeding on Wi-Fi while charging, 2026-11-22
 
