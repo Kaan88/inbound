@@ -102,6 +102,7 @@ public sealed partial class HostCommandDispatcher
             capabilities.Add(SiteTransferStartRequest.SafeSingleDownloadCapability);
             capabilities.Add(SiteChangeRequest.DeleteFilesCapability);
             capabilities.Add(SiteBrowseRequest.CachedFirstPageCapability);
+            capabilities.Add(SiteTransferStartRequest.RemoteCopyCapability);
         }
         if (Sites is not null && SitesAnswered(rights)) capabilities.Add("sites");
         capabilities.Add("browserRefresh");

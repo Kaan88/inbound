@@ -81,6 +81,8 @@ public sealed partial class HostCommandDispatcher
             {
                 var start = message.GetPayload<SiteTransferStartRequest>();
                 if (start is null) return null;
+                // A copy between two sites (ANDROID.8) reads and writes nothing on this computer; its folder is not used.
+                if (start.Direction == "copy" && message.Type == SitesMessageTypes.TransferStart) return null;
                 if (roots.Allowed(start.LocalFolder) is not { } real) return roots.OutsideTextFor(start.LocalFolder);
                 start.LocalFolder = real;
                 message = message with { Payload = System.Text.Json.JsonSerializer.SerializeToElement(start, IpcJson.Options) };

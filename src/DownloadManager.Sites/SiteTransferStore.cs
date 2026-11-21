@@ -9,6 +9,13 @@ public static class SiteTransferDirections
 {
     public const string Download = "download";
     public const string Upload = "upload";
+
+    /// <summary>
+    /// ANDROID.8 (r6): from <see cref="SiteTransferRecord.RemoteFolder"/> on the batch's site to
+    /// <see cref="SiteTransferRecord.DestinationFolder"/> on <see cref="SiteTransferRecord.DestinationSiteId"/>, streamed
+    /// through the Host's rclone.
+    /// </summary>
+    public const string Copy = "copy";
 }
 
 /// <summary>What a file does when its target is already there, chosen once for the batch.</summary>
@@ -97,7 +104,10 @@ public sealed class SiteTransferRecord
     public bool StagedComplete { get; set; }
 
     public const int SafeDownloadSchemaVersion = 2;
-    public const int CurrentSchemaVersion = SafeDownloadSchemaVersion;
+
+    /// <summary>A copy between two sites: an older Host, which would take it for an upload, leaves the file alone.</summary>
+    public const int RemoteCopySchemaVersion = 3;
+    public const int CurrentSchemaVersion = RemoteCopySchemaVersion;
 
     public int SchemaVersion { get; set; } = 1;
     public string Id { get; set; } = "";
@@ -105,11 +115,19 @@ public sealed class SiteTransferRecord
     public string SiteName { get; set; } = "";
     public string Direction { get; set; } = SiteTransferDirections.Download;
 
-    /// <summary>The folder on the server, absolute (<see cref="SitePaths.Normalize"/>): the source of a download, the target of an upload.</summary>
+    /// <summary>The folder on the server, absolute (<see cref="SitePaths.Normalize"/>): the source of a download or a copy, the target of an upload.</summary>
     public string RemoteFolder { get; set; } = "/";
 
-    /// <summary>The folder on this PC, fully qualified: the target of a download, the source of an upload.</summary>
+    /// <summary>The folder on this PC, fully qualified: the target of a download, the source of an upload; empty for a copy.</summary>
     public string LocalFolder { get; set; } = "";
+
+    /// <summary>A copy's target site (it may be <see cref="SiteId"/>); null otherwise.</summary>
+    public string? DestinationSiteId { get; set; }
+
+    public string? DestinationSiteName { get; set; }
+
+    /// <summary>A copy's target folder on <see cref="DestinationSiteId"/>, absolute; null otherwise.</summary>
+    public string? DestinationFolder { get; set; }
 
     public string Conflict { get; set; } = SiteTransferConflicts.Skip;
     public string State { get; set; } = SiteTransferStates.Running;
@@ -191,7 +209,9 @@ public sealed class SiteTransferStore
                     continue;
                 }
 
-                if (record.Id != name || !SiteStore.IsId(record.SiteId) || record.Items is null)
+                if (record.Id != name || !SiteStore.IsId(record.SiteId) || record.Items is null
+                    || (record.Direction == SiteTransferDirections.Copy
+                        && (!SiteStore.IsId(record.DestinationSiteId ?? "") || SitePaths.Normalize(record.DestinationFolder ?? "") is null)))
                 {
                     _log?.Invoke($"Transfer file {name}.json does not describe a transfer; it is left as it is.");
                     continue;

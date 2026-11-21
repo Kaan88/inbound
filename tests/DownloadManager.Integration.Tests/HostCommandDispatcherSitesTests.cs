@@ -238,6 +238,42 @@ public sealed class HostCommandDispatcherSitesTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task AWebSessionsCopyBetweenTwoSitesTouchesNoFolderHereAndIsAnswered()
+    {
+        var service = await ServiceAsync();
+        var profile = new WebSessionProfile(service, PlatformCapabilities.Desktop);
+        _cleanup.Add(new Disposer(profile.Dispose));
+        var sites = new RecordingSites();
+        var dispatcher = new HostCommandDispatcher(service, new FakePlatform(PlatformCapabilities.Desktop, _timeline), new ListLog())
+        {
+            WebSessions = profile.Rights,
+            Sites = sites,
+        };
+        var web = Session();
+        await dispatcher.OpenSessionAsync(web, new ClientHelloDto { Role = ClientRoles.Web }, CancellationToken.None);
+
+        // A copy reads and writes nothing on this computer, so the session's folders don't hold it.
+        var copy = await AskAsync(dispatcher, web, SitesMessageTypes.TransferStart, new SiteTransferStartRequest
+        {
+            SiteId = SiteId, Direction = "copy", RemoteFolder = "/pub", DestinationSiteId = SiteId, DestinationFolder = "/backup",
+            Names = [new SiteTransferNameDto { Name = "a.txt" }],
+        });
+        Assert.Equal(SitesMessageTypes.Status, copy.Type);
+        lock (sites.Seen) Assert.Equal("copy", sites.Messages[^1].GetPayload<SiteTransferStartRequest>().Direction);
+
+        // The safe single download is still held to them whatever its direction says.
+        var safe = await AskAsync(dispatcher, web, SitesMessageTypes.SafeDownloadStart, new SiteTransferStartRequest
+        {
+            SiteId = SiteId, Direction = "copy", LocalFolder = "/srv/in", SafeSingleDownload = true, Names = [new SiteTransferNameDto { Name = "a.txt" }],
+        });
+        Assert.Equal(MessageTypes.HostActionResult, safe.Type);
+
+        // A copy batch has no folder here (null), so Resume and Retry go on from the browser.
+        foreach (var type in new[] { SitesMessageTypes.TransferResume, SitesMessageTypes.TransferRetry })
+            Assert.Equal(SitesMessageTypes.Status, (await AskAsync(dispatcher, web, type, new SiteTransferIdRequest { Id = "copybatch" })).Type);
+    }
+
+    [Fact]
     public async Task SitesChangesReachThePipeAndWebSessions()
     {
         var service = await ServiceAsync();
