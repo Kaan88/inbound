@@ -9,13 +9,25 @@ public sealed partial class DownloadManagerService
     private bool _queuePowerKnown;
     private bool _queueCharging;
     private bool _queueBatterySaver;
+    private volatile bool _platformReportsQueuePower;
+
+    /// <summary>
+    /// True where the platform reports charging and battery saver (Android). Elsewhere (Windows, the headless server) a
+    /// queue's charging and battery-saver conditions are ignored, so a flag copied from a phone can't hold a queue forever
+    /// (review S1, 2026-11-21). Reporting power also turns this on.
+    /// </summary>
+    public bool PlatformReportsQueuePower
+    {
+        get => _platformReportsQueuePower;
+        set => _platformReportsQueuePower = value;
+    }
 
     // Unknown power is deliberately held until the platform reports it; persisted phone settings must never run unchecked.
     private string? QueueConditionWaitLocked(DownloadQueue queue)
         => !_platformTransfersAllowed ? "Waiting for Android to allow background work"
         : queue.RequireUnmeteredNetwork && _networkMetered ? "Waiting for Wi-Fi"
-        : queue.RequireCharging && (!_queuePowerKnown || !_queueCharging) ? "Waiting for charging"
-        : queue.RequireBatterySaverOff && (!_queuePowerKnown || _queueBatterySaver) ? "Waiting for battery saver to turn off"
+        : _platformReportsQueuePower && queue.RequireCharging && (!_queuePowerKnown || !_queueCharging) ? "Waiting for charging"
+        : _platformReportsQueuePower && queue.RequireBatterySaverOff && (!_queuePowerKnown || _queueBatterySaver) ? "Waiting for battery saver to turn off"
         : null;
 
     private void RefreshQueueConditionsLocked()
@@ -52,6 +64,7 @@ public sealed partial class DownloadManagerService
     {
         lock (_sync)
         {
+            _platformReportsQueuePower = true;
             _queuePowerKnown = true;
             _queueCharging = charging;
             _queueBatterySaver = batterySaver;

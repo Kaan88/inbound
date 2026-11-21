@@ -100,6 +100,10 @@ transition needs a one-time reinstall: coordinate it rather than wiping silently
 - Production output: src/DownloadManager.Android/bin/Release/net10.0-android/
   android-arm64/publish/app.inbound.android-Signed.apk. A filename ending Signed
   does not prove the permanent release key was used: earlier builds used debug signing.
+- A phone build needs the pinned librclone.so at
+  artifacts/android-app/rclone/arm64-v8a/ (ignored; the csproj checks its SHA-256).
+  A fresh worktree lacks it: build it per third_party/rclone/SOURCE.md or copy a
+  verified one (the archived android-app copy has it, 2026-11-21).
 - NativeAOT sets DOTNET_SYSTEM_NET_SOCKETS_INLINE_COMPLETIONS=1 (also in code,
   since AndroidEnvironment may not reach NativeAOT). Keep the TLS JNI callback
   export workaround and post-link defined-symbol check in the csproj.

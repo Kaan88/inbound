@@ -4366,6 +4366,8 @@ public sealed partial class RuntimeServiceTests
         public Func<IDownloadCheckpointStore, IDownloadCheckpointStore>? WrapCheckpoints { get; init; }
         /// <summary>For what happens during startup, which a test can't subscribe to afterwards.</summary>
         public Action<DownloadManagerService>? BeforeInitialize { get; init; }
+        /// <summary>A Windows or server Host: charging and battery saver are never reported.</summary>
+        public bool NoQueuePowerReports { get; init; }
     }
 
     private sealed class ServiceContext : IAsyncDisposable
@@ -4477,6 +4479,8 @@ public sealed partial class RuntimeServiceTests
                 linkSecrets: linkSecrets);
             // Most tests have nothing to wait for; the ones about the quiet period set their own.
             service.PackageSettleDelay = TimeSpan.Zero;
+            // Like the phone unless a test asks for a Windows or server Host.
+            service.PlatformReportsQueuePower = hooks?.NoQueuePowerReports != true;
             hooks?.BeforeInitialize?.Invoke(service);
             await service.InitializeAsync();
 

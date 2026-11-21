@@ -8,14 +8,15 @@ public sealed partial class HostCommandDispatcher
         => (requested ?? []).Any(next => next.NotifyWhenFinished is { } value &&
             value != (current.FirstOrDefault(q => q.Id == next.Id)?.NotifyWhenFinished ?? false));
 
+    /// <summary>Turning a condition on where the platform can't check it. Turning one off is always allowed (review S1).</summary>
     private static bool ChangesQueueConditions(List<QueueDto>? requested, List<QueueDto> current)
     {
         foreach (var next in requested ?? [])
         {
             var before = current.FirstOrDefault(q => q.Id == next.Id);
-            if (next.RequireCharging is { } charging && charging != (before?.RequireCharging ?? false) ||
-                next.RequireBatterySaverOff is { } saver && saver != (before?.RequireBatterySaverOff ?? false) ||
-                next.RequireUnmeteredNetwork is { } network && network != (before?.RequireUnmeteredNetwork ?? false)) return true;
+            if (next.RequireCharging == true && before?.RequireCharging != true ||
+                next.RequireBatterySaverOff == true && before?.RequireBatterySaverOff != true ||
+                next.RequireUnmeteredNetwork == true && before?.RequireUnmeteredNetwork != true) return true;
         }
         return false;
     }
@@ -24,8 +25,8 @@ public sealed partial class HostCommandDispatcher
     {
         if (!string.Equals(request.Action, "create", StringComparison.OrdinalIgnoreCase) && !string.Equals(request.Action, "policy", StringComparison.OrdinalIgnoreCase)) return false;
         var before = string.Equals(request.Action, "create", StringComparison.OrdinalIgnoreCase) ? null : _service.GetSettings().Queues.FirstOrDefault(q => q.Id == request.QueueId);
-        return request.RequireCharging is { } charging && charging != (before?.RequireCharging ?? false) ||
-            request.RequireBatterySaverOff is { } saver && saver != (before?.RequireBatterySaverOff ?? false) ||
-            request.RequireUnmeteredNetwork is { } network && network != (before?.RequireUnmeteredNetwork ?? false);
+        return request.RequireCharging == true && before?.RequireCharging != true ||
+            request.RequireBatterySaverOff == true && before?.RequireBatterySaverOff != true ||
+            request.RequireUnmeteredNetwork == true && before?.RequireUnmeteredNetwork != true;
     }
 }

@@ -90,6 +90,11 @@ public sealed class SiteTransferRecord
     public bool SafeSingleDownload { get; init; }
     /// <summary>The Host may have left the public file incomplete; never treat it as an ordinary skip.</summary>
     public bool PublicationPending { get; set; }
+    /// <summary>
+    /// A safe single download's staging file holds the whole file and only publication is left, so a run that had to wait
+    /// publishes it instead of downloading it again (review M2).
+    /// </summary>
+    public bool StagedComplete { get; set; }
 
     public const int SafeDownloadSchemaVersion = 2;
     public const int CurrentSchemaVersion = SafeDownloadSchemaVersion;

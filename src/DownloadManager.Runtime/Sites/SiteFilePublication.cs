@@ -5,7 +5,7 @@ namespace DownloadManager.Runtime.Sites;
 /// <summary>Publishes a staged file without replacing an existing directory entry.</summary>
 internal static class SiteFilePublication
 {
-    // null means Android needs its exclusive-create fallback; false means the destination exists.
+    // null means Android or Linux needs the exclusive-create fallback; false means the destination exists.
     public static bool? TryRename(string source, string destination)
     {
         if (OperatingSystem.IsWindows())
@@ -27,15 +27,16 @@ internal static class SiteFilePublication
         }
         catch (Exception e) when (e is EntryPointNotFoundException or DllNotFoundException)
         {
-            if (OperatingSystem.IsAndroid()) return null;
+            if (OperatingSystem.IsAndroid() || OperatingSystem.IsLinux()) return null;
             throw new IOException("This Host cannot publish files without replacing an existing file.", e);
         }
         if (result == 0) return true;
         var error = Marshal.GetLastPInvokeError();
         if (error == 17) return false; // EEXIST
-        // Android shared-storage FUSE can reject RENAME_NOREPLACE. CreateNew still gives an
-        // exclusive destination; readers may see the file during this local copy.
-        if (OperatingSystem.IsAndroid() && error is 22 or 38 or 95)
+        // Android shared-storage FUSE, and on Linux CIFS, NFS and older FUSE mounts, can reject RENAME_NOREPLACE
+        // (EINVAL, ENOSYS, EOPNOTSUPP). CreateNew still gives an exclusive destination; readers may see the file during
+        // this local copy (review S2, 2026-11-21).
+        if ((OperatingSystem.IsAndroid() || OperatingSystem.IsLinux()) && error is 22 or 38 or 95)
             return null;
         throw new IOException($"The destination did not accept an exclusive file move (error {error}).");
     }

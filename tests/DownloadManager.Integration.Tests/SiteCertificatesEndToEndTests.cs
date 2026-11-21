@@ -117,7 +117,7 @@ public sealed partial class SiteTransfersEndToEndTests
         // Explicit TLS to a server that speaks TLS from the start is not a certificate question.
         var plainProbe = await Call<SiteResultDto>(commands, SitesMessageTypes.Save, new SiteSaveRequest
         {
-            Id = id, Name = "FTPS", Kind = SiteKinds.Ftp, Host = "127.0.0.1", Port = port, Tls = SiteTlsModes.Explicit, User = User,
+            Id = id, Name = "FTPS", Kind = SiteKinds.Ftp, Host = "127.0.0.1", Port = port, Tls = SiteTlsModes.Explicit, User = User, Password = Password,
         });
         Assert.True(plainProbe.Ok, plainProbe.Message);
         Assert.Empty(plainProbe.Site!.TrustedCertificates);

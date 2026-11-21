@@ -230,6 +230,7 @@ internal sealed partial class RemoteFilesScreen : IDisposable
             _path = path; _items.Clear(); _total = 0; _listing = null;
         }
         Render();
+        long started = Environment.TickCount64, replied = -1;
         try
         {
             var result = await _client.BrowseAsync(new SiteBrowseRequest
@@ -238,6 +239,7 @@ internal sealed partial class RemoteFilesScreen : IDisposable
                 Listing = listing, Refresh = refresh, ChronologicalFiles = true, IncludeFolderCounts = true,
                 IncludeFreeSpace = !append && _site.Kind == SiteKindCatalog.Sftp
             }, browse.Token);
+            replied = Environment.TickCount64 - started;
             if (_closed || generation != _generation) return;
             if (append && !result.Ok && result.Problem == SiteProblems.ListingChanged)
             {
@@ -283,7 +285,12 @@ internal sealed partial class RemoteFilesScreen : IDisposable
         finally
         {
             if (ReferenceEquals(_browseRequest, browse)) _browseRequest = null;
-            if (!_closed && generation == _generation) { _busy = false; Render(); }
+            if (!_closed && generation == _generation)
+            {
+                _busy = false; Render();
+                // Remote Files speed work (2026-11-21): reply and first drawn rows, no names or paths.
+                Android.Util.Log.Info(InboundApplication.Tag, $"Remote Files browse: reply {replied} ms, rows drawn {Environment.TickCount64 - started} ms, {_items.Count} rows" + (append ? ", next page" : ""));
+            }
         }
     }
 

@@ -1,5 +1,23 @@
 # Progress — session handoff
 
+## Remote Files timing on the phone and shared fixes, 2026-11-21
+
+Timing (fix-order step 1): the Host now logs each browse's stages and the screen its reply and drawing times. On the
+owner's S24 FE with the real Drive account, a cold first open took 4.4 s; warm opens of the same folders took 0.7 s to
+34.5 s, almost all inside rclone's Drive `operations/list`. Our own costs are about 0.5 s plus the 2 s folder-count
+budget. The swings fit Drive throttling of rclone's calls, not yet confirmed. Details and the next measurement (rclone
+at DEBUG, desktop timed alongside) are in the [review](docs/plans/android-review-49f5663c-c745317f.md#timing-on-the-s24-fe-2026-11-21).
+Brightness was at minimum during the run; the display baseline was restored and read back.
+
+At the owner's request ("fix desktop related issues too") the shared regressions were fixed ahead of the Host speed
+work: S1 (charging and battery-saver conditions are ignored where the platform doesn't report power and can always be
+turned off), S2 (Linux gets the no-exclusive-rename fallback), S3 (a same-server edit of the user name or sign-in
+settings without the password is refused), M2 (a finished staging file that had to wait is published next time, not
+downloaded again) and M3 (the fallback copy is flushed to disk). Tests: Integration Sites, queue-condition and
+queue-policy tests 111 passed (6 skipped) with rclone 1.76.0; Sites 226 passed (20 skipped); Mobile 567; Server 209
+after fixing a capability list the range left stale. Signed APK checked with check-apk.py and release verification.
+None of this was tried in the desktop app or on a Linux CIFS/NFS mount.
+
 ## Review of 49f5663c..c745317f, 2026-11-21
 
 Four Opus agents reviewed the 136 commits read-only by area (shared code, Remote Files, rest of Android, test scripts); the lead verified the main findings in code; Fable then reviewed the consolidated report against the code. Result: [android-review-49f5663c-c745317f.md](docs/plans/android-review-49f5663c-c745317f.md).

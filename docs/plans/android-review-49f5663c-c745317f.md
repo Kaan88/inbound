@@ -156,3 +156,51 @@ frame; one cold and one warm open on the S24. Ranking: P1, P2 with P4, P5, P7; P
 4. Shared regressions for desktop and server: S1, S2, S3 (refuse instead of dropping), M2, M3.
 5. Idle wake-ups: A1, A2, A4, A8, S6.
 6. The rest: A3 with a redirecting fixture first, A5-A7, S4, S5, S7, test code removal (S8-S10), tooling (T1, T5, T6).
+
+## Timing on the S24 FE, 2026-11-21
+
+Fix-order step 1. The Host logs one line per browse (`Sites browse timing`: acquire with rclone version and start, fs
+build, `operations/list`, free space, folder counts) and the screen logs reply and rows-drawn times. Signed build
+(APK SHA-256 `824a6a95cd62a7eb4d4524ae25961f250f0f350e95bcf80b5d8e0650424f06ae`, version 0.0.10, installed in place),
+real Drive account, phone unlocked, display baseline restored afterwards.
+
+| Open | rclone | Total | Acquire | List | Counts |
+| --- | --- | --- | --- | --- | --- |
+| Drive top folder (66 items), first after app start | cold | 4.4 s | 0.4 s (version 0.27, start 0.14) | 1.9 s (includes a sign-in renewal) | 2.0 s (cut) |
+| Subfolder A (17 items) | warm | 34.5 s | 0 | 34.5 s | none |
+| Top folder again | warm | 2.9 s | 0 | 0.9 s | 2.0 s (cut) |
+| Subfolder B (8 items) | warm | 2.8 s | 0 | 0.7 s | 2.0 s (cut) |
+| Top folder again | warm | 19.4 s | 0 | 17.4 s | 2.0 s (cut) |
+| Subfolder A again | warm | 14.5 s | 0 | 14.4 s | none |
+
+Rows were drawn within 70 ms of every reply, so the screen itself is not the delay. Free space was 0 ms each time (Drive
+does not read it here).
+
+What this shows:
+- The code-side costs are small and steady: rclone start under 0.5 s, fs build under 20 ms, and folder counts always
+  stop at their 2 s budget. Taking counts out of the reply (P1) saves those 2 s on every open with folders.
+- The large and variable part is rclone's own Drive `operations/list`: 0.7 s to 34.5 s for the same folders within
+  two minutes. A folder-count list cancelled at its budget only ended 14 s later, just before the next list returned,
+  so rclone's Drive calls stalled as a group. That pattern fits Drive API throttling (rclone backing off); rclone also
+  logs that the site uses rclone's shared Google Drive client ID, which is being retired. Not yet confirmed: the
+  phone runs rclone at NOTICE level, which hides retries.
+- The 20 s first open the owner saw was not reproduced cold (4.4 s), but warm opens of 14-34 s were.
+
+Next measurement, before the Host fixes: one run with rclone at DEBUG to see retries and 403 rate-limit answers, and
+the same folders timed on the desktop at the same time with the same account.
+
+## Fixed so far
+
+Step 4 moved ahead of step 2 at the owner's request ("fix desktop related issues too", 2026-11-21). Uncommitted
+tests were run with rclone 1.76.0 (`INBOUND_RCLONE`), so the end-to-end transfer and certificate tests ran too.
+
+| # | Fix | Tests |
+| --- | --- | --- |
+| S1 | Charging and battery-saver conditions only hold a queue on a Host whose platform reports power (`PlatformReportsQueuePower`, set by the Android Host). Elsewhere they are kept but ignored, and the dispatcher lets any client turn a condition off; only turning one on still needs the capability. | `HostWithoutPowerReportsIgnoresChargingAndBatterySaverConditions`, `UnsupportedPlatformLetsAClientClearAQueueConditionItCannotSet` |
+| S2 | The fallback when the file system refuses an exclusive rename now covers Linux as well as Android. | Covered by the existing publication tests; not tried on a CIFS or NFS mount. |
+| S3 | On the same server, changing the user name or sign-in settings without entering the password or key again is refused with a message. A change of server still drops the secrets on purpose: they are never sent to another server. | `ChangingTheUserNameWithoutThePasswordIsRefusedAndKeepsTheSite`; the FTPS certificate test now re-enters the password |
+| M2 | A safe download that finished copying but had to wait before publication keeps its staging file (`StagedComplete` in the transfer record) and publishes it next time instead of downloading again. A restart sweep keeps it; removing the batch or a skip deletes it. | `AFinishedStagingFileThatHadToWaitIsPublishedWithoutDownloadingAgain` |
+| M3 | The fallback copy is now flushed to disk before it counts as done. The double write remains; measuring it on the S24 is still open. | None |
+
+Also fixed: the Server protocol test's capability list was missing `sitesDeleteFiles`, `queueUnqueuedPrecondition` and
+`stopUnfinished`, which this range added without updating the test (it failed at HEAD).

@@ -128,7 +128,11 @@ internal sealed class AndroidHost : IAsyncDisposable
         DownloadManagerService service;
         try
         {
-            service = new DownloadManagerService(paths, jobStore, checkpointStore, settingsStore, engine, log.Info, sleepPrevention: sleep);
+            service = new DownloadManagerService(paths, jobStore, checkpointStore, settingsStore, engine, log.Info, sleepPrevention: sleep)
+            {
+                // Unknown power holds charging and battery-saver queues until the first report.
+                PlatformReportsQueuePower = true,
+            };
         }
         catch
         {

@@ -40,6 +40,30 @@ public sealed partial class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task HostWithoutPowerReportsIgnoresChargingAndBatterySaverConditions()
+    {
+        // Review S1: a queue that carries phone power conditions (copied settings) must not wait forever on a PC or server.
+        await using var ctx = await ServiceContext.CreateAsync(_server, hooks: new ContextHooks { NoQueuePowerReports = true });
+        var settings = ctx.Service.GetSnapshot().Settings;
+        var queue = settings.Queues.Single(q => q.Id == 0);
+        queue.RequireCharging = true;
+        queue.RequireBatterySaverOff = true;
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+
+        const int size = 32_768, seed = 451;
+        var added = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/file/no-power.bin?size={size}&seed={seed}",
+            DestinationDirectory = ctx.Destination, FileName = "no-power.bin", QueueId = 0, StartMode = "queue",
+        });
+        Assert.True(added.Accepted, added.Error);
+        var completed = await ctx.WaitFor(added.Job!.Id, j => j.State == "completed");
+        var expected = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(TestContent.Generate(seed, size))).ToLowerInvariant();
+        Assert.Equal(expected, await Hashing.Sha256FileAsync(completed.FinalFilePath));
+        Assert.Null(ctx.Service.GetSnapshot().Settings.Queues.Single(q => q.Id == 0).ConditionWaitReason);
+    }
+
+    [Fact]
     public async Task QueuePolicySurvivesRestartUnknownPowerHoldsAndOldSettingsDoNotEraseIt()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server);

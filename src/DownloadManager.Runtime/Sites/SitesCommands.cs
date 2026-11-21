@@ -106,7 +106,7 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
         _probe = probe ?? ((host, port, ct) => SshHostKeyProbe.ProbeAllAsync(host, port, null, ct));
         _config = _configStore.Load(out _configProblem);
         if (_configProblem is not null) log(_configProblem);
-        _transfers = new SiteTransfers(stateDirectory, (id, ct) => _sites.GetAsync(id, ct), AcquireAsync,
+        _transfers = new SiteTransfers(stateDirectory, (id, ct) => _sites.GetAsync(id, ct), ct => AcquireAsync(ct),
             () => _config.Enabled, () => _config.TransfersAtOnce, log, _time, transferRetryDelay, sleepPrevention,
             preventSleep, transferExecutionAllowed, afterTransferExclusiveOpen);
         _transfers.Changed += change => TransfersChanged?.Invoke(this, change);
@@ -606,6 +606,11 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
                 && existing.Provider == (request.Kind == SiteKinds.S3 ? request.Provider : null)
                 && existing.Region == (request.Kind == SiteKinds.S3 ? Trimmed(request.Region) : null)
                 && existing.AuthMethod == request.AuthMethod;
+            // Secrets never follow the site to another server. On the same server they don't follow a change of user or
+            // sign-in settings either; say so instead of saving a site that can no longer sign in (review S3, 2026-11-21).
+            if (sameServer && !sameCredentials && request.Password is null && request.PrivateKey is null
+                && (existing.SealedPassword is not null || existing.SealedPrivateKey is not null))
+                return Fail("Enter the password or key again: it isn't kept when the user name or sign-in settings change.");
             try
             {
                 saved = new SiteRecord
@@ -808,6 +813,7 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
 
         var limit = request.Limit is < 1 ? DefaultPageSize : Math.Min(request.Limit, MaxPageSize);
         var offset = Math.Max(0, request.Offset);
+        var timing = new BrowseTiming();
 
         Listing listing;
         if (offset > 0 && !request.Refresh)
@@ -822,9 +828,10 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
         else
         {
             var generation = GenerationOf(site.Id);
-            var (listed, failure) = await ListFolderAsync(site, path, cancellationToken).ConfigureAwait(false);
+            var (listed, failure) = await ListFolderAsync(site, path, cancellationToken, timing).ConfigureAwait(false);
             if (failure is not null)
             {
+                _log(timing.Line(site.Kind, "failed"));
                 return new SiteBrowseResultDto
                 {
                     Ok = false,
@@ -840,8 +847,10 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
             if (request.ChronologicalFiles)
                 listed = listed!.OrderByDescending(item => item.IsFolder)
                     .ThenBy(item => item.IsFolder ? DateTimeOffset.MinValue : item.Modified ?? DateTimeOffset.MaxValue).ToArray();
+            var spaceStarted = timing.Now;
             var space = request.IncludeFreeSpace && site.Kind == SiteKindCatalog.Sftp
                 ? await TryReadSftpFreeBytesAsync(site, cancellationToken).ConfigureAwait(false) : null;
+            timing.SpaceMs = timing.Now - spaceStarted;
             listing = new Listing(Guid.NewGuid().ToString("N"), path, listed!, _time.GetUtcNow(), site.Revision,
                 request.ChronologicalFiles, space);
             StoreListing(site.Id, generation, listing);
@@ -849,7 +858,12 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
 
         var page = listing.Items.Skip(offset).Take(limit).Select(item => WithHere(item, site, path)).ToList();
         if (request.IncludeFolderCounts)
+        {
+            var countsStarted = timing.Now;
             await AddFolderCountsAsync(site, path, page, cancellationToken).ConfigureAwait(false);
+            timing.CountsMs = timing.Now - countsStarted;
+        }
+        _log(timing.Line(site.Kind, $"{page.Count} of {listing.Items.Count} items" + (offset > 0 ? $", from {offset}" : "")));
         return new SiteBrowseResultDto
         {
             Ok = true,
@@ -982,7 +996,8 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
     }
 
     /// <summary>Lists one folder through rclone: the items sorted, or the failure as <c>sites.test</c> reports it.</summary>
-    private async Task<(IReadOnlyList<SiteItemDto>? Items, SiteResultDto? Failure)> ListFolderAsync(SiteRecord site, string path, CancellationToken cancellationToken)
+    private async Task<(IReadOnlyList<SiteItemDto>? Items, SiteResultDto? Failure)> ListFolderAsync(SiteRecord site, string path, CancellationToken cancellationToken,
+        BrowseTiming? timing = null)
     {
         if (site.NeedsHostKey)
             return (null, new SiteResultDto { Ok = false, Problem = SiteProblems.HostKeyNotAccepted, Message = "The server's key has not been accepted yet." });
@@ -990,7 +1005,7 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
         RcloneLease lease;
         try
         {
-            lease = await AcquireAsync(cancellationToken).ConfigureAwait(false);
+            lease = await AcquireAsync(cancellationToken, timing).ConfigureAwait(false);
         }
         catch (RcloneUnavailableException e)
         {
@@ -1001,7 +1016,10 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
         {
             try
             {
+                var buildStarted = timing?.Now ?? 0;
                 var fs = await SiteRemote.BuildAsync(site, lease.Client, cancellationToken).ConfigureAwait(false);
+                if (timing is not null) timing.BuildMs = timing.Now - buildStarted;
+                var listStarted = timing?.Now ?? 0;
                 var listing = await lease.Client.CallAsync("operations/list", new JsonObject
                 {
                     ["fs"] = fs,
@@ -1009,6 +1027,7 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
                     // Without MIME types rclone need not look at each file's name; Sites shows none.
                     ["opt"] = new JsonObject { ["noMimeType"] = true },
                 }, cancellationToken).ConfigureAwait(false);
+                if (timing is not null) timing.ListMs = timing.Now - listStarted;
                 if (listing["list"] is JsonArray { Count: > MaxListingItems } big)
                     return (null, Fail($"The folder holds {big.Count:N0} items, more than Sites can show ({MaxListingItems:N0})."));
                 return (SiteListing.Read(listing), null);
@@ -1088,10 +1107,11 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
     /// A lease on rclone, starting it if needed. The first time for an rclone the version is checked: Sites has SFTP only
     /// for now, so one older than <see cref="RcloneSetup.MinimumForSftp"/> is refused.
     /// </summary>
-    private async Task<RcloneLease> AcquireAsync(CancellationToken cancellationToken)
+    private async Task<RcloneLease> AcquireAsync(CancellationToken cancellationToken, BrowseTiming? timing = null)
     {
         RcloneSupervisor supervisor;
         string path;
+        var acquireStarted = timing?.Now ?? 0;
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -1113,7 +1133,9 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
                     throw new RcloneUnavailableException(_rcloneProblem);
                 }
 
+                var versionStarted = timing?.Now ?? 0;
                 var (version, problem) = await RcloneSetup.ReadVersionAsync(rclone, cancellationToken).ConfigureAwait(false);
+                if (timing is not null) timing.VersionMs = timing.Now - versionStarted;
                 problem ??= version is null ? "rclone's version could not be read." : RcloneSetup.TooOldForSftp(version);
                 if (problem is not null)
                 {
@@ -1142,9 +1164,12 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
 
         var unproven = _updater is not null && path == _updater.CurrentExecutable && !_updater.State.Proven;
         RcloneLease lease;
+        var startStarted = timing?.Now ?? 0;
+        if (timing is not null) timing.Cold = supervisor.Status.State != RcloneState.Running;
         try
         {
             lease = await supervisor.AcquireAsync(cancellationToken).ConfigureAwait(false);
+            if (timing is not null) { timing.StartMs = timing.Now - startStarted; timing.AcquireMs = timing.Now - acquireStarted; }
         }
         catch (RcloneUnavailableException e) when (unproven && !cancellationToken.IsCancellationRequested
                                                    && (Interlocked.Increment(ref _unprovenFailures) >= UnprovenStartFailures || supervisor.Status.State == RcloneState.Failed))
@@ -1179,6 +1204,32 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
         }
 
         return lease;
+    }
+
+    /// <summary>
+    /// Where one browse spends its time, logged as one line without names or paths (Remote Files speed work, 2026-11-21).
+    /// </summary>
+    private sealed class BrowseTiming
+    {
+        private readonly long _started = Environment.TickCount64;
+        public long Now => Environment.TickCount64;
+        public bool? Cold { get; set; }
+        public long AcquireMs { get; set; } = -1;
+        public long VersionMs { get; set; } = -1;
+        public long StartMs { get; set; } = -1;
+        public long BuildMs { get; set; } = -1;
+        public long ListMs { get; set; } = -1;
+        public long SpaceMs { get; set; } = -1;
+        public long CountsMs { get; set; } = -1;
+
+        public string Line(string kind, string outcome)
+        {
+            static string Ms(long value) => value < 0 ? "-" : value + " ms";
+            var rclone = Cold switch { true => "cold", false => "warm", null => "cached listing" };
+            return $"Sites browse timing ({kind}, rclone {rclone}): total {Environment.TickCount64 - _started} ms; acquire {Ms(AcquireMs)} " +
+                   $"(version {Ms(VersionMs)}, start {Ms(StartMs)}), build {Ms(BuildMs)}, list {Ms(ListMs)}, free space {Ms(SpaceMs)}, " +
+                   $"folder counts {Ms(CountsMs)}; {outcome}.";
+        }
     }
 
     /// <summary>A freshly installed rclone that can't even report its version is rolled back before it is used.</summary>

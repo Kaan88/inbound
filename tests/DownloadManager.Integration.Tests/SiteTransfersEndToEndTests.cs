@@ -312,6 +312,37 @@ public sealed partial class SiteTransfersEndToEndTests : IAsyncLifetime
     }
 
     [SiteTransfersFact]
+    public async Task AFinishedStagingFileThatHadToWaitIsPublishedWithoutDownloadingAgain()
+    {
+        var (commands, siteId) = await OpenSiteAsync(StartServer(slow: true));
+        commands.Transfers.SetExecutionAllowed(false);
+        var target = Path.Combine(Local, "staged-complete");
+        Directory.CreateDirectory(target);
+        var result = await Call<SiteTransferResultDto>(commands, SitesMessageTypes.SafeDownloadStart, new SiteTransferStartRequest
+        {
+            SiteId = siteId, RemoteFolder = "/pub", LocalFolder = target,
+            Names = [new SiteTransferNameDto { Name = "slow.bin" }],
+        });
+        Assert.True(result.Ok, result.Message);
+        var id = result.Transfer!.Id;
+        await commands.DisposeAsync();
+        _commands.Remove(commands);
+
+        // What a run leaves when execution was taken away after the copy finished but before publication (review M2).
+        var file = Path.Combine(State, "sites", "transfers", id + ".json");
+        var record = JsonNode.Parse(await File.ReadAllTextAsync(file))!.AsObject();
+        record["stagedComplete"] = true;
+        await File.WriteAllTextAsync(file, record.ToJsonString());
+        await File.WriteAllTextAsync(Path.Combine(target, ".inbound-transfer-" + id), "staged");
+
+        var again = Open();
+        var done = await WaitForAsync(again, id, t => SiteTransferStates.IsFinished(t.State), TimeSpan.FromSeconds(60));
+        Assert.Equal(SiteTransferStates.Done, done.State);
+        Assert.Equal("staged", await File.ReadAllTextAsync(Path.Combine(target, "slow.bin")));
+        Assert.Equal(Path.Combine(target, "slow.bin"), Assert.Single(Directory.EnumerateFiles(target)));
+    }
+
+    [SiteTransfersFact]
     public async Task SafeDownloadRecoveryLeavesFinalNamePartialsAlone()
     {
         var (commands, siteId) = await OpenSiteAsync(StartServer(slow: true));

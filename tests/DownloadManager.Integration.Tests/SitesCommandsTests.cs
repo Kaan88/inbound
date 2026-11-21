@@ -130,6 +130,28 @@ public sealed class SitesCommandsTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ChangingTheUserNameWithoutThePasswordIsRefusedAndKeepsTheSite()
+    {
+        var commands = Open();
+        await On(commands);
+        var saved = (await Call<SiteResultDto>(commands, SitesMessageTypes.Save, Site())).Site!;
+
+        var refused = await Call<SiteResultDto>(commands, SitesMessageTypes.Save, Site(id: saved.Id, password: null, user: "someone-else"));
+        Assert.False(refused.Ok);
+        Assert.Contains("password or key again", refused.Message);
+
+        var list = await Call<SitesListDto>(commands, SitesMessageTypes.ListRequest);
+        var still = Assert.Single(list.Sites);
+        Assert.Equal("tester", still.User);
+        Assert.True(still.HasPassword);
+
+        var changed = await Call<SiteResultDto>(commands, SitesMessageTypes.Save, Site(id: saved.Id, user: "someone-else"));
+        Assert.True(changed.Ok);
+        Assert.Equal("someone-else", changed.Site!.User);
+        Assert.True(changed.Site.HasPassword);
+    }
+
+    [Fact]
     public async Task ProbeThenTrustStoresTheServersKeys()
     {
         var commands = Open(probe: Probe());
@@ -512,14 +534,14 @@ public sealed class SitesCommandsTests : IAsyncLifetime
         Assert.True(status.Enabled);
     }
 
-    private static SiteSaveRequest Site(string? id = null, string name = "Office box", string host = Host, string? password = Secret) => new()
+    private static SiteSaveRequest Site(string? id = null, string name = "Office box", string host = Host, string? password = Secret, string user = "tester") => new()
     {
         Id = id,
         Name = name,
         Kind = SiteKinds.Sftp,
         Host = host,
         Port = 22,
-        User = "tester",
+        User = user,
         AuthMethod = SiteAuthMethods.Password,
         Password = password,
         RemoteFolder = "/pub",

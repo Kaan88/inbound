@@ -478,6 +478,9 @@ public sealed class SiteTransfers : IAsyncDisposable
         try
         {
             lock (_sync) batch.Removed = true;
+            // A staging file kept for a publication that never came goes with the batch (review M2).
+            if (batch.Record.SafeSingleDownload && batch.Record.StagedComplete && Directory.Exists(batch.Record.LocalFolder))
+                DropStaged(batch.Record);
             _store.Delete(batch.Record.Id);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
@@ -1171,6 +1174,7 @@ public sealed class SiteTransfers : IAsyncDisposable
                 {
                     case SiteTransferConflicts.Skip:
                         if (record.PublicationPending) throw new ItemFailure(InterruptedPublication);
+                        if (record.SafeSingleDownload) DropStaged(record);
                         return SiteTransferItemStates.Skipped;
                     case SiteTransferConflicts.KeepBoth:
                         target = await FreeNameAsync(record, client, fs, item.Path, token).ConfigureAwait(false);
@@ -1191,17 +1195,36 @@ public sealed class SiteTransfers : IAsyncDisposable
             string temporaryName = ".inbound-transfer-" + record.Id;
             string temporary = SiteTransferPaths.Local(record.LocalFolder, temporaryName);
             string final = SiteTransferPaths.Local(record.LocalFolder, to);
+            string? outcome = null;
             try
             {
-                await CopyFileAsync(client, batch, fs, local, remote, temporaryName, token).ConfigureAwait(false);
-                return await PublishSafeAsync(batch, temporary, final, token).ConfigureAwait(false);
+                bool staged;
+                lock (_sync) staged = record.StagedComplete;
+                if (!staged || !File.Exists(temporary))
+                {
+                    await CopyFileAsync(client, batch, fs, local, remote, temporaryName, token).ConfigureAwait(false);
+                    lock (_sync) record.StagedComplete = true;
+                    await SaveAsync(batch, token).ConfigureAwait(false);
+                }
+                outcome = await PublishSafeAsync(batch, temporary, final, token).ConfigureAwait(false);
+                return outcome;
             }
-            finally { File.Delete(temporary); }
+            finally
+            {
+                // A run that has to wait keeps the finished file for the next one (review M2); anything else removes it.
+                if (outcome != SiteTransferItemStates.Waiting) DropStaged(record);
+            }
         }
 
         await CopyFileAsync(client, batch, download ? fs : local, download ? local.DeepClone() : fs.DeepClone(),
             download ? remote : item.Path, download ? to : remote, token).ConfigureAwait(false);
         return SiteTransferItemStates.Done;
+    }
+
+    private void DropStaged(SiteTransferRecord record)
+    {
+        File.Delete(SiteTransferPaths.Local(record.LocalFolder, ".inbound-transfer-" + record.Id));
+        lock (_sync) record.StagedComplete = false;
     }
 
     private const string InterruptedPublication =
@@ -1220,7 +1243,7 @@ public sealed class SiteTransfers : IAsyncDisposable
                 return renamed ? SiteTransferItemStates.Done : SiteTransferItemStates.Skipped;
             batch.Record.PublicationPending = true;
         }
-        // On Android FUSE, record the uncertainty durably before opening the public path. If
+        // Where exclusive rename is refused (Android FUSE, some Linux mounts), record the uncertainty durably before opening the public path. If
         // killed at any point afterwards, fail closed without deleting or reusing that path.
         await SaveAsync(batch, token).ConfigureAwait(false);
         await using var input = File.OpenRead(temporary);
@@ -1240,6 +1263,7 @@ public sealed class SiteTransfers : IAsyncDisposable
                     await afterOpen(token).ConfigureAwait(false);
                 await input.CopyToAsync(output, token).ConfigureAwait(false);
                 await output.FlushAsync(token).ConfigureAwait(false);
+                output.Flush(flushToDisk: true);
             }
             return SiteTransferItemStates.Done;
         }
@@ -1382,7 +1406,8 @@ public sealed class SiteTransfers : IAsyncDisposable
                 {
                     token.ThrowIfCancellationRequested();
                     var staged = ".inbound-transfer-" + record.Id;
-                    File.Delete(SiteTransferPaths.Local(record.LocalFolder, staged));
+                    // A finished staging file waits for publication (review M2); only rclone's partial files go.
+                    if (!record.StagedComplete) File.Delete(SiteTransferPaths.Local(record.LocalFolder, staged));
                     foreach (var partial in Directory.EnumerateFiles(record.LocalFolder, staged + ".*.partial"))
                     {
                         token.ThrowIfCancellationRequested();

@@ -27,6 +27,28 @@ public sealed partial class HostCommandDispatcherTests
     }
 
     [Fact]
+    public async Task UnsupportedPlatformLetsAClientClearAQueueConditionItCannotSet()
+    {
+        // Review S1: a condition that arrived another way (copied settings) can always be turned off.
+        var web = await WebAsync();
+        var current = web.Service.GetSettings();
+        var id = current.DefaultQueueId;
+        current.Queues.Single(q => q.Id == id).RequireCharging = true;
+        current.Queues.Single(q => q.Id == id).RequireBatterySaverOff = true;
+        Assert.True((await web.Service.UpdateSettingsAsync(current)).Ok);
+
+        var requested = web.Service.GetSettings();
+        requested.Queues.Single(q => q.Id == id).RequireCharging = false;
+        requested.Queues.Single(q => q.Id == id).RequireBatterySaverOff = false;
+        var cleared = (await AskAsync(web.Dispatcher, web.Pipe, MessageTypes.SettingsUpdate,
+            new SettingsUpdateRequest { Settings = requested, ExpectedRevision = requested.Revision })).GetPayload<SettingsResult>();
+        Assert.True(cleared.Ok, cleared.Error);
+        var queue = web.Service.GetSettings().Queues.Single(q => q.Id == id);
+        Assert.NotEqual(true, queue.RequireCharging);
+        Assert.NotEqual(true, queue.RequireBatterySaverOff);
+    }
+
+    [Fact]
     public async Task SettingsWireCompareAndSwapRejectsStaleWriteWithoutChangingOtherFields()
     {
         var web = await WebAsync();
