@@ -2,6 +2,23 @@
 
 ## ANDROID.9 build started, 2026-11-21
 
+Owner decision (archives step): t6 and t7 show a list of saved archive passwords tried in order and a per-archive
+"Delete the archive after extracting"; the Host had neither (one password per set or package, one global delete
+setting). Owner: add both to the Host ("Add both to the Host"), so the phone matches the mockups.
+
+Step 3, archives: built and tried on the S24 with real downloads (password-protected zips served from the PC over
+`adb reverse`; captures `t-archive-*`, `t6-sheet`, `t7-archives`, `t7-saved-sheet` in
+`artifacts/android-app/pairs/android9-torbox-20261121/`). The phone's Host composes extraction as the server does. The
+Host gained a saved-password list (sealed, tried in order before asking, each once until a retry, added from the sheet
+or Settings, never sent back) and a per-archive delete choice (`archive.passwords.*`, `SaveForOtherArchives`,
+`DeleteArchives`; 4 new integration tests). On the phone: "Needs a password · 3.0 MB" with Enter, the t6 sheet with both
+checkboxes, extraction to Download, a second archive opened by the saved password with no prompt, the t7 Archives group
+and the Saved passwords sheet (a sheet, since the settings page is already the open page). Two phone-only faults found and
+fixed: the official static `7zzs` is killed by the app sandbox (SIGSYS, exit 159; it had only been run from adb's
+shell), so 7-Zip 26.04 is now built from source with the NDK (`tools/AndroidApp/build-7zip-android.sh`, reproducible,
+pinned); and the hard-link check treated Android as unknown (.NET's IsLinux is false there). Logcat from the app holds no
+password. Tests: Archives 401, archive integration 157, Mobile 595.
+
 The owner approved mockups t1-t7 ("Approved, build them"). Order: TorBox (plain .NET), then archives (needs an arm64
 7-Zip in the APK, as rclone is), then torrents (needs the libtorrent worker built for arm64 with the NDK), then a check
 of each screen against a paired PC or server, then the side-by-side comparison on the phone and a Fable review.

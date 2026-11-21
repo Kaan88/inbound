@@ -407,7 +407,8 @@ public static partial class ExtractionSafety
     /// <returns>Null when the count can't be told off Windows. Windows keeps its earlier rule: a failed call counts as one.</returns>
     private static uint? HardLinkCount(string path)
     {
-        if (OperatingSystem.IsLinux()) return UnixHardLinkCount(path);
+        // Android is Linux with bionic, whose arm64 struct stat is the generic layout too; .NET doesn't count it as Linux (ANDROID.9).
+        if (OperatingSystem.IsLinux() || OperatingSystem.IsAndroid()) return UnixHardLinkCount(path);
         if (!OperatingSystem.IsWindows()) return null;
         using SafeFileHandle handle = File.OpenHandle(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
         return GetFileInformationByHandle(handle, out var information) ? information.NumberOfLinks : 1;

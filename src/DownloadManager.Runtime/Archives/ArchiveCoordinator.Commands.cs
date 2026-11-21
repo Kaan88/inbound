@@ -50,7 +50,7 @@ public sealed partial class ArchiveCoordinator
     {
         ArchiveSettings settings;
         lock (_sync) settings = _settings;
-        return new ArchiveSettingsResult { Ok = true, Settings = MapSettings(settings), Tool = ToolStatus() };
+        return new ArchiveSettingsResult { Ok = true, Settings = MapSettings(settings, SavedPasswordCount()), Tool = ToolStatus() };
     }
 
     public async Task<ArchiveSettingsResult> UpdateSettingsAsync(ArchiveSettingsUpdate update, CancellationToken cancellationToken = default)
@@ -76,7 +76,7 @@ public sealed partial class ArchiveCoordinator
         }
 
         // The tool's status reads the disk, which can be a share, so it waits for the gate to be free.
-        return new ArchiveSettingsResult { Ok = error is null, Error = error, Settings = MapSettings(settings), Tool = ToolStatus() };
+        return new ArchiveSettingsResult { Ok = error is null, Error = error, Settings = MapSettings(settings, SavedPasswordCount()), Tool = ToolStatus() };
     }
 
     /// <summary>Returns what is wrong with the update, or null once it is applied.</summary>
@@ -265,6 +265,11 @@ public sealed partial class ArchiveCoordinator
     {
         ArgumentNullException.ThrowIfNull(request);
         if (DescribeBadPassword(request.Password) is { } bad) return new ArchiveActionResult { Ok = false, Error = bad };
+        if (request.SaveForOtherArchives && !string.IsNullOrEmpty(request.Password) &&
+            await AddSavedPasswordCoreAsync(request.Password, cancellationToken).ConfigureAwait(false) is { } notSaved)
+        {
+            return new ArchiveActionResult { Ok = false, Error = notSaved };
+        }
 
         if (request.PackageId is { } packageId)
         {
@@ -309,6 +314,7 @@ public sealed partial class ArchiveCoordinator
             if (record is null || record.Removed) return new ArchiveActionResult { Ok = false, Error = "There is no such archive set." };
 
             var next = record.Clone();
+            if (request.DeleteArchives is { } delete) next.DeleteArchives = delete;
             next.ProtectedPassword = string.IsNullOrEmpty(request.Password) ? null : SecretProtector.ProtectArchivePassword(request.Password);
             if (next.ProtectedPassword is not null && AsksForPassword(next))
             {
@@ -328,6 +334,107 @@ public sealed partial class ArchiveCoordinator
         Announce(announce);
         Wake();
         return new ArchiveActionResult { Ok = true, Set = announce };
+    }
+
+    /// <summary>The saved passwords' ids and dates, in the order they are tried. Their values never leave the Host.</summary>
+    public ArchiveSavedPasswordsResult ListSavedPasswords()
+    {
+        lock (_sync)
+        {
+            return new ArchiveSavedPasswordsResult
+            {
+                Ok = true,
+                Passwords = [.. _saved.Select(saved => new ArchiveSavedPasswordDto { Id = saved.Id, AddedAt = saved.AddedAt })],
+            };
+        }
+    }
+
+    /// <summary>Adds a password to the end of the saved list (one already there is not added twice) and tries it on every set asking for one.</summary>
+    public async Task<ArchiveSavedPasswordsResult> AddSavedPasswordAsync(string? password, CancellationToken cancellationToken = default)
+    {
+        var error = await AddSavedPasswordCoreAsync(password, cancellationToken).ConfigureAwait(false);
+        var result = ListSavedPasswords();
+        result.Ok = error is null;
+        result.Error = error;
+        return result;
+    }
+
+    public async Task<ArchiveSavedPasswordsResult> RemoveSavedPasswordAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        string? error = null;
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            IReadOnlyList<ArchiveSavedPassword> current;
+            lock (_sync) current = _saved;
+            if (!_savedPasswordsLoaded) error = NotLoadedText;
+            else if (current.All(saved => saved.Id != id)) error = "There is no such saved password.";
+            else
+            {
+                var next = current.Where(saved => saved.Id != id).ToList();
+                await _store.SaveSavedPasswordsAsync(new ArchiveSavedPasswords { Passwords = next }, cancellationToken).ConfigureAwait(false);
+                lock (_sync) _saved = next;
+            }
+        }
+        finally
+        {
+            _gate.Release();
+        }
+
+        var result = ListSavedPasswords();
+        result.Ok = error is null;
+        result.Error = error;
+        return result;
+    }
+
+    private const string NotLoadedText = "Archive extraction isn't running, so the saved passwords can't be changed now.";
+
+    /// <summary>Returns what went wrong, or null once the password is in the list (added now or there already).</summary>
+    private async Task<string?> AddSavedPasswordCoreAsync(string? password, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrEmpty(password)) return "Enter a password first.";
+        if (DescribeBadPassword(password) is { } bad) return bad;
+
+        var added = false;
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (!_savedPasswordsLoaded) return NotLoadedText;
+            IReadOnlyList<ArchiveSavedPassword> current;
+            lock (_sync) current = _saved;
+            if (!current.Any(saved => string.Equals(SecretProtector.UnprotectArchivePassword(saved.ProtectedPassword), password, StringComparison.Ordinal)))
+            {
+                var next = current.Append(new ArchiveSavedPassword
+                {
+                    Id = Guid.NewGuid(),
+                    ProtectedPassword = SecretProtector.ProtectArchivePassword(password),
+                    AddedAt = _time.GetUtcNow(),
+                }).ToList();
+                await _store.SaveSavedPasswordsAsync(new ArchiveSavedPasswords { Passwords = next }, cancellationToken).ConfigureAwait(false);
+                lock (_sync) _saved = next;
+                added = true;
+            }
+        }
+        finally
+        {
+            _gate.Release();
+        }
+
+        if (added)
+        {
+            // A set that asked has tried every other one, so the new one is its next.
+            List<Guid> asking;
+            lock (_sync) asking = _sets.Values.Where(AsksForPassword).Select(set => set.Id).ToList();
+            foreach (var id in asking) await ResumeAskingSetAsync(id, cancellationToken).ConfigureAwait(false);
+            Wake();
+        }
+
+        return null;
+    }
+
+    private int SavedPasswordCount()
+    {
+        lock (_sync) return _saved.Count;
     }
 
     public async Task<string?> SetPackagePasswordAsync(Guid packageId, string? password, bool keepExisting = false, CancellationToken cancellationToken = default)
@@ -463,6 +570,8 @@ public sealed partial class ArchiveCoordinator
             var next = record.Clone();
             next.Wanted = true;
             next.State = ArchiveSetState.Waiting;
+            // Asked again: every saved password gets another go.
+            next.TriedSavedPasswords = [];
             next.ToolMissingVolumes = [];
             next.Note = null;
             ClearFailure(next);
@@ -569,8 +678,9 @@ public sealed partial class ArchiveCoordinator
         };
     }
 
-    private static ArchiveSettingsDto MapSettings(ArchiveSettings settings) => new()
+    private static ArchiveSettingsDto MapSettings(ArchiveSettings settings, int savedPasswords) => new()
     {
+        SavedPasswords = savedPasswords,
         AutoExtract = settings.AutoExtract,
         Destination = settings.DestinationMode switch
         {
@@ -631,9 +741,13 @@ public sealed partial class ArchiveCoordinator
     {
         var live = set.State == ArchiveSetState.Extracting ? _live.GetValueOrDefault(set.Id) : null;
         bool packageHasPassword;
+        int savedTried;
+        bool deleteByDefault;
         lock (_sync)
         {
             packageHasPassword = set.PackageId is { } packageId && _packagePasswords.TryGetValue(packageId, out var password) && password.Stamp != set.RejectedPackagePasswordStamp;
+            savedTried = _saved.Count(saved => set.TriedSavedPasswords.Contains(saved.Id));
+            deleteByDefault = _settings.DeleteArchives;
         }
 
         return new ArchiveSetDto
@@ -672,6 +786,8 @@ public sealed partial class ArchiveCoordinator
             CreatedAt = set.CreatedAt,
             UpdatedAt = set.UpdatedAt,
             CompletedAt = set.CompletedAt,
+            SavedPasswordsTried = savedTried,
+            DeleteArchives = set.DeleteArchives ?? deleteByDefault,
         };
     }
 

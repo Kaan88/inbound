@@ -17,6 +17,9 @@
       <!-- A 48 dp touch target around the 40 dp circle; the negative margins keep the row's size as it was. -->
       <ImageButton android:id="@+id/action" android:layout_width="48dp" android:layout_height="48dp" android:layout_marginTop="-4dp" android:layout_marginBottom="-4dp" android:layout_marginRight="-4dp"
           android:background="@drawable/bg_circle_tonal_inset" />
+      <!-- Archive sets: the small tonal button of t3 ("Enter" a password, "Retry" extracting); shown instead of the button above. -->
+      <com.google.android.material.button.MaterialButton android:id="@+id/archive_action" style="@style/Widget.Material3.Button.TonalButton" android:layout_width="wrap_content" android:layout_height="40dp"
+          android:minWidth="0dp" android:insetTop="0dp" android:insetBottom="0dp" android:paddingLeft="16dp" android:paddingRight="16dp" android:textSize="14sp" android:visibility="gone" />
     </LinearLayout>
     <com.google.android.material.progressindicator.LinearProgressIndicator android:id="@+id/bar" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="14dp" android:layout_marginRight="4dp"
         android:max="1000" app:trackThickness="6dp" app:trackStopIndicatorSize="0dp" app:indicatorTrackGapSize="0dp" app:trackColor="?attr/colorSurfaceContainerHighest" app:trackCornerRadius="3dp" android:importantForAccessibility="no" />

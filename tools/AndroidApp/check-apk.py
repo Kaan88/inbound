@@ -24,8 +24,9 @@ if "--bundled-7zip" in sys.argv:
     seven_license = "assets/licenses/7-zip.txt"
     checks["only one packaged 7-Zip, arm64"] = [n for n in names if n.endswith("/lib7zz.so")] == [seven]
     checks["pinned 7-Zip bytes"] = seven in names and hashlib.sha256(z.read(seven)).hexdigest() == (
-        "8f34c72fa4a9a79282b2364308f75d77a928ddf571292a7d030825e53d60e3a7")
+        "41a3efa6bba849c70c1625d572507f34b42ef05c7530215e60afea74fa38de74")
     checks["7-Zip license"] = seven_license in names and b"GNU LGPL" in z.read(seven_license)
+    checks["7-Zip unRAR license"] = "assets/licenses/7-zip-unrar.txt" in names
 if "--bundled-rclone" in sys.argv:
     binary = "lib/arm64-v8a/librclone.so"
     license_path = "assets/licenses/rclone.txt"

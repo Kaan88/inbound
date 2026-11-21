@@ -5,6 +5,7 @@ using DownloadManager.Host;
 using DownloadManager.Mobile;
 using DownloadManager.Persistence;
 using DownloadManager.Runtime;
+using DownloadManager.Runtime.Archives;
 using DownloadManager.Runtime.Ipc;
 using DownloadManager.Runtime.Remote;
 using DownloadManager.Runtime.Sites;
@@ -68,7 +69,7 @@ internal sealed record AndroidRemote(RemoteProviderSetup Setup, RemoteJobCoordin
 
 /// <summary>
 /// The Host core on Android, in this process: DownloadManagerService + HostCommandDispatcher composed as
-/// src/DownloadManager.Server/ServerApp.cs composes them, with TorBox and minus the HTTP front, Torrents and Archives. A client is an
+/// src/DownloadManager.Server/ServerApp.cs composes them, with TorBox and Archives and minus the HTTP front and Torrents. A client is an
 /// <see cref="InProcessSession"/> talking to the dispatcher with the same IpcMessage envelopes a pipe or WebSocket carries.
 /// For now it lives and dies with the process (no foreground service yet).
 /// </summary>
@@ -85,17 +86,19 @@ internal sealed class AndroidHost : IAsyncDisposable
 
     private readonly HttpDownloadEngine _engine;
     private readonly AndroidRemote _remote;
+    private readonly ArchiveCoordinator _archives;
     private readonly SitesCommands? _sites;
     private readonly ISleepPrevention? _siteSleep;
     private readonly Action<string> _say;
 
-    private AndroidHost(DownloadManagerService service, HostCommandDispatcher dispatcher, HttpDownloadEngine engine, AndroidRemote remote, SitesCommands? sites, ISleepPrevention? siteSleep, ActivityState activity,
+    private AndroidHost(DownloadManagerService service, HostCommandDispatcher dispatcher, HttpDownloadEngine engine, AndroidRemote remote, ArchiveCoordinator archives, SitesCommands? sites, ISleepPrevention? siteSleep, ActivityState activity,
         ISleepPrevention sleep, EventHandler<JobChangeEventArgs> onJob, EventHandler<bool> onWait, EventHandler<AppSettings> onSettings, Action<string> say)
     {
         Service = service;
         Dispatcher = dispatcher;
         _engine = engine;
         _remote = remote;
+        _archives = archives;
         _sites = sites;
         _siteSleep = siteSleep;
         Activity = activity;
@@ -150,6 +153,12 @@ internal sealed class AndroidHost : IAsyncDisposable
             checkpoints: checkpointStore);
         DownloadManagerService service;
         AndroidRemote remote;
+        ArchiveCoordinator archives;
+        // ANDROID.9: the APK's own 7-Zip (the static arm64 build, as lib7zz.so), the one place Android lets an app run a
+        // program from. A build without it (another ABI, a test build) offers no extraction.
+        var nativeLibraries = Android.App.Application.Context.ApplicationInfo?.NativeLibraryDir;
+        var bundledSevenZip = nativeLibraries is null ? null : Path.Combine(nativeLibraries, "lib7zz.so");
+        var canExtract = File.Exists(bundledSevenZip);
         RemoteProviderSetup? remoteSetup = null;
         try
         {
@@ -161,8 +170,10 @@ internal sealed class AndroidHost : IAsyncDisposable
                 // Unknown power holds charging and battery-saver queues until the first report.
                 PlatformReportsQueuePower = true,
             };
-            // Archive passwords from TorBox packages wait for the phone's extraction (ANDROID.9, archives step).
-            var remoteJobs = remoteSetup.CreateCoordinator(paths, service, packagePasswords: null, log.Info);
+            archives = new ArchiveCoordinator(service, new JsonArchiveStore(paths, log.Warn), log.Info,
+                new ArchiveCoordinatorOptions { SevenZipPath = canExtract ? bundledSevenZip : null });
+            // A TorBox package's archive password goes to extraction, as on the desktop.
+            var remoteJobs = remoteSetup.CreateCoordinator(paths, service, archives, log.Info);
             remote = new AndroidRemote(remoteSetup, remoteJobs, new RemoteCommands(remoteSetup.Registry, remoteJobs, log: log.Info));
             service.DirectAddresses = remoteJobs;
             foreach (var provider in remoteSetup.Registry.All)
@@ -203,6 +214,23 @@ internal sealed class AndroidHost : IAsyncDisposable
             await service.SetQueuePowerStateAsync(power.Charging, power.BatterySaver, ct).ConfigureAwait(false);
             await service.InitializeAsync(lastRunStoppedByUser, ct).ConfigureAwait(false);
             service.TrayAvailable = false;
+            var archivesStarted = false;
+            if (canExtract)
+            {
+                try
+                {
+                    await archives.InitializeAsync(ct).ConfigureAwait(false);
+                    archivesStarted = true;
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    log.Error("Archive extraction could not start: " + ex.GetType().Name);
+                    await archives.ShutdownAsync(CancellationToken.None).ConfigureAwait(false);
+                }
+            }
+            // No 7-Zip: it stops listening to the service, so finished downloads are never queued for an extraction that can't run.
+            else await archives.ShutdownAsync(CancellationToken.None).ConfigureAwait(false);
+
             // After the service, because reconciling can create local jobs at once. Ordinary downloads don't depend on it:
             // without it the Add sheet's TorBox entry is simply not offered.
             try
@@ -235,7 +263,6 @@ internal sealed class AndroidHost : IAsyncDisposable
             activity.ApplySnapshot(snapshot.Jobs, snapshot.Status, snapshot.Settings.Queues);
             // Never fetch or run an executable from writable app storage on Android.
             // Test/other ABI builds without the bundled binary do not advertise this capability.
-            var nativeLibraries = Android.App.Application.Context.ApplicationInfo?.NativeLibraryDir;
             var bundledRclone = nativeLibraries is null ? null : Path.Combine(nativeLibraries, "librclone.so");
             if (File.Exists(bundledRclone))
             {
@@ -254,6 +281,7 @@ internal sealed class AndroidHost : IAsyncDisposable
             }
             var dispatcher = new HostCommandDispatcher(service, new AndroidPlatform(), log, remote.Started ? remote.Commands : null)
             {
+                Archives = archivesStarted ? new ArchiveIpcDispatcher(archives, new PathRoots([SharedDownloadFolder]) { Called = "this phone's Download folder" }) : null,
                 Folders = new FolderBrowser(new PathRoots([SharedDownloadFolder]) { Called = "this phone's Download folder" }),
                 Sites = sites,
                 SitesRoots = sites is null ? null : new PathRoots([SharedDownloadFolder]) { Called = "this phone's Download folder" },
@@ -269,8 +297,9 @@ internal sealed class AndroidHost : IAsyncDisposable
                 sites.Transfers.Measured += service.OnSiteTransfersMeasured;
                 service.AttachSiteTransfers(sites.Transfers.Demand, sites.Transfers.SetSpeedLimit);
             }
+            archives.Changed += (_, change) => dispatcher.BroadcastArchiveChanged(change);
             dispatcher.Start();
-            return new AndroidHost(service, dispatcher, engine, remote, sites, siteSleep, activity, sleep, onJob, onWait, onSettings, say);
+            return new AndroidHost(service, dispatcher, engine, remote, archives, sites, siteSleep, activity, sleep, onJob, onWait, onSettings, say);
         }
         catch (Exception startError)
         {
@@ -284,6 +313,7 @@ internal sealed class AndroidHost : IAsyncDisposable
             try { if (sites is not null) await sites.DisposeAsync().ConfigureAwait(false); }
             catch (Exception ex) { sitesShutdownError = ex; }
             finally { siteSleep?.Dispose(); }
+            await StopArchivesAsync(archives, say).ConfigureAwait(false);
             await remote.StopAsync(say).ConfigureAwait(false);
             try { await service.ShutdownAsync(CancellationToken.None).ConfigureAwait(false); }
             catch (Exception ex)
@@ -300,6 +330,13 @@ internal sealed class AndroidHost : IAsyncDisposable
             if (sitesShutdownError is not null) throw new HostLeftRunningException(startError, sitesShutdownError);
             throw;
         }
+    }
+
+    /// <summary>Stops extraction (a running 7-Zip is ended) before the service, as the server does. Safe when it never started.</summary>
+    private static async Task StopArchivesAsync(ArchiveCoordinator archives, Action<string> say)
+    {
+        try { await archives.ShutdownAsync(CancellationToken.None).ConfigureAwait(false); }
+        catch (Exception ex) { say("[host] archive shutdown: " + ex.GetType().Name); }
     }
 
     private static async Task ProtectStoredSecretsAsync(DownloadManagerService service, Action<string> say)
@@ -323,6 +360,7 @@ internal sealed class AndroidHost : IAsyncDisposable
         try { if (_sites is not null) await _sites.DisposeAsync().ConfigureAwait(false); }
         catch (Exception ex) { _say("[host] remote files shutdown: " + ex.GetType().Name); }
         finally { _siteSleep?.Dispose(); }
+        await StopArchivesAsync(_archives, _say).ConfigureAwait(false);
         await _remote.StopAsync(_say).ConfigureAwait(false);
         try { await Service.ShutdownAsync(CancellationToken.None).ConfigureAwait(false); }
         catch (Exception ex) { _say("[host] shutdown: " + ex.GetType().Name + ": " + ex.Message); }

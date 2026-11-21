@@ -423,6 +423,14 @@ internal sealed class FreezableStore(IArchiveStore inner, int? freezeAtSave = nu
     public Task SavePackagePasswordAsync(ArchivePackagePassword password, CancellationToken cancellationToken = default) => inner.SavePackagePasswordAsync(password, cancellationToken);
 
     public Task DeletePackagePasswordAsync(Guid packageId, CancellationToken cancellationToken = default) => inner.DeletePackagePasswordAsync(packageId, cancellationToken);
+
+    public Task<ArchiveSavedPasswords?> LoadSavedPasswordsAsync(CancellationToken cancellationToken = default) => inner.LoadSavedPasswordsAsync(cancellationToken);
+
+    public Task SaveSavedPasswordsAsync(ArchiveSavedPasswords passwords, CancellationToken cancellationToken = default)
+    {
+        Check();
+        return inner.SaveSavedPasswordsAsync(passwords, cancellationToken);
+    }
 }
 
 /// <summary>

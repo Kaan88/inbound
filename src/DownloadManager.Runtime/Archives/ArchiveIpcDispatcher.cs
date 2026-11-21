@@ -85,6 +85,19 @@ public sealed class ArchiveIpcDispatcher(ArchiveCoordinator coordinator, PathRoo
                     var remove = request.GetPayload<ArchiveActionRequest>().SetId;
                     return Action(request, RefuseOutside(remove) ?? await coordinator.RemoveAsync(remove, cancellationToken).ConfigureAwait(false));
 
+                case ArchiveMessageTypes.PasswordsList:
+                    return IpcMessage.Create(ArchiveMessageTypes.PasswordsResult, coordinator.ListSavedPasswords(), request.Id);
+
+                case ArchiveMessageTypes.PasswordsAdd:
+                    var added = request.GetPayload<ArchiveSavedPasswordAddRequest>();
+                    return IpcMessage.Create(ArchiveMessageTypes.PasswordsResult,
+                        await coordinator.AddSavedPasswordAsync(added.Password, cancellationToken).ConfigureAwait(false), request.Id);
+
+                case ArchiveMessageTypes.PasswordsRemove:
+                    var removed = request.GetPayload<ArchiveSavedPasswordRemoveRequest>();
+                    return IpcMessage.Create(ArchiveMessageTypes.PasswordsResult,
+                        await coordinator.RemoveSavedPasswordAsync(removed.Id, cancellationToken).ConfigureAwait(false), request.Id);
+
                 default:
                     return Action(request, new ArchiveActionResult { Ok = false, Error = $"Unknown message type '{request.Type}'." });
             }

@@ -51,6 +51,8 @@ ANDROID.9 mockups, approved by the owner (2026-11-21, "Approved, build them"): `
 `t-torrents-torbox-archives.html`. The phone does the work in its own Host; with another host selected the same
 screens act on that host (owner: "Both").
 
+ANDROID.9 results on the S24 (phone Host, real data, 2026-11-21), side by side with the mockups still to do: t2 cache hit and miss, t5, t7 TorBox group: built. t3 archive rows (needs a password, extracted), t6 (both checkboxes), t7 Archives group with Saved passwords: built. Not yet: t1 phone mode, t3 torrent rows, t4 (torrents step); the paired-host pass.
+
 Speed (owner report, 2026-11-21)
 15. "mobile remote files loads directories very slowly compared to desktop with the same google drive account." Matches item 5. The [review](android-review-49f5663c-c745317f.md) found that only the phone asks for folder item counts on every browse (up to +2 s per folder, Back and breadcrumb), rclone stops after 60 s idle so most opens are cold, and Back never reuses a listing. Fable: that explains the 4-5 s subfolders but only 5-8 s of the 20 s first open; measure before fixing. Measured on the S24 on 2026-11-21 ([timing](android-review-49f5663c-c745317f.md#timing-on-the-s24-fe-2026-11-21)): our code adds about 0.5 s plus the 2 s count budget; rclone's Drive list varied from 0.7 s to 34.5 s for the same folders, which fits Drive throttling. Confirmed and fixed the same day: Google rate-limited rclone's shared client ID, and the phone had no way to enter the owner's own (the desktop has one). With the phone's new client ID fields and lazy counts, Drive folders show in 0.5-1.3 s on the S24 ([cause](android-review-49f5663c-c745317f.md#cause-found-and-fixed-2026-11-21)). Item 5's progress indicator is still part of the redesign.
 

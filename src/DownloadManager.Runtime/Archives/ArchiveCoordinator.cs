@@ -61,6 +61,12 @@ public sealed partial class ArchiveCoordinator : IAsyncDisposable, IPackagePassw
     /// <summary>Until the saved passwords are read, nothing here can tell whether a package already has one.</summary>
     private volatile bool _packagePasswordsLoaded;
 
+    /// <summary>The passwords saved for any archive, in the order they are tried. Guarded by <see cref="_sync"/>; replaced, never changed in place.</summary>
+    private IReadOnlyList<ArchiveSavedPassword> _saved = [];
+
+    /// <summary>Until the list is read, adding to it would overwrite what is on disk.</summary>
+    private volatile bool _savedPasswordsLoaded;
+
     /// <summary>Guarded by <see cref="_sync"/>.</summary>
     private readonly Dictionary<Guid, RunningExtraction> _running = [];
 
@@ -177,6 +183,7 @@ public sealed partial class ArchiveCoordinator : IAsyncDisposable, IPackagePassw
 
         var sets = await _store.LoadSetsAsync(cancellationToken).ConfigureAwait(false);
         var passwords = await _store.LoadPackagePasswordsAsync(cancellationToken).ConfigureAwait(false);
+        var saved = await _store.LoadSavedPasswordsAsync(cancellationToken).ConfigureAwait(false);
         var snapshot = _service.GetSnapshot();
         var stoppedQueues = StoppedQueues.From([.. snapshot.Settings.Queues.Select(queue => (queue.Id, queue.IsRunning))], snapshot.Settings.DefaultQueueId);
         lock (_sync) _stoppedQueues = stoppedQueues;
@@ -197,9 +204,11 @@ public sealed partial class ArchiveCoordinator : IAsyncDisposable, IPackagePassw
             _settings = settings;
             foreach (var password in passwords.Where(password => packageIds.Contains(password.PackageId))) _packagePasswords[password.PackageId] = password;
             _unreadablePackagePasswords.UnionWith(_store.UnreadablePackagePasswords);
+            _saved = saved?.Passwords.Where(password => password.Id != Guid.Empty).ToList() ?? [];
         }
 
         _packagePasswordsLoaded = true;
+        _savedPasswordsLoaded = true;
 
         foreach (var set in sets)
         {

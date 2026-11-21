@@ -17,6 +17,12 @@ public static class ArchiveMessageTypes
     public const string Remove = "archive.remove";
     public const string ActionResult = "archive.actionResult";
 
+    /// <summary>The passwords saved for any archive: their ids and when they were added, never their values.</summary>
+    public const string PasswordsList = "archive.passwords.list";
+    public const string PasswordsAdd = "archive.passwords.add";
+    public const string PasswordsRemove = "archive.passwords.remove";
+    public const string PasswordsResult = "archive.passwords.result";
+
     /// <summary>Host push: the whole current state of one set, or which set left the list.</summary>
     public const string Changed = "archive.changed";
 }
@@ -86,6 +92,12 @@ public sealed class ArchiveSetDto
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
     public DateTimeOffset? CompletedAt { get; set; }
+
+    /// <summary>How many of the saved passwords were tried on it and didn't open it.</summary>
+    public int SavedPasswordsTried { get; set; }
+
+    /// <summary>Whether its archives are deleted once extracted: its own choice, else the setting.</summary>
+    public bool DeleteArchives { get; set; }
 }
 
 public static class ArchiveSetProgress
@@ -146,6 +158,9 @@ public sealed class ArchiveSettingsDto
     public string ConflictPolicy { get; set; } = "rename";
 
     public bool DeleteArchives { get; set; }
+
+    /// <summary>How many passwords are saved for any archive.</summary>
+    public int SavedPasswords { get; set; }
 }
 
 /// <summary>Only what is set changes. Null leaves a setting as it is.</summary>
@@ -209,6 +224,40 @@ public sealed class ArchiveSetPasswordRequest
 
     /// <summary>Empty clears what is on record.</summary>
     public string? Password { get; set; }
+
+    /// <summary>Also adds the password to the saved list, which is tried on any archive that needs one.</summary>
+    public bool SaveForOtherArchives { get; set; }
+
+    /// <summary>For a set: delete its archives once extracted (true), keep them (false); null leaves its choice as it is.</summary>
+    public bool? DeleteArchives { get; set; }
+}
+
+/// <summary>A saved password as a client sees it: which one and when, never what.</summary>
+public sealed class ArchiveSavedPasswordDto
+{
+    public Guid Id { get; set; }
+
+    public DateTimeOffset AddedAt { get; set; }
+}
+
+public sealed class ArchiveSavedPasswordsResult
+{
+    public bool Ok { get; set; }
+
+    public string? Error { get; set; }
+
+    /// <summary>In the order they are tried.</summary>
+    public List<ArchiveSavedPasswordDto> Passwords { get; set; } = [];
+}
+
+public sealed class ArchiveSavedPasswordAddRequest
+{
+    public string? Password { get; set; }
+}
+
+public sealed class ArchiveSavedPasswordRemoveRequest
+{
+    public Guid Id { get; set; }
 }
 
 public sealed class ArchiveActionRequest

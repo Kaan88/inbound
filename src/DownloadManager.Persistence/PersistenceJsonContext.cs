@@ -30,6 +30,7 @@ namespace DownloadManager.Persistence;
 [JsonSerializable(typeof(ArchiveSettings))]
 [JsonSerializable(typeof(ArchiveSetRecord))]
 [JsonSerializable(typeof(ArchivePackagePassword))]
+[JsonSerializable(typeof(ArchiveSavedPasswords))]
 internal sealed partial class PersistenceJsonContext : JsonSerializerContext
 {
 }

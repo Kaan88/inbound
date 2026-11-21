@@ -13,6 +13,7 @@ public sealed class JsonArchiveStore(StoragePaths paths, Action<string>? log = n
     private readonly string _settingsFile = Path.Combine(paths.Root, "archive", "settings.json");
     private readonly string _setsDirectory = Path.Combine(paths.Root, "archive", "sets");
     private readonly string _packagesDirectory = Path.Combine(paths.Root, "archive", "packages");
+    private readonly string _savedPasswordsFile = Path.Combine(paths.Root, "archive", "passwords.json");
     private readonly ArchiveStoreOptions _options = options ?? new ArchiveStoreOptions();
     private IReadOnlyCollection<Guid> _unreadableSets = [];
     private IReadOnlyCollection<Guid> _unreadablePackagePasswords = [];
@@ -96,6 +97,24 @@ public sealed class JsonArchiveStore(StoragePaths paths, Action<string>? log = n
 
     public Task DeletePackagePasswordAsync(Guid packageId, CancellationToken cancellationToken = default)
         => DeleteAsync(Path.Combine(_packagesDirectory, $"{packageId:N}.json"));
+
+    public async Task<ArchiveSavedPasswords?> LoadSavedPasswordsAsync(CancellationToken cancellationToken = default)
+    {
+        if (!File.Exists(_savedPasswordsFile)) return null;
+        // Like the settings: carrying on as if none were saved would overwrite the user's list at the next change.
+        var read = await ReadAsync<ArchiveSavedPasswords>(_savedPasswordsFile, cancellationToken).ConfigureAwait(false);
+        if (read.HeldOpen) throw new IOException("The saved archive passwords can't be read right now.");
+        if (read.Value is { } saved && saved.SchemaVersion > ArchiveSavedPasswords.CurrentSchemaVersion)
+        {
+            Quarantine(_savedPasswordsFile, $"schema {saved.SchemaVersion} is newer than this version");
+            return null;
+        }
+
+        return read.Value;
+    }
+
+    public Task SaveSavedPasswordsAsync(ArchiveSavedPasswords passwords, CancellationToken cancellationToken = default)
+        => WriteAsync(_savedPasswordsFile, passwords, cancellationToken);
 
     private static Task WriteAsync<T>(string path, T value, CancellationToken cancellationToken)
         => AtomicFile.WriteAsync(path, JsonSerializer.Serialize(value, PersistenceJson.Options), cancellationToken);

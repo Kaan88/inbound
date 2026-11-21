@@ -217,12 +217,14 @@ public sealed partial class ArchiveCoordinator
     {
         var id = claimed.Id;
         var committed = false;
-        var (password, ownPassword, packageStamp) = ResolvePassword(claimed);
+        var (password, ownPassword, packageStamp, savedId) = ResolvePassword(claimed);
+        // The set's own choice (made where its password was asked for), else the setting.
+        var deleteArchives = claimed.DeleteArchives ?? settings.DeleteArchives;
         var volumes = claimed.Volumes.Select(name => Path.Combine(claimed.Directory, name)).ToList();
 
         async Task CommitOnceAsync(ExtractionResult result)
         {
-            await CommitAsync(id, result, settings.DeleteArchives, WhatTheRunReallyUsed(claimed, result)).ConfigureAwait(false);
+            await CommitAsync(id, result, deleteArchives, WhatTheRunReallyUsed(claimed, result)).ConfigureAwait(false);
             committed = true;
         }
 
@@ -244,7 +246,7 @@ public sealed partial class ArchiveCoordinator
                 ConflictPolicy = settings.ConflictPolicy,
                 PreserveFolders = settings.PreserveFolders,
                 KeepFiles = volumes,
-                MakeDurable = settings.DeleteArchives,
+                MakeDurable = deleteArchives,
                 Committed = CommitOnceAsync,
             };
 
@@ -254,7 +256,7 @@ public sealed partial class ArchiveCoordinator
         }
         catch (ExtractionException failure) when (!committed)
         {
-            await RecordFailureAsync(id, failure.Kind, failure.Message, failure.MissingVolumes, password is not null && ownPassword, packageStamp, claimed).ConfigureAwait(false);
+            await RecordFailureAsync(id, failure.Kind, failure.Message, failure.MissingVolumes, password is not null && ownPassword, packageStamp, claimed, savedId).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (!committed)
         {
@@ -316,21 +318,44 @@ public sealed partial class ArchiveCoordinator
         return new RunUse(read, named.Except(read, PathNames.Comparer).ToList(), jobs);
     }
 
-    private (string? Password, bool Own, DateTimeOffset? PackageStamp) ResolvePassword(ArchiveSetRecord set)
+    /// <summary>The set's own password, else its package's, else the first saved one not yet tried on it, else none.</summary>
+    private (string? Password, bool Own, DateTimeOffset? PackageStamp, Guid? Saved) ResolvePassword(ArchiveSetRecord set)
     {
         if (set.ProtectedPassword is { } own && SecretProtector.UnprotectArchivePassword(own) is { } ownPlain)
         {
-            return (ownPlain, true, null);
+            return (ownPlain, true, null, null);
         }
 
         if (UsablePackagePassword(set) is { } package)
         {
             // Unreadable, it is still the package's password that was tried: its stamp goes with the run, so a failure
             // can set it aside for this set rather than find it "still there" and run again at once (M15).
-            return (SecretProtector.UnprotectArchivePassword(package.ProtectedPassword), false, package.Stamp);
+            return (SecretProtector.UnprotectArchivePassword(package.ProtectedPassword), false, package.Stamp, null);
         }
 
-        return (null, false, null);
+        if (UntriedSavedPassword(set) is { } saved)
+        {
+            // Unreadable (state from another account or PC), it fails as "needs a password" and counts as tried.
+            return (SecretProtector.UnprotectArchivePassword(saved.ProtectedPassword), false, null, saved.Id);
+        }
+
+        return (null, false, null, null);
+    }
+
+    /// <summary>The next saved password this set hasn't refused, in the saved order.</summary>
+    private ArchiveSavedPassword? UntriedSavedPassword(ArchiveSetRecord set)
+    {
+        lock (_sync) return _saved.FirstOrDefault(saved => !set.TriedSavedPasswords.Contains(saved.Id));
+    }
+
+    /// <summary>A set that refused a password goes back in line while a saved one is left to try, instead of asking.</summary>
+    private void TryNextSavedPassword(ArchiveSetRecord next)
+    {
+        if (next.State == ArchiveSetState.Failed && UntriedSavedPassword(next) is not null)
+        {
+            next.State = ArchiveSetState.Waiting;
+            ClearFailure(next);
+        }
     }
 
     /// <summary>The package's password, unless it has failed on this set. A set can run before its record has heard of its package, so its downloads say too.</summary>
@@ -386,6 +411,7 @@ public sealed partial class ArchiveCoordinator
 
             // It has done its job, and a password is kept only while it is needed.
             next.ProtectedPassword = null;
+            next.TriedSavedPasswords = [];
             next.ArchivesDeleted = false;
             next.Note = null;
             next.VolumesToDelete = [];
@@ -537,7 +563,8 @@ public sealed partial class ArchiveCoordinator
         Announce(announce);
     }
 
-    private async Task RecordFailureAsync(Guid id, ExtractionFailureKind kind, string message, IReadOnlyList<string> missing, bool usedOwnPassword, DateTimeOffset? packageStamp, ArchiveSetRecord claimed)
+    private async Task RecordFailureAsync(Guid id, ExtractionFailureKind kind, string message, IReadOnlyList<string> missing, bool usedOwnPassword, DateTimeOffset? packageStamp, ArchiveSetRecord claimed,
+        Guid? savedPassword = null)
     {
         ArchiveSetDto? announce = null;
 
@@ -572,6 +599,8 @@ public sealed partial class ArchiveCoordinator
                         // can be right for its other sets, so this set just won't use that one again.
                         if (usedOwnPassword) next.ProtectedPassword = null;
                         else if (packageStamp is not null) next.RejectedPackagePasswordStamp = packageStamp;
+                        else if (savedPassword is { } refused && !next.TriedSavedPasswords.Contains(refused)) next.TriedSavedPasswords.Add(refused);
+                        TryNextSavedPassword(next);
                         break;
 
                     case ExtractionFailureKind.PasswordRequired:
@@ -589,6 +618,8 @@ public sealed partial class ArchiveCoordinator
                             ClearFailure(next);
                         }
 
+                        if (savedPassword is { } unreadable && !next.TriedSavedPasswords.Contains(unreadable)) next.TriedSavedPasswords.Add(unreadable);
+                        TryNextSavedPassword(next);
                         break;
 
                     case ExtractionFailureKind.MissingVolume:

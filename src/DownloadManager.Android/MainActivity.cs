@@ -484,6 +484,12 @@ public sealed partial class MainActivity : AppCompatActivity
     internal DownloadManager.Mobile.TorBox.TorBoxClient? NewTorBoxClient() =>
         _connection is null ? null : new DownloadManager.Mobile.TorBox.TorBoxClient(_connection);
 
+    /// <summary>The shown Host answers archive.* and has an extractor (its hello lists "archives").</summary>
+    internal bool HasArchives => DownloadManager.Mobile.Archives.ArchiveClient.Offered(_model?.Hello);
+
+    internal DownloadManager.Mobile.Archives.ArchiveClient? NewArchiveClient() =>
+        _connection is null ? null : new DownloadManager.Mobile.Archives.ArchiveClient(_connection);
+
     /// <summary>Add torrent (t1, t2): the Add sheet's "Torrent file or magnet".</summary>
     internal void OpenAddTorrent()
     {
@@ -517,8 +523,9 @@ public sealed partial class MainActivity : AppCompatActivity
     /// <summary>"Torrents, TorBox, archives" (t7), from the Settings list.</summary>
     internal bool OpenTorBoxSettings()
     {
-        if (_nav is null || _nav.PageOpen || _prefs is null || NewTorBoxClient() is not { } client) return false;
-        _torBoxSettings = new TorBoxSettingsPage(this, client, new DownloadManager.Mobile.TorBox.TorBoxChoice(_prefs));
+        if (_nav is null || _nav.PageOpen || _prefs is null || !(HasTorBox || HasArchives)) return false;
+        _torBoxSettings = new TorBoxSettingsPage(this, HasTorBox ? NewTorBoxClient() : null, HasArchives ? NewArchiveClient() : null,
+            new DownloadManager.Mobile.TorBox.TorBoxChoice(_prefs));
         return OpenHostSettingsPage(_torBoxSettings.Root, TorBoxSettingsPage.Title, () => { });
     }
 

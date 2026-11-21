@@ -129,6 +129,12 @@ public sealed class ArchiveSetRecord
     /// <summary>The package password this set refused, by its stamp. A newer one is tried; that one is not tried again.</summary>
     public DateTimeOffset? RejectedPackagePasswordStamp { get; set; }
 
+    /// <summary>Saved passwords (by id) that have been tried on this set and didn't open it. Each is tried once, until a retry.</summary>
+    public List<Guid> TriedSavedPasswords { get; set; } = [];
+
+    /// <summary>This set's own choice to delete its archives once extracted; null follows the setting.</summary>
+    public bool? DeleteArchives { get; set; }
+
     public string? Destination { get; set; }
 
     /// <summary>Where this set's staging folder is, written before the run so a restart can find it.</summary>
@@ -171,6 +177,7 @@ public sealed class ArchiveSetRecord
         copy.SeenJobs = new Dictionary<Guid, DateTimeOffset>(SeenJobs);
         copy.JobIds = [.. JobIds];
         copy.VolumesToDelete = [.. VolumesToDelete];
+        copy.TriedSavedPasswords = [.. TriedSavedPasswords];
         return copy;
     }
 }
@@ -184,6 +191,29 @@ public sealed class ArchivePackagePassword
 
     /// <summary>Tells one password from its replacement without keeping anything about its value.</summary>
     public DateTimeOffset Stamp { get; set; }
+}
+
+/// <summary>
+/// One of the passwords the user saved for any archive, tried in order on a set that needs one before it asks.
+/// <see cref="ProtectedPassword"/> is sealed by the platform's protector (DPAPI on Windows, Inbound's own key elsewhere).
+/// </summary>
+public sealed class ArchiveSavedPassword
+{
+    public Guid Id { get; set; }
+
+    public string ProtectedPassword { get; set; } = string.Empty;
+
+    public DateTimeOffset AddedAt { get; set; }
+}
+
+/// <summary>The saved passwords, in the order they are tried.</summary>
+public sealed class ArchiveSavedPasswords
+{
+    public const int CurrentSchemaVersion = 1;
+
+    public int SchemaVersion { get; set; } = CurrentSchemaVersion;
+
+    public List<ArchiveSavedPassword> Passwords { get; set; } = [];
 }
 
 public interface IArchiveStore
@@ -216,4 +246,9 @@ public interface IArchiveStore
     Task SavePackagePasswordAsync(ArchivePackagePassword password, CancellationToken cancellationToken = default);
 
     Task DeletePackagePasswordAsync(Guid packageId, CancellationToken cancellationToken = default);
+
+    /// <summary>Null when none were ever saved. Throws when they are there but can't be read now, so they are never overwritten.</summary>
+    Task<ArchiveSavedPasswords?> LoadSavedPasswordsAsync(CancellationToken cancellationToken = default);
+
+    Task SaveSavedPasswordsAsync(ArchiveSavedPasswords passwords, CancellationToken cancellationToken = default);
 }

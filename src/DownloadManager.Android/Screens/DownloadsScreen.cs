@@ -8,7 +8,9 @@ using Android.Views;
 using Android.Widget;
 using AndroidX.Core.View;
 using AndroidX.RecyclerView.Widget;
+using DownloadManager.Contracts;
 using DownloadManager.Mobile;
+using DownloadManager.Mobile.Archives;
 using Google.Android.Material.Chip;
 using Google.Android.Material.ProgressIndicator;
 
@@ -35,6 +37,9 @@ internal sealed partial class DownloadsScreen
     private readonly Handler _queueTimingUi = new(Looper.MainLooper!);
     private readonly Java.Lang.Runnable _queueTimingExpiry;
     private readonly Dictionary<int, (string Name, DateTimeOffset Start)> _queueStarts = new();
+    private readonly ArchiveStore _archives;
+    private Google.Android.Material.BottomSheet.BottomSheetDialog? _passwordSheet;
+    private bool _disposed;
     private double _shownRate;
     private bool _toggleIsPause = true;
     private bool _remoteFiltersExpanded;
@@ -73,6 +78,12 @@ internal sealed partial class DownloadsScreen
         _queueTimingExpiry = new Java.Lang.Runnable(RefreshScheduledRows);
         _model.SettingsChanged += RefreshScheduledRows;
         RefreshScheduledRows();
+        // Archive sets (t3): drawn on the row of their first volume, from archive.list and archive.changed.
+        _archives = new ArchiveStore(_model.JobOf);
+        _archives.Changed += _adapter.RefreshAll;
+        _model.ArchiveChanged += _archives.Apply;
+        _model.HostHelloChanged += LoadArchives;
+        LoadArchives();
         // Lists: 200 ms fade and move. Rows never reorder: a row only comes in at the top or leaves.
         _recycler.SetItemAnimator(new DefaultItemAnimator { AddDuration = 200, MoveDuration = 200, RemoveDuration = 200, ChangeDuration = 0, SupportsChangeAnimations = false });
 
@@ -151,8 +162,39 @@ internal sealed partial class DownloadsScreen
         return i < 0 ? null : (_recycler.FindViewHolderForAdapterPosition(i) as Holder)?.Card;
     }
 
+    private void LoadArchives()
+    {
+        if (_disposed) return;
+        if (!ArchiveClient.Offered(_model.Hello) || _activity.NewArchiveClient() is not { } client) { _archives.Clear(); return; }
+        // A failure leaves the rows as the downloads alone make them; the next hello or archive.changed brings the sets.
+        ArchiveUi.Run(_activity, () => client.ListAsync(), list => { if (!_disposed) _archives.Load(list); }, _ => { });
+    }
+
+    private void OnArchiveAction(JobRow row, ArchiveAction action)
+    {
+        if (_archives.SetFor(row.Id) is not { } set || _activity.NewArchiveClient() is not { } client) return;
+        if (action == ArchiveAction.Enter)
+        {
+            if (_passwordSheet is { IsShowing: true }) return;
+            _passwordSheet = ArchivePasswordSheet.Show(_activity, client, set, updated => { if (!_disposed && updated is not null) _archives.Apply(new ArchiveChangedDto { Set = updated }); });
+        }
+        else if (action == ArchiveAction.Retry)
+            ArchiveUi.Run(_activity, () => client.RetryAsync(set.Id), result =>
+            {
+                if (_disposed) return;
+                if (!result.Ok) _activity.ShowMessage(string.IsNullOrWhiteSpace(result.Error) ? "The extraction was not restarted." : result.Error.Trim());
+                else if (result.Set is not null) _archives.Apply(new ArchiveChangedDto { Set = result.Set });
+            }, words => { if (!_disposed) _activity.ShowMessage(words); });
+    }
+
     public void Dispose()
     {
+        _disposed = true;
+        _passwordSheet?.Dismiss();
+        _passwordSheet = null;
+        _model.ArchiveChanged -= _archives.Apply;
+        _model.HostHelloChanged -= LoadArchives;
+        _archives.Changed -= _adapter.RefreshAll;
         _model.SettingsChanged -= RefreshScheduledRows;
         _queueTimingUi.RemoveCallbacks(_queueTimingExpiry);
         _queueTimingExpiry.Dispose();
@@ -405,6 +447,8 @@ internal sealed partial class DownloadsScreen
         private readonly ImageView _icon;
         private readonly View _tile;
         private readonly ImageButton _action;
+        private readonly Google.Android.Material.Button.MaterialButton _archiveAction;
+        private ArchiveAction _archiveActionKind;
         private JobRow? _row;
 
         public Holder(View v, RowAdapter owner, DownloadsScreen screen) : base(v)
@@ -429,6 +473,8 @@ internal sealed partial class DownloadsScreen
                 if (_row is { } r && !_s._list.Selecting) { _s._list.StartSelecting(r); e.Handled = true; }
             };
             _action.Click += (_, _) => { if (_row is { } r) _s.OnRowAction(r); };
+            _archiveAction = v.FindViewById<Google.Android.Material.Button.MaterialButton>(Resource.Id.archive_action)!;
+            _archiveAction.Click += (_, _) => { if (_row is { } r && _archiveActionKind != ArchiveAction.None) _s.OnArchiveAction(r, _archiveActionKind); };
         }
 
         public View Card { get; }
@@ -454,16 +500,36 @@ internal sealed partial class DownloadsScreen
 
             var ctx = ItemView.Context!;
             _name.Text = row.Name;
-            var subtitle = _s.SubtitleFor(row);
-            _subtitle.Text = subtitle;
-            var color = row.Kind switch
+            // An archive set on this row (its first volume) says what extraction is doing, with its lead word coloured (t3).
+            var info = _s._archives.InfoFor(row.Id);
+            var subtitle = info?.Subtitle ?? _s.SubtitleFor(row);
+            var variant = Motion.Attr(ctx, Resource.Attribute.colorOnSurfaceVariant);
+            if (info is not null)
             {
-                StatusKind.Done => ctx.GetColor(Resource.Color.state_done),
-                StatusKind.Failed => ctx.GetColor(Resource.Color.state_failed),
-                StatusKind.Waiting => ctx.GetColor(Resource.Color.state_waiting),
-                _ => Motion.Attr(ctx, Resource.Attribute.colorOnSurfaceVariant),
-            };
-            _subtitle.SetTextColor(new Android.Graphics.Color(color));
+                var tone = info.Tone switch
+                {
+                    ArchiveTone.Amber => ctx.GetColor(Resource.Color.state_waiting),
+                    ArchiveTone.Failed => ctx.GetColor(Resource.Color.state_failed),
+                    ArchiveTone.Done => ctx.GetColor(Resource.Color.state_done),
+                    _ => variant,
+                };
+                var styled = new Android.Text.SpannableString(subtitle);
+                styled.SetSpan(new Android.Text.Style.ForegroundColorSpan(new Android.Graphics.Color(tone)), 0, info.Lead.Length, Android.Text.SpanTypes.ExclusiveExclusive);
+                _subtitle.SetText(styled, Android.Widget.TextView.BufferType.Spannable);
+                _subtitle.SetTextColor(new Android.Graphics.Color(variant));
+            }
+            else
+            {
+                _subtitle.Text = subtitle;
+                var color = row.Kind switch
+                {
+                    StatusKind.Done => ctx.GetColor(Resource.Color.state_done),
+                    StatusKind.Failed => ctx.GetColor(Resource.Color.state_failed),
+                    StatusKind.Waiting => ctx.GetColor(Resource.Color.state_waiting),
+                    _ => variant,
+                };
+                _subtitle.SetTextColor(new Android.Graphics.Color(color));
+            }
 
             var selected = _s._list.IsSelected(row);
             var card = (Google.Android.Material.Card.MaterialCardView)Card;
@@ -474,16 +540,32 @@ internal sealed partial class DownloadsScreen
                 _icon.SetImageResource(Resource.Drawable.ic_check);
                 _icon.ImageTintList = Android.Content.Res.ColorStateList.ValueOf(new Android.Graphics.Color(Motion.Attr(ctx, Resource.Attribute.colorOnPrimary)));
             }
+            else if (info is not null)
+            {
+                _icon.SetImageResource(info.Icon == ArchiveIcon.Lock ? Resource.Drawable.ic_browser_lock : Resource.Drawable.ic_archive);
+                _icon.ImageTintList = Android.Content.Res.ColorStateList.ValueOf(new Android.Graphics.Color(ctx.GetColor(Resource.Color.state_waiting)));
+            }
             else
             {
-                var info = FileIcons.For(FileKinds.Of(row.Name));
-                _icon.SetImageResource(info.Drawable);
-                _icon.ImageTintList = Android.Content.Res.ColorStateList.ValueOf(new Android.Graphics.Color(FileIcons.Color(ctx, info)));
+                var fileIcon = FileIcons.For(FileKinds.Of(row.Name));
+                _icon.SetImageResource(fileIcon.Drawable);
+                _icon.ImageTintList = Android.Content.Res.ColorStateList.ValueOf(new Android.Graphics.Color(FileIcons.Color(ctx, fileIcon)));
             }
 
             Card.Selected = selected;
             Card.ContentDescription = row.Name + ". " + subtitle;
-            BindAction(row, ctx);
+            BindAction(row, ctx, info);
+
+            if (info is not null)
+            {
+                _bar.Visibility = info.ShowBar ? ViewStates.Visible : ViewStates.Gone;
+                if (!info.ShowBar) return;
+                _bar.SetIndicatorColor(ctx.GetColor(Resource.Color.state_waiting));
+                if (info.Progress is not { } done) { if (!_bar.Indeterminate) _bar.Indeterminate = true; return; }
+                if (_bar.Indeterminate) _bar.Indeterminate = false;
+                _bar.SetProgressCompat((int)(done * 1000), animate);
+                return;
+            }
 
             _bar.Visibility = row.ShowBar ? ViewStates.Visible : ViewStates.Gone;
             if (!row.ShowBar) return;
@@ -494,8 +576,20 @@ internal sealed partial class DownloadsScreen
             _bar.SetProgressCompat((int)(row.Progress * 1000), animate); // glides to the new value; no jump between updates
         }
 
-        private void BindAction(JobRow row, Context ctx)
+        private void BindAction(JobRow row, Context ctx, ArchiveRowInfo? info)
         {
+            // Enter (password) and Retry (extraction) are small tonal buttons with words, as in the mockup; the download's own button waits.
+            _archiveActionKind = info?.Action ?? ArchiveAction.None;
+            if (_archiveActionKind != ArchiveAction.None)
+            {
+                _action.Visibility = ViewStates.Gone;
+                _archiveAction.Visibility = _s.Selecting ? ViewStates.Gone : ViewStates.Visible;
+                _archiveAction.Text = _archiveActionKind == ArchiveAction.Enter ? "Enter" : "Retry";
+                _archiveAction.ContentDescription = (_archiveActionKind == ArchiveAction.Enter ? "Enter the password for " : "Retry extracting ") + row.Name;
+                return;
+            }
+
+            _archiveAction.Visibility = ViewStates.Gone;
             var (icon, text) = row.Action switch
             {
                 RowAction.Pause => (PauseIcon, "Pause"),

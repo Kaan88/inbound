@@ -83,6 +83,12 @@ public sealed class DownloadsModel : IDisposable
     /// <summary>Raised on the UI thread for each remote.changed push (a TorBox job or the account changed), from a Host that answers remote.*.</summary>
     public event Action<RemoteChangedDto>? RemoteChanged;
 
+    /// <summary>The job as the list last had it (UI thread), or null for one it does not know.</summary>
+    public JobDto? JobOf(Guid id) => _byId.TryGetValue(id, out var row) ? row.Job : null;
+
+    /// <summary>Raised on the UI thread for each archive.changed push (an archive set changed or left the list), from a Host that answers archive.*.</summary>
+    public event Action<ArchiveChangedDto>? ArchiveChanged;
+
     /// <summary>Opens the session; the snapshot arrives as a frame and is shown through <see cref="Rows"/>.</summary>
     public async Task StartAsync(CancellationToken cancellationToken)
     {
@@ -131,6 +137,13 @@ public sealed class DownloadsModel : IDisposable
             try { change = m.GetPayload<RemoteChangedDto>(); }
             catch (Exception e) when (e is System.IO.InvalidDataException or System.Text.Json.JsonException) { return; }
             _post(() => { if (!Disposed) RemoteChanged?.Invoke(change); });
+        }
+        else if (m.Type == ArchiveMessageTypes.Changed)
+        {
+            ArchiveChangedDto change;
+            try { change = m.GetPayload<ArchiveChangedDto>(); }
+            catch (Exception e) when (e is System.IO.InvalidDataException or System.Text.Json.JsonException) { return; }
+            _post(() => { if (!Disposed) ArchiveChanged?.Invoke(change); });
         }
         else if (m.Type == MessageTypes.JobEvent && _gotSnapshot)
         {
