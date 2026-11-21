@@ -101,6 +101,23 @@ public sealed class RcloneSupervisorTests
     }
 
     [Fact]
+    public async Task A_caller_that_gives_up_during_a_start_leaves_the_started_rclone_for_the_next()
+    {
+        var factory = new FakeFactory { StartDelay = TimeSpan.FromMilliseconds(200) };
+        await using var supervisor = new RcloneSupervisor(factory.StartAsync, Options, time: factory.Time);
+        using var giveUp = new CancellationTokenSource(TimeSpan.FromMilliseconds(20));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => supervisor.AcquireAsync(giveUp.Token));
+        var instance = factory.Instances.Single();
+        Assert.False(instance.StopRequested);
+        Assert.Equal(RcloneState.Running, supervisor.Status.State);
+        Assert.Equal(1, factory.Time.ActiveTimers); // the idle stop, as after a last lease
+
+        using var lease = await supervisor.AcquireAsync();
+        Assert.Equal(1, factory.Started);
+        Assert.Equal(instance.ProcessId, lease.ProcessId);
+    }
+
+    [Fact]
     public async Task Disposing_a_lease_twice_counts_once()
     {
         var factory = new FakeFactory();

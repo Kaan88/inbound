@@ -35,6 +35,9 @@ internal sealed partial class RemoteFilesScreen : IDisposable
     private bool _folderFullScreen;
     private CancellationTokenSource? _browseRequest;
     private CancellationTokenSource? _countsRequest;
+    // Listing tokens of folders shown, by site and path: the Host shows one again from its copy for a minute (review P5).
+    private readonly Dictionary<string, string> _knownListings = new(StringComparer.Ordinal);
+    private static string ListingKey(string siteId, string? path) => siteId + "\n" + (path ?? "");
     private readonly Func<bool> _cachedFirstPage;
     private bool _browseRequiresSignIn;
     private readonly LinearLayout _content;
@@ -232,6 +235,7 @@ internal sealed partial class RemoteFilesScreen : IDisposable
         string siteId = _site.Id;
         int offset = append ? _items.Count : 0;
         string? listing = append ? _listing : null;
+        string? known = !append && !refresh && _knownListings.TryGetValue(ListingKey(siteId, path), out var remembered) ? remembered : null;
         _browseRequiresSignIn = false;
         _busy = true; _error = null;
         if (!append)
@@ -246,7 +250,7 @@ internal sealed partial class RemoteFilesScreen : IDisposable
             var result = await _client.BrowseAsync(new SiteBrowseRequest
             {
                 Id = siteId, Path = path, Offset = offset, Limit = PageSize,
-                Listing = listing, Refresh = refresh, ChronologicalFiles = true, IncludeFolderCounts = !lazyCounts,
+                Listing = listing ?? known, Refresh = refresh, ChronologicalFiles = true, IncludeFolderCounts = !lazyCounts,
                 IncludeFreeSpace = !append && _site.Kind == SiteKindCatalog.Sftp
             }, browse.Token);
             replied = Environment.TickCount64 - started;
@@ -282,6 +286,12 @@ internal sealed partial class RemoteFilesScreen : IDisposable
             if (!append && _site is not null) _site.FreeBytes = result.FreeBytes;
             _path = result.Path;
             _listing = result.Listing;
+            if (!append && !string.IsNullOrEmpty(result.Listing))
+            {
+                if (_knownListings.Count >= 32) _knownListings.Clear();
+                _knownListings[ListingKey(siteId, path)] = result.Listing;
+                _knownListings[ListingKey(siteId, result.Path)] = result.Listing;
+            }
             _items.AddRange(result.Items);
             _total = result.Items.Count == 0 ? _items.Count : Math.Max(result.Total, _items.Count);
             fillCounts = lazyCounts && !string.IsNullOrEmpty(_listing) && result.Items.Any(item => item.IsFolder);

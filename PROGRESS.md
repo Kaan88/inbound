@@ -1,5 +1,15 @@
 # Progress — session handoff
 
+## Remote Files: rclone stays warm on the phone and Back shows folders at once, 2026-11-21
+
+Review fixes P2, P3, P4 and P5 ([details](docs/plans/android-review-49f5663c-c745317f.md#host-speed-fixes-2026-11-21)):
+the phone's rclone stops after 3 minutes idle instead of 60 s; a renewed token is stored right away; a browse given up
+during an rclone start no longer kills it; the Host keeps 8 recent folders per site with their counts and the phone
+sends their tokens back, so Back to the Drive top folder shows rows and counts in 0 ms (the server isn't read). rclone
+looks for expired jobs once a minute instead of every 10 s. P6 was tried and dropped (it slowed failure on a dead
+SFTP server); M4 stays open. Integration Sites and Sites tests pass; APK `72d9b8c8` passed check-apk.py and is on the
+S24; display baseline restored.
+
 ## Remote Files on the phone now lists Drive as fast as the desktop, 2026-11-21
 
 Owner: "desktop lists it so much faster." A run with rclone's debug log showed Google refusing the phone's Drive calls

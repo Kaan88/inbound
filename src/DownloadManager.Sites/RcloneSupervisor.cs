@@ -135,9 +135,11 @@ public sealed class RcloneSupervisor : IAsyncDisposable
                 IRcloneInstance instance;
                 try
                 {
-                    instance = await _start(token).ConfigureAwait(false);
+                    // Only the Host stopping cuts a start: a browse given up half-way (Back, another site) would otherwise
+                    // kill the half-started rclone, and the next browse starts from zero again (review P4).
+                    instance = await _start(_stopping.Token).ConfigureAwait(false);
                 }
-                catch (OperationCanceledException) when (token.IsCancellationRequested)
+                catch (OperationCanceledException) when (_stopping.IsCancellationRequested)
                 {
                     _state = RcloneState.Off;
                     changed = Snap();
@@ -164,6 +166,14 @@ public sealed class RcloneSupervisor : IAsyncDisposable
                 _retryAt = null;
                 _error = null;
                 _ = WatchAsync(instance);
+                if (token.IsCancellationRequested)
+                {
+                    // Kept for the next caller, and stopped after the idle delay if none comes.
+                    _state = RcloneState.Running;
+                    if (_users == 0) ScheduleIdleLocked();
+                    changed = Snap();
+                    token.ThrowIfCancellationRequested();
+                }
             }
 
             CancelIdleLocked();

@@ -216,9 +216,35 @@ After, on the S24 FE with the owner's client ID:
 | Top folder again (3 times) | 0.9-1.3 s | +0.8-0.9 s |
 | Subfolders (17, 8 and 10 items) | 0.5-0.6 s | +1.1 s when they hold folders |
 
-Still open from step 2: P2 (rclone stops after 60 s idle, so a later open pays the 0.3 s start and a fresh Drive
+Still open from step 2 at that point (since fixed except P6 and M4, see below): P2 (rclone stops after 60 s idle, so a later open pays the 0.3 s start and a fresh Drive
 backend), P5 (Back reads the folder again), P4, M4, P6, P3. rclone also suggests storing Drive's `root_folder_id` to
 save a call at each backend start.
+
+## Host speed fixes, 2026-11-21
+
+- P2: the phone's rclone now stops after 3 minutes idle instead of 60 s (Android Host only; desktop and server keep
+  60 s). rclone also checks for expired rc jobs once a minute instead of every 10 s (all platforms), so an idle rclone
+  wakes less.
+- P3: a token rclone renews during a list is stored right after the list, so a cold start doesn't renew it again.
+- P4: a browse given up while rclone is starting (Back, another location) no longer kills the half-started rclone; it
+  is kept for the next browse and stopped after the idle delay if none comes. Test:
+  `A_caller_that_gives_up_during_a_start_leaves_the_started_rclone_for_the_next`.
+- P5: the Host keeps up to 8 folders per site (and at most `MaxListingItems` items) for a minute, with their folder
+  counts, and the phone remembers each folder's listing token, so Back and a breadcrumb show a folder again without
+  the server. Refresh and any change through the Host read the server again. Test:
+  `BackToAFolderShownBeforeUsesItsHeldListingWithItsCounts`. Counts are copied back by position, because a Drive
+  folder can hold two folders of the same name (an earlier build failed on that with a duplicate-key error on the
+  owner's Drive).
+- Not done: P6 (one obscured form per password, to reuse rclone's fs cache). It broke
+  `AServerThatGoesAway...`: a cached SFTP fs keeps retrying a dead server slowly, where a new form failed at once. It
+  needs its own design (drop the cached form when a connection fails). M4 (the idle stop holds the gate during
+  `core/quit`) also stays open; with the 3-minute delay it is rarer on the phone.
+
+On the S24 FE with the owner's client ID (APK `72d9b8c8`): first open of the Drive top folder 2.1 s (rclone start
+0.4 s, list 1.7 s), counts +1.0 s; a subfolder 0.5 s; Back to the top folder 0 ms in the Host, rows with their counts at
+once, and a further counts pass for folders the first one didn't reach. An earlier build of the same batch: after a 90 s
+pause the next open found rclone still running. Integration Sites tests (110 passed, 6 opt-in skipped) and Sites
+tests (227 passed, 20 skipped) pass with rclone 1.76.0.
 
 ## Fixed so far
 

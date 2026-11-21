@@ -93,6 +93,36 @@ public sealed partial class SiteTransfersEndToEndTests
     }
 
     [SiteTransfersFact]
+    public async Task BackToAFolderShownBeforeUsesItsHeldListingWithItsCounts()
+    {
+        Directory.CreateDirectory(Path.Combine(Served, "pub", "inner", "deeper"));
+        var (commands, siteId) = await OpenSiteAsync(StartServer(slow: false));
+        var top = await Call<SiteBrowseResultDto>(commands, SitesMessageTypes.Browse,
+            new SiteBrowseRequest { Id = siteId, Path = "/pub", IncludeFolderCounts = true });
+        Assert.True(top.Ok, top.Message);
+        Assert.Equal(1, Assert.Single(top.Items, item => item.Name == "inner").ChildCount);
+        var inner = await Call<SiteBrowseResultDto>(commands, SitesMessageTypes.Browse, new SiteBrowseRequest { Id = siteId, Path = "/pub/inner" });
+        Assert.True(inner.Ok, inner.Message);
+
+        // Back (review P5): the top folder is still held after the inner one was read, counts included.
+        File.WriteAllText(Path.Combine(Served, "pub", "added-later.txt"), "x");
+        var back = await Call<SiteBrowseResultDto>(commands, SitesMessageTypes.Browse,
+            new SiteBrowseRequest { Id = siteId, Path = "/pub", Listing = top.Listing });
+        Assert.True(back.Ok, back.Message);
+        Assert.Equal(top.Listing, back.Listing);
+        Assert.DoesNotContain(back.Items, item => item.Name == "added-later.txt");
+        Assert.Equal(1, Assert.Single(back.Items, item => item.Name == "inner").ChildCount);
+
+        // A change through the Host forgets what it held: the next look reads the server.
+        var made = await Call<SiteResultDto>(commands, SitesMessageTypes.MakeFolder, new SiteMakeFolderRequest { Id = siteId, Path = "/pub", Name = "made" });
+        Assert.True(made.Ok, made.Message);
+        var after = await Call<SiteBrowseResultDto>(commands, SitesMessageTypes.Browse,
+            new SiteBrowseRequest { Id = siteId, Path = "/pub", Listing = top.Listing });
+        Assert.NotEqual(top.Listing, after.Listing);
+        Assert.Contains(after.Items, item => item.Name == "added-later.txt");
+    }
+
+    [SiteTransfersFact]
     public async Task FileOnlyDeleteRejectsAStaleListingAfterAnEndpointEdit()
     {
         int port = StartServer(slow: false);

@@ -191,6 +191,10 @@ internal sealed class AndroidHost : IAsyncDisposable
             {
                 siteSleep = new Background.AndroidSleepPrevention(Android.App.Application.Context);
                 sites = new SitesCommands(paths.Root, log.Info, findRclone: _ => bundledRclone,
+                    // A phone browses in bursts with pauses to read; three minutes idle spares most opens a cold start, which
+                    // costs a process start, a new cloud backend and often a sign-in renewal (review P2).
+                    createSupervisor: (rclone, state) => DownloadManager.Sites.RcloneSupervisor.ForExecutable(rclone, state,
+                        new DownloadManager.Sites.RcloneSupervisorOptions { IdleDelay = TimeSpan.FromMinutes(3) }, log.Info),
                     sleepPrevention: siteSleep, preventSleep: () => service.GetSettings().PreventSleepWhileDownloading,
                     transferExecutionAllowed: false
 #if INBOUND_TEST_BUILD && INBOUND_RCLONE_PROBE

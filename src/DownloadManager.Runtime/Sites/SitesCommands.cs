@@ -57,10 +57,18 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
     public const int MaxListingItems = 100_000;
 
     private sealed record Listing(string Token, string Path, IReadOnlyList<SiteItemDto> Items, DateTimeOffset At,
-        Guid SiteRevision, bool ChronologicalFiles, long? FreeBytes = null);
+        Guid SiteRevision, bool ChronologicalFiles, long? FreeBytes = null)
+    {
+        /// <summary>When the server was read; <see cref="At"/> moves with each page read, this does not.</summary>
+        public DateTimeOffset ListedAt { get; init; } = At;
+    }
 
-    // The last folder listed per site, dropped after a minute unread: enough for paging, and nothing grows with browsing.
-    private readonly Dictionary<string, Listing> _listings = new(StringComparer.Ordinal);
+    /// <summary>Folders kept per site, newest first, so Back and a breadcrumb tap can show one again without the server.</summary>
+    public const int ListingsPerSite = 8;
+
+    // The last folders listed per site, newest first; each is dropped after a minute unread, and a site never holds more than
+    // ListingsPerSite of them or MaxListingItems items in all (the newest is always kept).
+    private readonly Dictionary<string, List<Listing>> _listings = new(StringComparer.Ordinal);
 
     // Bumped when a site changes, so a listing read before the change is not kept after it.
     private readonly Dictionary<string, int> _generations = new(StringComparer.Ordinal);
@@ -609,7 +617,7 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
             // Secrets never follow the site to another server. On the same server they don't follow a change of user or
             // sign-in settings either; say so instead of saving a site that can no longer sign in (review S3, 2026-11-21).
             if (sameServer && !sameCredentials && request.Password is null && request.PrivateKey is null
-                && (existing.SealedPassword is not null || existing.SealedPrivateKey is not null))
+                && (existing!.SealedPassword is not null || existing.SealedPrivateKey is not null))
                 return Fail("Enter the password or key again: it isn't kept when the user name or sign-in settings change.");
             try
             {
@@ -817,10 +825,11 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
 
         Listing listing;
         if (offset == 0 && !request.Refresh && request.Listing is not null
-            && CachedListing(site.Id, path, request.Listing) is { } held
+            && CachedListing(site.Id, path, request.Listing, fresherThan: ListingLifetime) is { } held
             && held.ChronologicalFiles == request.ChronologicalFiles && held.SiteRevision == site.Revision)
         {
-            // The folder just shown, asked again for its folder counts: the server isn't listed a second time.
+            // A folder shown in the last minute, asked again (its folder counts, Back, a breadcrumb): not read again from the
+            // server (review P1, P5). Refresh reads it again.
             listing = held;
         }
         else if (offset > 0 && !request.Refresh)
@@ -869,6 +878,12 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
             var countsStarted = timing.Now;
             await AddFolderCountsAsync(site, path, page, cancellationToken).ConfigureAwait(false);
             timing.CountsMs = timing.Now - countsStarted;
+            // Kept with the listing, so the folder shown again has its counts at once. By position: a cloud folder can hold
+            // two folders of the same name.
+            lock (_listings)
+                for (var i = 0; i < page.Count && offset + i < listing.Items.Count; i++)
+                    if (page[i].ChildCount is { } children && listing.Items[offset + i] is { IsFolder: true, ChildCount: null } source)
+                        source.ChildCount = children;
         }
         _log(timing.Line(site.Kind, $"{page.Count} of {listing.Items.Count} items" + (offset > 0 ? $", from {offset}" : "")));
         return new SiteBrowseResultDto
@@ -903,8 +918,8 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
     {
         lock (_listings)
         {
-            return _listings.TryGetValue(site.Id, out var listing) && listing.SiteRevision == site.Revision &&
-                _time.GetUtcNow() - listing.At <= ListingLifetime ? listing.FreeBytes : null;
+            return _listings.TryGetValue(site.Id, out var held) && held.Count > 0 && held[0] is var listing
+                && listing.SiteRevision == site.Revision && _time.GetUtcNow() - listing.At <= ListingLifetime ? listing.FreeBytes : null;
         }
     }
 
@@ -912,7 +927,7 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
 
     private async Task AddFolderCountsAsync(SiteRecord site, string path, List<SiteItemDto> page, CancellationToken cancellationToken)
     {
-        var folders = page.Where(item => item.IsFolder && SitePaths.NameProblem(item.Name) is null).Take(8).ToArray();
+        var folders = page.Where(item => item.IsFolder && item.ChildCount is null && SitePaths.NameProblem(item.Name) is null).Take(8).ToArray();
         if (folders.Length == 0) return;
         using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         budget.CancelAfter(TimeSpan.FromSeconds(2));
@@ -950,18 +965,25 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
         IsFolder = item.IsFolder,
         Size = item.Size,
         Modified = item.Modified,
+        ChildCount = item.ChildCount,
         Here = SiteHere.Of(site.LocalFolder, site.RemoteFolder, path, item),
     };
 
     /// <summary>The site's listing of that folder when it is the one asked for and still fresh; each page read keeps it a minute longer.</summary>
-    private Listing? CachedListing(string siteId, string path, string? token)
+    private Listing? CachedListing(string siteId, string path, string? token, TimeSpan? fresherThan = null)
     {
         lock (_listings)
         {
             DropExpiredListingsLocked();
-            if (!_listings.TryGetValue(siteId, out var listing) || listing.Path != path || listing.Token != token) return null;
-            _listings[siteId] = listing with { At = _time.GetUtcNow() };
-            return listing;
+            if (!_listings.TryGetValue(siteId, out var held)) return null;
+            var index = held.FindIndex(listing => listing.Path == path && listing.Token == token);
+            if (index < 0) return null;
+            var found = held[index];
+            if (fresherThan is { } age && _time.GetUtcNow() - found.ListedAt > age) return null;
+            found = found with { At = _time.GetUtcNow() };
+            held.RemoveAt(index);
+            held.Insert(0, found);
+            return found;
         }
     }
 
@@ -979,15 +1001,27 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
         lock (_listings)
         {
             DropExpiredListingsLocked();
-            if (_generations.GetValueOrDefault(siteId) == generation) _listings[siteId] = listing;
+            if (_generations.GetValueOrDefault(siteId) != generation) return;
+            if (!_listings.TryGetValue(siteId, out var held)) _listings[siteId] = held = [];
+            held.RemoveAll(old => old.Path == listing.Path);
+            held.Insert(0, listing);
+            var items = 0;
+            for (var i = 0; i < held.Count; i++)
+            {
+                items += held[i].Items.Count;
+                if (i > 0 && (i >= ListingsPerSite || items > MaxListingItems)) { held.RemoveRange(i, held.Count - i); break; }
+            }
         }
     }
 
     private void DropExpiredListingsLocked()
     {
         var now = _time.GetUtcNow();
-        foreach (var (id, listing) in _listings.ToArray())
-            if (now - listing.At >= ListingLifetime) _listings.Remove(id);
+        foreach (var (id, held) in _listings.ToArray())
+        {
+            held.RemoveAll(listing => now - listing.At >= ListingLifetime);
+            if (held.Count == 0) _listings.Remove(id);
+        }
     }
 
     private void ForgetListings(string siteId)
@@ -1041,6 +1075,13 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
                     ["opt"] = new JsonObject { ["noMimeType"] = true },
                 }, cancellationToken).ConfigureAwait(false);
                 if (timing is not null) timing.ListMs = timing.Now - listStarted;
+                if (SiteKindCatalog.SignsIn(site.Kind))
+                {
+                    // A token rclone renewed during the list is stored now, not at the next build on this rclone: one that
+                    // stops idle first would lose it, and every cold start renewed again (review P3). A local call.
+                    try { await SiteRemote.BuildAsync(site, lease.Client, cancellationToken).ConfigureAwait(false); }
+                    catch (Exception e) when (e is not OperationCanceledException) { }
+                }
                 if (listing["list"] is JsonArray { Count: > MaxListingItems } big)
                     return (null, Fail($"The folder holds {big.Count:N0} items, more than Sites can show ({MaxListingItems:N0})."));
                 return (SiteListing.Read(listing), null);
