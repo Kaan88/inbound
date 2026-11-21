@@ -1,5 +1,9 @@
 # Progress — session handoff
 
+## Owner report: Remote Files loads folders slowly, 2026-11-21
+
+"mobile remote files loads directories very slowly compared to desktop with the same google drive account." Added as item 15 in the [matrix](docs/plans/android-mockup-acceptance.md). The owner asked for an Opus review of the 136 commits made outside Claude sessions (`49f5663c..c745317f`) before the redesign; the slow loading is part of that review's Remote Files scope.
+
 ## Remote Files captured on the owner's phone, 2026-11-21
 
 With the owner's go-ahead, captured the Remote Files tab on the S24 FE (SM-S721B, API 37, Inbound 0.0.10) with its real Drive, Dropbox, OneDrive and SFTP locations. Display baseline (adaptive brightness on, brightness 60, timeout unchanged) was saved, brightness set to minimum, and the baseline restored and read back afterwards. Two files were selected and deselected; nothing was downloaded, deleted or changed, and the SFTP key prompt was cancelled, not trusted. The 14 differences from the mockups are listed in the [matrix](docs/plans/android-mockup-acceptance.md); the main ones are an always-on transfer banner and selection bar, no provider names or icons, about 20 s of blank loading at Drive's top folder, no breadcrumb path, unsorted files, no way to open a file, and a This phone tab that is only a download-folder picker. Captures stay in the ignored `artifacts/android-app/pairs/remote-files-real-20261121/` because they show private folder names.

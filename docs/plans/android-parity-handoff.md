@@ -37,7 +37,7 @@ Updated 2026-11-21. Claude leads the Android work again. Read `CLAUDE.md`, then
    copied the mockup's names and folders (`media/recordings/2026`, a WebDAV
    "C3 mixed fixture" on a paired Host), so it never showed the tab as the owner
    uses it. The real tab was captured on the owner's phone on 2026-11-21 and the
-   [14 differences](android-mockup-acceptance.md) are listed in the matrix.
+   [15 differences](android-mockup-acceptance.md) are listed in the matrix.
    Agree the list with the owner before changing code. Then
    rebuild the screens to the mockups, compare on real data and on the phone,
    Opus review, and Fable review before release.

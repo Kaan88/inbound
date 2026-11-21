@@ -34,6 +34,9 @@ This phone tab
 13. It is a download-folder picker ("Use this download folder"), not the phone side of a two-sided browser: no files, no sizes, no upload action, and the bottom bar disappears.
 14. Its rows are cards while the Site tab's are flat rows; the folder glyph renders as a flat bar; every row repeats "Folder · on this phone".
 
+Speed (owner report, 2026-11-21)
+15. "mobile remote files loads directories very slowly compared to desktop with the same google drive account." Matches item 5. Find the cause (Opus review of the Remote Files code, 2026-11-21) before the redesign.
+
 Back from a subfolder returned to its parent, as expected.
 
 **Status (2026-11-20, before that rejection):** Review passed source, native visuals and flows for all four documented Android 0.0.9 parity batches. The final signed candidate and scoped evidence are recorded in [PROGRESS.md](../../PROGRESS.md). No owner decision remains open within the parity scope.
