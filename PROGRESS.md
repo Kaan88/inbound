@@ -1,5 +1,11 @@
 # Progress — session handoff
 
+## Owner: redesign mockups approved, redesign moved to last, 2026-11-21
+
+"great mockups, I approve. but leave the redesign for last and just implement remaining missing big features."
+Mockups r1-r6 are approved. The Remote Files redesign now comes after the remaining big features; the next one is
+ANDROID.9 (TorBox, torrents, archives).
+
 ## Remote Files redesign: owner decisions, 2026-11-21
 
 With the speed fixes done the redesign starts. The owner chose a full This phone browser with upload, two tabs as two

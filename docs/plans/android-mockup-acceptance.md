@@ -44,7 +44,7 @@ Owner decisions for the redesign (2026-11-21)
   leaving the folder; pull to refresh; sort in the menu.
 - These go beyond c3/c4, so the new states (pane location switcher, file options sheet, selection bar, This phone
   with files and upload) get mockups first, agreed by the owner, saved in `android-mockups/`, then built.
-- Proposed mockups (2026-11-21, not yet agreed): `r1-this-phone` to `r6-server-to-server` in `android-mockups/`, from
+- Mockups approved by the owner (2026-11-21, "great mockups, I approve"): `r1-this-phone` to `r6-server-to-server` in `android-mockups/`, from
   `r-remote-files-redesign.html` (same tokens and sizes as c3/c4).
 
 Speed (owner report, 2026-11-21)
