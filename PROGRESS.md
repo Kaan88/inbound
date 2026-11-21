@@ -50,6 +50,9 @@ Keep both?); the desktop, web UI and CLI list a copy batch by direction and sour
 Owner decision (2026-11-22): on the phone, copies, uploads and downloads ask only when names already exist at the
 target (checked against the target pane's listing), once per batch: "N files already exist in <place>" with Skip,
 Replace and Keep both; no clash starts at once. A clash added after the pane loaded falls back to Skip.
+Built on the redesign branch (`48da7a2f`, Sonnet, reviewed): names compare ignoring case; no check (Skip as before)
+when a download goes to a PC Host's folder, the phone pane is outside Download, or the target pane isn't loaded. A
+single file keeps the safe download only with Skip. Mobile 645. Not run on a phone yet.
 
 ## ANDROID.9: torrents on Wi-Fi, seeding on Wi-Fi while charging, 2026-11-22
 
