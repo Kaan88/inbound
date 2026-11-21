@@ -14,6 +14,8 @@ Fable should look at.
 
 ## Open: Android work from 49f5663c to c745317f (2026-11-21)
 
+**Reviewed 2026-11-21:** four Opus agents and then Fable reviewed this range; findings, verdicts and the fix order are in [android-review-49f5663c-c745317f.md](android-review-49f5663c-c745317f.md). It stays open until the findings are fixed and Fable checks the fixes.
+
 Added 2026-11-21 when Claude took the Android work back. Commits `49f5663c..c745317f` (136 commits, 0.0.2 to the 0.0.10 hotfix) were made outside Claude sessions and have had no Fable or Opus review. Earlier milestone verdicts recorded for them in PROGRESS and the matrix came from another reviewer and are input, not acceptance. Review the code and requirements first; use `git diff --stat 49f5663c..c745317f` and `git log --reverse 49f5663c..c745317f`. Review shared Runtime, Contracts and Sites changes for desktop and server impact as well as Android behaviour. The detailed earlier review notes are in git history: `git show c745317f:ANDROID-CODEX-FABLE-REVIEW.md`.
 
 | Work since baseline | Commit checkpoints | Evidence and review focus |

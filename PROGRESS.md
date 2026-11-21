@@ -1,5 +1,16 @@
 # Progress — session handoff
 
+## Review of 49f5663c..c745317f, 2026-11-21
+
+Four Opus agents reviewed the 136 commits read-only by area (shared code, Remote Files, rest of Android, test scripts); the lead verified the main findings in code; Fable then reviewed the consolidated report against the code. Result: [android-review-49f5663c-c745317f.md](docs/plans/android-review-49f5663c-c745317f.md).
+
+- Slow loading: only the phone asks for folder item counts on every browse (up to +2 s per folder, Back and breadcrumb), rclone stops after 60 s idle so most opens are cold, and Back never reuses a listing. Fable: this explains the 4-5 s subfolders but only about 5-8 s of the 20 s first open, so measure on the phone first.
+- Important elsewhere: a charging or battery-saver queue condition holds a queue forever on Windows and the server and cannot be cleared there (S1); safe download fails on Linux CIFS/NFS folders (S2); every battery broadcast re-runs scheduling and the queue job re-arms about once a second (A1, A2); the phone trusts only the first SFTP host key and the "key changed" dialog is one tap with only the new fingerprint (R1, M1).
+- Sound: release signing, updater signatures and pre-install checks, test-hook gating, link-catching cookie rules, lock ordering and DTO back-compatibility.
+- Owner items 3, 4, 6 and 9 reworded after Fable (item 9: files are sorted oldest first but the year is hidden).
+
+No code changed. The range stays open in the Fable queue until fixes are checked.
+
 ## Owner report: Remote Files loads folders slowly, 2026-11-21
 
 "mobile remote files loads directories very slowly compared to desktop with the same google drive account." Added as item 15 in the [matrix](docs/plans/android-mockup-acceptance.md). The owner asked for an Opus review of the 136 commits made outside Claude sessions (`49f5663c..c745317f`) before the redesign; the slow loading is part of that review's Remote Files scope.

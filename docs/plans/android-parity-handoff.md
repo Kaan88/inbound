@@ -38,9 +38,12 @@ Updated 2026-11-21. Claude leads the Android work again. Read `CLAUDE.md`, then
    "C3 mixed fixture" on a paired Host), so it never showed the tab as the owner
    uses it. The real tab was captured on the owner's phone on 2026-11-21 and the
    [15 differences](android-mockup-acceptance.md) are listed in the matrix.
-   Agree the list with the owner before changing code. Then
-   rebuild the screens to the mockups, compare on real data and on the phone,
-   Opus review, and Fable review before release.
+   The [review](android-review-49f5663c-c745317f.md) (Opus, then Fable) sets the
+   order: (a) timing logs and one cold and one warm open on the S24; (b) Host-side
+   speed fixes P1, P5, P2, P4, M4, P6, P3; (c) the redesign against c3/c4
+   with R1/M1, R3 and the owner's call on upload (R4); compare on real data and on
+   the phone; Fable review before release. Then shared regressions (S1, S2, S3, M2,
+   M3) and idle wake-ups (A1, A2, A4, A8, S6).
 2. Inventory the `android-app` working copy, then continue ANDROID.9 under its plan.
 3. Separate follow-ups: ANDROID.5/.6 real-account capture and natural deep Doze are
    deferred to ANDROID.14; expanded accessibility is optional (ANDROID.13);

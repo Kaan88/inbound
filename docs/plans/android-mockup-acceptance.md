@@ -17,15 +17,15 @@ The owner also requires successful real-account sign-in after expiry before 0.0.
 Locations (C3)
 1. The amber transfer banner is always shown, as "No active transfers"; the mockup shows it only while transfers run.
 2. Every cloud location has the same generic cloud icon and the raw rclone remote name in lower case ("drive", "onedrive"); the mockup names the service ("Google Drive") and its state.
-3. The SFTP row shows no free space (mockup: "SFTP · nas.local · 1.2 TB free").
-4. Opening the saved SFTP location asked again to trust its server key; the fingerprint wraps mid-string with a stray last character on its own line.
+3. The SFTP row shows no free space (mockup: "SFTP · nas.local · 1.2 TB free"). Free space is only fetched during a browse and kept for one minute, so the row can almost never show it.
+4. Opening the saved SFTP location asked again to trust its server key; the fingerprint wraps mid-string with a stray last character on its own line. Likely cause: the phone trusts only the first offered key (review R1); a location never trusted on the phone gives the same first prompt. The "key changed" variant is a security risk (review M1).
 
 Folder (C4, Site tab)
 5. Opening Drive's top folder showed plain "Loading…" text for about 20 s with no progress indicator; subfolders took 4–5 s.
-6. No breadcrumb at the top folder; inside a subfolder only the current folder appears ("Archive"), with no parent chips or chevrons to go up.
+6. No root (location) chip: the top folder shows no breadcrumb and one level down shows only the current folder ("Archive"). Parent chips and chevrons appear only from two levels down.
 7. The bottom bar is always shown: "0 files · 0 B", a greyed "To this phone" and a delete icon that looks enabled with nothing selected. The mockup bar summarises a selection.
 8. The destination reads "To Downloads"; the mockup shows the real category folder ("To Downloads/Inbound/Music").
-9. Files are not sorted by name or date (2 Nov, 2 Nov, 2 Nov, 3 Nov, 5 Oct, 12 Oct, 12 Oct, 8 Apr).
+9. Files look unsorted (2 Nov, 2 Nov, 2 Nov, 3 Nov, 5 Oct, 12 Oct, 12 Oct, 8 Apr): they are sorted oldest first by full date, but the year is hidden. The mockup wants name order (or newest first).
 10. Item counts show for some folders and not others.
 11. A tap only selects; there is no way to open or preview a file, and the menu has only Refresh folder and Transfers (no select all, sort, new folder, rename or delete for folders).
 12. Long names are cut in the middle on one line.
@@ -35,7 +35,7 @@ This phone tab
 14. Its rows are cards while the Site tab's are flat rows; the folder glyph renders as a flat bar; every row repeats "Folder · on this phone".
 
 Speed (owner report, 2026-11-21)
-15. "mobile remote files loads directories very slowly compared to desktop with the same google drive account." Matches item 5. Find the cause (Opus review of the Remote Files code, 2026-11-21) before the redesign.
+15. "mobile remote files loads directories very slowly compared to desktop with the same google drive account." Matches item 5. The [review](android-review-49f5663c-c745317f.md) found that only the phone asks for folder item counts on every browse (up to +2 s per folder, Back and breadcrumb), rclone stops after 60 s idle so most opens are cold, and Back never reuses a listing. Fable: that explains the 4-5 s subfolders but only 5-8 s of the 20 s first open; measure before fixing.
 
 Back from a subfolder returned to its parent, as expected.
 
