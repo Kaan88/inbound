@@ -23,10 +23,17 @@ public static class PuttyKeyFile
     public const string NeedsPassphrase = "This PuTTY key has a passphrase. Enter it as the key passphrase.";
     public const string Damaged = "This PuTTY key file is damaged or incomplete. Save it again with PuTTYgen and choose it again.";
 
-    // Argon2 limits for a file from outside: PuTTYgen's defaults are 8192 KiB, 13 to 34 passes and 1 lane.
-    private const int MaxMemoryKiB = 256 * 1024;
+    // Argon2 limits for a file from outside: PuTTYgen's defaults are 8192 KiB, 13 to 34 passes and 1 lane. The work cap
+    // (memory times passes) keeps one key to a few seconds of one core (Fable review, SITES.11).
+    private const int MaxMemoryKiB = 64 * 1024;
     private const int MaxPasses = 256;
     private const int MaxLanes = 16;
+    private const long MaxWork = 4L * 1024 * 1024;
+
+    // A 16384-bit RSA key file is under 10 KiB; anything far larger is not a key someone made with PuTTYgen.
+    private const int MaxText = 64 * 1024;
+    private const int MaxLine = 128;
+    private const int MaxBlob = 16 * 1024;
 
     /// <summary>Whether <paramref name="text"/> starts like a PuTTY key file of any version.</summary>
     public static bool IsPuttyKey(string text) => text.TrimStart().StartsWith("PuTTY-User-Key-File-", StringComparison.Ordinal);
@@ -39,11 +46,12 @@ public static class PuttyKeyFile
         return line.StartsWith("PuTTY-User-Key-File-", StringComparison.Ordinal) && colon > 0 ? line[(colon + 1)..].Trim() : null;
     }
 
-    public static Result ToOpenSsh(string text, string? passphrase)
+    public static Result ToOpenSsh(string text, string? passphrase, CancellationToken cancellationToken = default)
     {
+        if (text.Length > MaxText) return new Result(null, Damaged, null);
         try
         {
-            return Convert(text, passphrase);
+            return Convert(text, passphrase, cancellationToken);
         }
         catch (FormatException)
         {
@@ -59,19 +67,22 @@ public static class PuttyKeyFile
         }
     }
 
-    private static Result Convert(string text, string? passphrase)
+    private static Result Convert(string text, string? passphrase, CancellationToken cancellationToken)
     {
         var lines = text.Replace("\r", "", StringComparison.Ordinal).Split('\n');
         int at = 0;
         string NextLine() => at < lines.Length ? lines[at++] : throw new FormatException();
-        (string Key, string Value) Header(string expected)
+        // PuTTY writes "Key: value". The comment is kept as written, since the MAC covers it; a header ending at its colon
+        // (an empty comment whose trailing space an editor took off) is an empty value.
+        (string Key, string Value) Header(string expected, bool verbatim = false)
         {
             var line = NextLine();
-            var colon = line.IndexOf(": ", StringComparison.Ordinal);
-            if (colon < 0) throw new FormatException();
+            var colon = line.IndexOf(':', StringComparison.Ordinal);
+            if (colon <= 0 || (colon + 1 < line.Length && line[colon + 1] != ' ')) throw new FormatException();
             var key = line[..colon];
             if (expected.Length > 0 && key != expected) throw new FormatException();
-            return (key, line[(colon + 2)..].Trim());
+            var value = colon + 2 <= line.Length ? line[(colon + 2)..] : "";
+            return (key, verbatim ? value : value.Trim());
         }
 
         while (at < lines.Length && lines[at].Trim().Length == 0) at++;
@@ -87,7 +98,7 @@ public static class PuttyKeyFile
             return new Result(null, "This PuTTY key file's format is not supported. Save it again with a current PuTTYgen.", algorithm);
         var encryption = Header("Encryption").Value;
         if (encryption is not ("none" or "aes256-cbc")) return new Result(null, Damaged, algorithm);
-        var comment = Header("Comment").Value;
+        var comment = Header("Comment", verbatim: true).Value;
         var publicBlob = Blob(Header("Public-Lines").Value, NextLine);
 
         int memory = 0, passes = 0, lanes = 0;
@@ -106,7 +117,8 @@ public static class PuttyKeyFile
             passes = int.Parse(Header("Argon2-Passes").Value, System.Globalization.CultureInfo.InvariantCulture);
             lanes = int.Parse(Header("Argon2-Parallelism").Value, System.Globalization.CultureInfo.InvariantCulture);
             salt = System.Convert.FromHexString(Header("Argon2-Salt").Value);
-            if (memory is < 8 or > MaxMemoryKiB || passes is < 1 or > MaxPasses || lanes is < 1 or > MaxLanes || memory < 8 * lanes)
+            if (memory is < 8 or > MaxMemoryKiB || passes is < 1 or > MaxPasses || lanes is < 1 or > MaxLanes || memory < 8 * lanes
+                || (long)memory * passes > MaxWork)
                 return new Result(null, "This PuTTY key asks for more work to open than Inbound allows. Save it again with PuTTYgen's default settings.", algorithm);
         }
 
@@ -116,14 +128,14 @@ public static class PuttyKeyFile
         bool encrypted = encryption != "none";
         if (encrypted && string.IsNullOrEmpty(passphrase)) return new Result(null, NeedsPassphrase, algorithm);
         var secret = Encoding.UTF8.GetBytes(encrypted ? passphrase! : "");
-        byte[] cipherKey = [], iv = new byte[16], macKey;
+        byte[] cipherKey = [], iv = new byte[16], macKey = [];
         try
         {
             if (version == 3)
             {
                 if (encrypted)
                 {
-                    var derived = Argon2.Hash(kind, secret, salt, memory, passes, lanes, 80);
+                    var derived = Argon2.Hash(kind, secret, salt, memory, passes, lanes, 80, cancellationToken: cancellationToken);
                     cipherKey = derived[..32];
                     iv = derived[32..48];
                     macKey = derived[48..];
@@ -138,6 +150,8 @@ public static class PuttyKeyFile
                     var a = SHA1.HashData([0, 0, 0, 0, .. secret]);
                     var b = SHA1.HashData([0, 0, 0, 1, .. secret]);
                     cipherKey = [.. a, .. b[..12]];
+                    CryptographicOperations.ZeroMemory(a);
+                    CryptographicOperations.ZeroMemory(b);
                 }
                 macKey = SHA1.HashData([.. "putty-private-key-file-mac-key"u8, .. secret]);
             }
@@ -156,7 +170,10 @@ public static class PuttyKeyFile
             macData.String(Encoding.UTF8.GetBytes(comment));
             macData.String(publicBlob);
             macData.String(privateBlob);
-            var expected = version == 3 ? HMACSHA256.HashData(macKey, macData.ToArray()) : HMACSHA1.HashData(macKey, macData.ToArray());
+            var macBytes = macData.ToArray();
+            macData.Clear();
+            var expected = version == 3 ? HMACSHA256.HashData(macKey, macBytes) : HMACSHA1.HashData(macKey, macBytes);
+            CryptographicOperations.ZeroMemory(macBytes);
             if (!CryptographicOperations.FixedTimeEquals(expected, mac))
                 return new Result(null, encrypted ? WrongPassphrase : Damaged, algorithm);
         }
@@ -164,6 +181,8 @@ public static class PuttyKeyFile
         {
             CryptographicOperations.ZeroMemory(secret);
             CryptographicOperations.ZeroMemory(cipherKey);
+            CryptographicOperations.ZeroMemory(iv);
+            CryptographicOperations.ZeroMemory(macKey);
         }
 
         try
@@ -179,10 +198,16 @@ public static class PuttyKeyFile
     private static byte[] Blob(string count, Func<string> nextLine)
     {
         int lines = int.Parse(count, System.Globalization.CultureInfo.InvariantCulture);
-        if (lines is < 0 or > 4096) throw new FormatException();
+        if (lines is < 0 or > MaxBlob / 48 + 1) throw new FormatException();
         var base64 = new StringBuilder();
-        for (int i = 0; i < lines; i++) base64.Append(nextLine().Trim());
-        return System.Convert.FromBase64String(base64.ToString());
+        for (int i = 0; i < lines; i++)
+        {
+            var line = nextLine().Trim();
+            if (line.Length > MaxLine) throw new FormatException();
+            base64.Append(line);
+        }
+        var blob = System.Convert.FromBase64String(base64.ToString());
+        return blob.Length <= MaxBlob ? blob : throw new FormatException();
     }
 
     private static Result BuildOpenSsh(string algorithm, string comment, byte[] publicBlob, byte[] privateBlob)
@@ -204,8 +229,10 @@ public static class PuttyKeyFile
                 var e = pub.String(); var n = pub.String();
                 var d = priv.String(); var p = priv.String(); var q = priv.String(); var iqmp = priv.String();
                 // n = p * q: the private half belongs to the public one.
-                if (Mpint(n) != Mpint(p) * Mpint(q)) return new Result(null, Damaged, algorithm);
-                section.String(n); section.String(e); section.String(d); section.String(iqmp); section.String(p); section.String(q);
+                bool belongs = Mpint(n) == Mpint(p) * Mpint(q);
+                if (belongs) { section.String(n); section.String(e); section.String(d); section.String(iqmp); section.String(p); section.String(q); }
+                foreach (var part in (byte[][])[d, p, q, iqmp]) CryptographicOperations.ZeroMemory(part);
+                if (!belongs) { section.Clear(); return new Result(null, Damaged, algorithm); }
                 type = "RSA";
                 break;
             }
@@ -213,8 +240,10 @@ public static class PuttyKeyFile
             {
                 var curve = pub.String(); var point = pub.String();
                 var d = priv.String();
-                if (Encoding.UTF8.GetString(curve) != algorithm["ecdsa-sha2-".Length..]) return new Result(null, Damaged, algorithm);
-                section.String(curve); section.String(point); section.String(d);
+                bool sameCurve = Encoding.UTF8.GetString(curve) == algorithm["ecdsa-sha2-".Length..];
+                if (sameCurve) { section.String(curve); section.String(point); section.String(d); }
+                CryptographicOperations.ZeroMemory(d);
+                if (!sameCurve) { section.Clear(); return new Result(null, Damaged, algorithm); }
                 type = "ECDSA";
                 break;
             }
@@ -223,16 +252,24 @@ public static class PuttyKeyFile
                 var publicKey = pub.String();
                 // PuTTY stores the 32-byte private key as a little-endian number without its high zero bytes.
                 var stored = priv.String();
-                if (publicKey.Length != 32 || stored.Length > 32) return new Result(null, Damaged, algorithm);
-                var seed = new byte[32];
-                stored.CopyTo(seed, 0);
+                if (publicKey.Length != 32 || stored.Length > 32)
+                {
+                    CryptographicOperations.ZeroMemory(stored);
+                    section.Clear();
+                    return new Result(null, Damaged, algorithm);
+                }
+                var secretKey = new byte[64];
+                stored.CopyTo(secretKey, 0);
+                publicKey.CopyTo(secretKey, 32);
                 section.String(publicKey);
-                section.String([.. seed, .. publicKey]);
-                CryptographicOperations.ZeroMemory(seed);
+                section.String(secretKey);
+                CryptographicOperations.ZeroMemory(secretKey);
+                CryptographicOperations.ZeroMemory(stored);
                 type = "Ed25519";
                 break;
             }
             default:
+                section.Clear();
                 return new Result(null, algorithm switch
                 {
                     "ssh-dss" => "DSA keys can't be used. Use an RSA, ECDSA or Ed25519 key.",
@@ -252,9 +289,11 @@ public static class PuttyKeyFile
         file.UInt32(1);
         file.String(publicBlob);
         var sectionBytes = section.ToArray();
+        section.Clear();
         file.String(sectionBytes);
         CryptographicOperations.ZeroMemory(sectionBytes);
         var body = file.ToArray();
+        file.Clear();
         var base64 = System.Convert.ToBase64String(body);
         CryptographicOperations.ZeroMemory(body);
         var pem = new StringBuilder("-----BEGIN OPENSSH PRIVATE KEY-----\n");
@@ -303,5 +342,12 @@ public static class PuttyKeyFile
         }
 
         public byte[] ToArray() => _stream.ToArray();
+
+        /// <summary>Zeroes everything the stream holds, its spare capacity included.</summary>
+        public void Clear()
+        {
+            CryptographicOperations.ZeroMemory(_stream.GetBuffer());
+            _stream.SetLength(0);
+        }
     }
 }

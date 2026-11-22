@@ -36,6 +36,13 @@ it, since this branch does not merge into `main` without the owner's say-so.
   Python writer that reproduces PuTTY's four vectors byte for byte, all converted, each signing a file that `ssh-keygen -Y`
   verifies against the original public key, and 12 of them signing in to `rclone serve sftp` (an unknown key refused).
   Left: the Android key UI (y1-y3), Fable.
+- Fable on SITES.11 (`cdc1cef8`): approved for release; it compared Argon2 with OpenSSL and fuzzed the reader. Fixed all
+  three mediums: a comment is read as written (the MAC covers it; a trailing space failed), Argon2 is capped at 64 MiB and
+  4 Mi KiB-passes, runs cancellable off the dispatching thread outside the sites lock, one at a time; and a passphrase
+  typed on an edit is dropped when the kept key has none (rclone would refuse it). Lows: size limits on the text, lines
+  and blobs, more secrets zeroed, an empty comment without its space read, conversion for any SFTP save. Tests added: Argon2
+  D/I/Id with 2 to 16 lanes against OpenSSL, RSA and ECDSA files, an Ed25519 seed ending in zero, the limits; the 24-key
+  run signs again. Not done: the private-to-public check for ECDSA and Ed25519 (the MAC binds both; Fable: no fix needed).
 - **Owner, 2026-11-22: "all mockups are fine."** So y1-y3 (SFTP key login on Android, `y-sftp-key.html`) are approved
   as drawn, with x1-x33.
 - Drafts merged into this branch: Transfers and get-there (x1-x10, x33; `android-x-mockups-draft`, review fixes

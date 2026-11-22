@@ -17,7 +17,7 @@ internal static class Argon2
     private const uint Version = 0x13;
 
     public static byte[] Hash(Kind kind, ReadOnlySpan<byte> password, ReadOnlySpan<byte> salt, int memoryKiB, int passes, int lanes,
-        int tagLength, ReadOnlySpan<byte> secret = default, ReadOnlySpan<byte> associated = default)
+        int tagLength, ReadOnlySpan<byte> secret = default, ReadOnlySpan<byte> associated = default, CancellationToken cancellationToken = default)
     {
         if (lanes < 1 || passes < 1 || tagLength < 4 || memoryKiB < 8 * lanes) throw new ArgumentOutOfRangeException(nameof(memoryKiB));
 
@@ -41,73 +41,82 @@ internal static class Argon2
         int laneLength = segment * SyncPoints;
         var memory = new ulong[(long)laneLength * lanes * BlockWords];
         var block = new byte[1024];
-        for (int lane = 0; lane < lanes; lane++)
-            for (int i = 0; i < 2; i++)
-            {
-                BinaryPrimitives.WriteUInt32LittleEndian(seed.AsSpan(64), (uint)i);
-                BinaryPrimitives.WriteUInt32LittleEndian(seed.AsSpan(68), (uint)lane);
-                LongHash(seed, block);
-                var dest = memory.AsSpan((lane * laneLength + i) * BlockWords, BlockWords);
-                for (int w = 0; w < BlockWords; w++) dest[w] = BinaryPrimitives.ReadUInt64LittleEndian(block.AsSpan(w * 8));
-            }
-
-        var zero = new ulong[BlockWords];
-        var input = new ulong[BlockWords];
-        var address = new ulong[BlockWords];
-        var r = new ulong[BlockWords];
-        var tmp = new ulong[BlockWords];
-        for (int pass = 0; pass < passes; pass++)
-            for (int slice = 0; slice < SyncPoints; slice++)
-                for (int lane = 0; lane < lanes; lane++)
+        var final = new ulong[BlockWords];
+        try
+        {
+            for (int lane = 0; lane < lanes; lane++)
+                for (int i = 0; i < 2; i++)
                 {
-                    bool independent = kind == Kind.I || (kind == Kind.Id && pass == 0 && slice < SyncPoints / 2);
-                    if (independent)
-                    {
-                        Array.Clear(input);
-                        input[0] = (ulong)pass; input[1] = (ulong)lane; input[2] = (ulong)slice;
-                        input[3] = (ulong)(laneLength * lanes); input[4] = (ulong)passes; input[5] = (ulong)kind;
-                    }
-
-                    int start = 0;
-                    if (pass == 0 && slice == 0)
-                    {
-                        start = 2;
-                        if (independent) NextAddresses(address, input, zero, r, tmp);
-                    }
-
-                    long current = (long)lane * laneLength + slice * segment + start;
-                    long previous = current % laneLength == 0 ? current + laneLength - 1 : current - 1;
-                    for (int index = start; index < segment; index++, current++, previous++)
-                    {
-                        if (current % laneLength == 1) previous = current - 1;
-                        ulong random;
-                        if (independent)
-                        {
-                            if (index % BlockWords == 0) NextAddresses(address, input, zero, r, tmp);
-                            random = address[index % BlockWords];
-                        }
-                        else random = memory[previous * BlockWords];
-
-                        long refLane = (long)((random >> 32) % (ulong)lanes);
-                        if (pass == 0 && slice == 0) refLane = lane;
-                        long refIndex = ReferenceIndex(pass, slice, index, segment, laneLength, (uint)random, refLane == lane);
-                        FillBlock(memory, previous * BlockWords, (refLane * laneLength + refIndex) * BlockWords, current * BlockWords,
-                            pass != 0, r, tmp);
-                    }
+                    BinaryPrimitives.WriteUInt32LittleEndian(seed.AsSpan(64), (uint)i);
+                    BinaryPrimitives.WriteUInt32LittleEndian(seed.AsSpan(68), (uint)lane);
+                    LongHash(seed, block);
+                    var dest = memory.AsSpan((lane * laneLength + i) * BlockWords, BlockWords);
+                    for (int w = 0; w < BlockWords; w++) dest[w] = BinaryPrimitives.ReadUInt64LittleEndian(block.AsSpan(w * 8));
                 }
 
-        var final = new ulong[BlockWords];
-        for (int lane = 0; lane < lanes; lane++)
-        {
-            var last = memory.AsSpan(checked((lane * laneLength + laneLength - 1) * BlockWords), BlockWords);
-            for (int w = 0; w < BlockWords; w++) final[w] ^= last[w];
+            var zero = new ulong[BlockWords];
+            var input = new ulong[BlockWords];
+            var address = new ulong[BlockWords];
+            var r = new ulong[BlockWords];
+            var tmp = new ulong[BlockWords];
+            for (int pass = 0; pass < passes; pass++)
+                for (int slice = 0; slice < SyncPoints; slice++)
+                    for (int lane = 0; lane < lanes; lane++)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        bool independent = kind == Kind.I || (kind == Kind.Id && pass == 0 && slice < SyncPoints / 2);
+                        if (independent)
+                        {
+                            Array.Clear(input);
+                            input[0] = (ulong)pass; input[1] = (ulong)lane; input[2] = (ulong)slice;
+                            input[3] = (ulong)(laneLength * lanes); input[4] = (ulong)passes; input[5] = (ulong)kind;
+                        }
+
+                        int start = 0;
+                        if (pass == 0 && slice == 0)
+                        {
+                            start = 2;
+                            if (independent) NextAddresses(address, input, zero, r, tmp);
+                        }
+
+                        long current = (long)lane * laneLength + slice * segment + start;
+                        long previous = current % laneLength == 0 ? current + laneLength - 1 : current - 1;
+                        for (int index = start; index < segment; index++, current++, previous++)
+                        {
+                            if (current % laneLength == 1) previous = current - 1;
+                            ulong random;
+                            if (independent)
+                            {
+                                if (index % BlockWords == 0) NextAddresses(address, input, zero, r, tmp);
+                                random = address[index % BlockWords];
+                            }
+                            else random = memory[previous * BlockWords];
+
+                            long refLane = (long)((random >> 32) % (ulong)lanes);
+                            if (pass == 0 && slice == 0) refLane = lane;
+                            long refIndex = ReferenceIndex(pass, slice, index, segment, laneLength, (uint)random, refLane == lane);
+                            FillBlock(memory, previous * BlockWords, (refLane * laneLength + refIndex) * BlockWords, current * BlockWords,
+                                pass != 0, r, tmp);
+                        }
+                    }
+
+            for (int lane = 0; lane < lanes; lane++)
+            {
+                var last = memory.AsSpan(checked((lane * laneLength + laneLength - 1) * BlockWords), BlockWords);
+                for (int w = 0; w < BlockWords; w++) final[w] ^= last[w];
+            }
+            for (int w = 0; w < BlockWords; w++) BinaryPrimitives.WriteUInt64LittleEndian(block.AsSpan(w * 8), final[w]);
+            var tag = new byte[tagLength];
+            LongHash(block, tag);
+            return tag;
         }
-        for (int w = 0; w < BlockWords; w++) BinaryPrimitives.WriteUInt64LittleEndian(block.AsSpan(w * 8), final[w]);
-        var tag = new byte[tagLength];
-        LongHash(block, tag);
-        Array.Clear(memory);
-        Array.Clear(seed);
-        return tag;
+        finally
+        {
+            Array.Clear(memory);
+            Array.Clear(seed);
+            Array.Clear(block);
+            Array.Clear(final);
+        }
     }
 
     private static long ReferenceIndex(int pass, int slice, int index, int segment, int laneLength, uint random, bool sameLane)

@@ -347,6 +347,31 @@ public sealed class SitesCommandsTests : IAsyncLifetime
             Assert.DoesNotContain("amviz4sVUBN64jLO3gt4HGXJosUArghc4", text);
             Assert.DoesNotContain("PuTTY", text);
         }
+
+        // The kept key is unencrypted, so a passphrase typed on a later edit is not kept: rclone would refuse it.
+        var edit = Site(id: saved.Site.Id, password: null);
+        edit.AuthMethod = SiteAuthMethods.Key;
+        edit.KeyPassphrase = "test-passphrase";
+        var edited = await Call<SiteResultDto>(commands, SitesMessageTypes.Save, edit);
+        Assert.True(edited.Ok, edited.Message);
+        Assert.True(edited.Site!.HasPrivateKey);
+        Assert.False(edited.Site.HasKeyPassphrase);
+    }
+
+    [Fact]
+    public async Task APuttyKeyOnAnFtpSiteIsRefusedWithoutOpeningIt()
+    {
+        var commands = Open();
+        await On(commands);
+
+        var site = Site();
+        site.Kind = SiteKinds.Ftp;
+        site.Port = 21;
+        site.PrivateKey = PuttyKey;
+        var refused = await Call<SiteResultDto>(commands, SitesMessageTypes.Save, site);
+        Assert.False(refused.Ok);
+        Assert.Contains("Only SFTP sites sign in with a key", refused.Message);
+        Assert.Empty((await Call<SitesListDto>(commands, SitesMessageTypes.ListRequest)).Sites);
     }
 
     [Fact]

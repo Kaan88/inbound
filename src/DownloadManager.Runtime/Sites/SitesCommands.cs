@@ -30,6 +30,8 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
     /// <summary>SITES.6c: the OneDrive a token opens (Graph <c>/me/drive</c>); tests give their own.</summary>
     internal Func<string, CancellationToken, Task<(string? Id, string? Type, string? Problem)>> _oneDriveDrive = ReadOneDriveDriveAsync;
     private readonly SemaphoreSlim _gate = new(1, 1);
+    // SITES.11: opening a PuTTY key can take seconds of Argon2; one at a time, outside _gate (Fable review).
+    private readonly SemaphoreSlim _keyGate = new(1, 1);
     private readonly RcloneUpdater? _updater;
     private readonly SiteTransfers _transfers;
     private readonly TimeProvider _time;
@@ -579,6 +581,29 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
     {
         SiteRecord saved;
         var droppedCertificates = false;
+        // SITES.11: rclone can't read a PuTTY key, so it is opened with its passphrase now and kept as an unencrypted
+        // OpenSSH key, sealed like every other secret. The passphrase has done its work and is not kept. Other kinds
+        // leave the text alone: the checks below refuse a key for them.
+        if (request.Kind == SiteKinds.Sftp && !string.IsNullOrEmpty(request.PrivateKey) && PuttyKeyFile.IsPuttyKey(request.PrivateKey))
+        {
+            if (SiteKeyText.Problem(request.PrivateKey) is { } shapeProblem) return Fail(shapeProblem);
+            var ppk = request.PrivateKey;
+            var passphrase = request.KeyPassphrase;
+            PuttyKeyFile.Result converted;
+            await _keyGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                converted = await Task.Run(() => PuttyKeyFile.ToOpenSsh(ppk, passphrase, cancellationToken), cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                _keyGate.Release();
+            }
+            if (converted.Problem is { } puttyProblem) return Fail(puttyProblem);
+            request.PrivateKey = converted.OpenSshKey;
+            request.KeyPassphrase = null;
+        }
+
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -611,15 +636,6 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
             // A key that rclone could not read would be sealed and only fail at the next test; it is refused here instead.
             if (!string.IsNullOrEmpty(request.PrivateKey) && SiteKeyText.Problem(request.PrivateKey) is { } keyProblem)
                 return Fail(keyProblem);
-            // SITES.11: rclone can't read a PuTTY key, so it is opened with its passphrase now and kept as an unencrypted
-            // OpenSSH key, sealed like every other secret. The passphrase has done its work and is not kept.
-            if (!string.IsNullOrEmpty(request.PrivateKey) && PuttyKeyFile.IsPuttyKey(request.PrivateKey))
-            {
-                var converted = PuttyKeyFile.ToOpenSsh(request.PrivateKey, request.KeyPassphrase);
-                if (converted.Problem is { } puttyProblem) return Fail(puttyProblem);
-                request.PrivateKey = converted.OpenSshKey;
-                request.KeyPassphrase = null;
-            }
 
             var (host, port, _) = KindAddress(request);
             var now = DateTimeOffset.UtcNow;
@@ -639,6 +655,14 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
             if (sameServer && !sameCredentials && request.Password is null && request.PrivateKey is null
                 && (existing!.SealedPassword is not null || existing.SealedPrivateKey is not null))
                 return Fail("Enter the password or key again: it isn't kept when the user name or sign-in settings change.");
+            // A key kept without a passphrase (every converted .ppk is one) takes none: rclone refuses a passphrase for an
+            // unencrypted key, so one typed on an edit is not kept (Fable review, SITES.11).
+            if (!string.IsNullOrEmpty(request.KeyPassphrase))
+            {
+                var keyInUse = request.PrivateKey ?? (sameCredentials && existing!.SealedPrivateKey is { } sealedKey
+                    ? SecretProtector.UnprotectSiteSecret(sealedKey) : null);
+                if (keyInUse is not null && SiteKeyText.IsUnencrypted(keyInUse)) request.KeyPassphrase = null;
+            }
             try
             {
                 saved = new SiteRecord
