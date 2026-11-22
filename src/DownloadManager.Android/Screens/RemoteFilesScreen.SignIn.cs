@@ -190,16 +190,16 @@ internal sealed partial class RemoteFilesScreen
         }
     }
 
-    private bool ViewingCloudLocations => _site is null && !_adding && !_showTransfers;
+    private bool ViewingCloudLocations => !_inFolder && !_adding && !_showTransfers;
 
     private bool ViewingCloudFolder(string siteId) =>
-        _site?.Id == siteId && !_adding && !_showTransfers && !_showPhoneFiles;
+        _inFolder && ShowsSite(siteId) && !_adding && !_showTransfers;
 
     private async Task VerifyPhoneCloudSignInAsync(string siteId, CancellationToken cancellationToken)
     {
         if (ViewingCloudFolder(siteId))
         {
-            await BrowseAsync(_path, false, true);
+            await AfterFolderSignInAsync(siteId);
             return;
         }
         if (!ViewingCloudLocations) return;
@@ -283,7 +283,7 @@ internal sealed partial class RemoteFilesScreen
     private void RefreshAfterCloudSignIn(string siteId)
     {
         _expiredCloudSites.Remove(siteId);
-        if (ViewingCloudFolder(siteId)) _ = BrowseAsync(_path, false, true);
+        if (ViewingCloudFolder(siteId) || _inFolder && _pendingChoice is { } pending && pending.SiteId == siteId) _ = AfterFolderSignInAsync(siteId);
         else if (ViewingCloudLocations) _ = LoadLocationsAsync();
     }
 
@@ -337,7 +337,11 @@ internal sealed partial class RemoteFilesScreen
     {
         if (!SameHost()) return;
         _error = message;
-        _activity.RunOnUiThread(() => { if (SameHost()) Render(); });
+        _activity.RunOnUiThread(() =>
+        {
+            if (!SameHost()) return;
+            if (_inFolder) Toast.MakeText(_activity, message, ToastLength.Long)?.Show(); else Render();
+        });
     }
 
     private static string BuildAuthorizeCommand(SiteDto site)

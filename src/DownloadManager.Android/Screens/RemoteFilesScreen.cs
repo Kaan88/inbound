@@ -33,28 +33,25 @@ internal sealed partial class RemoteFilesScreen : IDisposable
     private readonly Func<bool> _deleteFiles;
     private readonly Action<bool> _showBottomNavigation;
     private bool _folderFullScreen;
-    private CancellationTokenSource? _browseRequest;
-    private CancellationTokenSource? _countsRequest;
     // Listing tokens of folders shown, by site and path: the Host shows one again from its copy for a minute (review P5).
     private readonly Dictionary<string, string> _knownListings = new(StringComparer.Ordinal);
     private static string ListingKey(string siteId, string? path) => siteId + "\n" + (path ?? "");
     private readonly Func<bool> _cachedFirstPage;
-    private bool _browseRequiresSignIn;
+    /// <summary>The Host offers <see cref="SiteTransferStartRequest.RemoteCopyCapability"/> (r6, location to location).</summary>
+    private readonly Func<bool> _remoteCopy;
     private readonly LinearLayout _content;
     private readonly FrameLayout _surface;
     private readonly ScrollView _scroll;
-    private readonly List<string> _parents = [];
-    private readonly List<SiteItemDto> _items = [];
-    private SiteDto? _site;
+    private readonly Dictionary<string, long> _freeBytes = new(StringComparer.Ordinal);
     private SitesStatusDto? _status;
     private List<SiteDto> _sites = [];
-    private string? _path, _listing, _error;
-    private int _total, _generation;
+    private string? _error;
+    private int _generation;
     private bool _started, _closed, _busy, _listLoaded;
     private bool _adding;
     private string _addKind = SiteKindCatalog.WebDav;
     private string _addName = "";
-    private bool _showTransfers, _mutation, _startUncertain, _transfersLoaded;
+    private bool _showTransfers, _mutation, _transfersLoaded;
     private bool _summaryRequestInFlight;
     private List<SiteTransferDto> _transfers = [];
     private EditText? _password;
@@ -64,10 +61,11 @@ internal sealed partial class RemoteFilesScreen : IDisposable
     public View View { get; }
 
     public RemoteFilesScreen(MainActivity activity, IHostConnection connection, string? connectionStamp, bool secureHostConnection,
-        Func<bool> safeDownloads, Func<bool> deleteFiles, Func<bool> cachedFirstPage, Action<bool> showBottomNavigation)
+        Func<bool> safeDownloads, Func<bool> deleteFiles, Func<bool> cachedFirstPage, Func<bool> remoteCopy, Action<bool> showBottomNavigation)
     {
         _activity = activity;
         _cachedFirstPage = cachedFirstPage;
+        _remoteCopy = remoteCopy;
         _client = new RemoteFilesClient(connection);
         _safeDownloads = safeDownloads;
         _deleteFiles = deleteFiles;
@@ -141,31 +139,8 @@ internal sealed partial class RemoteFilesScreen : IDisposable
             Render();
             return true;
         }
-        if (_site is null) return false;
-        if (_showPhoneFiles && !string.IsNullOrEmpty(_phonePath))
-        {
-            int separator = _phonePath.LastIndexOf('/');
-            OpenPhoneFolder(separator < 0 ? null : _phonePath[..separator]);
-            return true;
-        }
-        if (_showPhoneFiles) { SetPhoneTab(false); return true; }
-        CancelCurrent();
-        if (_parents.Count == 0)
-        {
-            _site = null;
-            _path = null;
-            _error = null;
-            _items.Clear();
-            Render();
-            _ = RefreshLocationTransfersAsync(_generation);
-        }
-        else
-        {
-            var parent = _parents[^1];
-            _parents.RemoveAt(_parents.Count - 1);
-            _ = BrowseAsync(parent, false, false);
-        }
-        return true;
+        if (_inFolder) return FolderBack();
+        return false;
     }
 
     public void Dispose()
@@ -177,8 +152,8 @@ internal sealed partial class RemoteFilesScreen : IDisposable
         HostChoice.Hosts(_activity).Changed -= HostChanged;
         CloseCloudSignInUi();
         ClearPassword();
-        _browseRequest?.Cancel();
-        _countsRequest?.Cancel();
+        foreach (var pane in _panes) { pane.Request?.Cancel(); pane.Counts?.Cancel(); }
+        _sheet?.Dismiss();
         _confirm?.Dismiss();
         _confirm = null;
         _life.Cancel();
@@ -201,6 +176,8 @@ internal sealed partial class RemoteFilesScreen : IDisposable
             ClearPassword();
             _confirm?.Dismiss();
             _confirm = null;
+            _sheet?.Dismiss();
+            _inFolder = false;
             SetFolderFullScreen(false);
             ResetChrome();
             _content.RemoveAllViews();
@@ -213,9 +190,6 @@ internal sealed partial class RemoteFilesScreen : IDisposable
     // a request after Back; its answer must never replace the newer view.
     private void CancelCurrent()
     {
-        _browseRequest?.Cancel();
-        _countsRequest?.Cancel();
-        _browseRequiresSignIn = false;
         _generation++;
         _busy = false;
     }
@@ -233,6 +207,7 @@ internal sealed partial class RemoteFilesScreen : IDisposable
             if (!SameHost() || generation != _generation) return;
             _status = status; _sites = list.Sites; _listLoaded = true;
             _ = RefreshLocationTransfersAsync(generation);
+            _ = FetchSftpFreeSpaceAsync(generation);
         }
         catch (OperationCanceledException) when (_life.IsCancellationRequested) { return; }
         catch (Exception) { if (!_closed && generation == _generation) _error = "Could not load Remote Files from this Host. Check the connection and try again."; }
@@ -242,217 +217,16 @@ internal sealed partial class RemoteFilesScreen : IDisposable
         }
     }
 
-    private async Task BrowseAsync(string? path, bool append, bool refresh)
-    {
-        if (!SameHost() || _busy || _site is null) return;
-        using var browse = CancellationTokenSource.CreateLinkedTokenSource(_life.Token);
-        _browseRequest = browse;
-        _countsRequest?.Cancel();
-        // A Host that keeps the listing answers first without folder counts, which follow (2 s less per open).
-        bool lazyCounts = _cachedFirstPage();
-        bool fillCounts = false;
-        int generation = ++_generation;
-        string siteId = _site.Id;
-        int offset = append ? _items.Count : 0;
-        string? listing = append ? _listing : null;
-        string? known = !append && !refresh && _knownListings.TryGetValue(ListingKey(siteId, path), out var remembered) ? remembered : null;
-        _browseRequiresSignIn = false;
-        _busy = true; _error = null;
-        if (!append)
-        {
-            _selectedRemoteFiles.Clear();
-            _path = path; _items.Clear(); _total = 0; _listing = null;
-        }
-        Render();
-        long started = Environment.TickCount64, replied = -1;
-        try
-        {
-            var result = await _client.BrowseAsync(new SiteBrowseRequest
-            {
-                Id = siteId, Path = path, Offset = offset, Limit = PageSize,
-                Listing = listing ?? known, Refresh = refresh, ChronologicalFiles = true, IncludeFolderCounts = !lazyCounts,
-                IncludeFreeSpace = !append && _site.Kind == SiteKindCatalog.Sftp
-            }, browse.Token);
-            replied = Environment.TickCount64 - started;
-            if (_closed || generation != _generation) return;
-            if (append && !result.Ok && result.Problem == SiteProblems.ListingChanged)
-            {
-                _busy = false;
-                _ = BrowseAsync(path, false, false);
-                return;
-            }
-            if (!result.Ok)
-            {
-                if (result.Problem == SiteProblems.SignInNeeded && IsSignInKind(_site?.Kind))
-                {
-                    _expiredCloudSites.Add(siteId);
-                    _browseRequiresSignIn = true;
-                    _error = "Sign-in has run out. Sign in again to browse this location.";
-                    return;
-                }
-                if (result.Problem is SiteProblems.HostKeyNotAccepted or SiteProblems.HostKeyChanged)
-                    _changedSftpKeys.Add(siteId);
-                _error = string.IsNullOrWhiteSpace(result.Message) ? "Could not browse this location." : result.Message;
-                return;
-            }
-            // Never combine pages that don't describe the requested page/listing.
-            if (result.Offset != offset || (append && result.Listing != listing))
-            {
-                _error = "The folder listing changed. Refresh to start again.";
-                _listing = null; _total = _items.Count;
-                return;
-            }
-            _expiredCloudSites.Remove(siteId);
-            if (!append && _site is not null) _site.FreeBytes = result.FreeBytes;
-            _path = result.Path;
-            _listing = result.Listing;
-            if (!append && !string.IsNullOrEmpty(result.Listing))
-            {
-                if (_knownListings.Count >= 32) _knownListings.Clear();
-                _knownListings[ListingKey(siteId, path)] = result.Listing;
-                _knownListings[ListingKey(siteId, result.Path)] = result.Listing;
-            }
-            _items.AddRange(result.Items);
-            _total = result.Items.Count == 0 ? _items.Count : Math.Max(result.Total, _items.Count);
-            fillCounts = lazyCounts && !string.IsNullOrEmpty(_listing) && result.Items.Any(item => item.IsFolder);
-            if (_total > _items.Count && string.IsNullOrEmpty(_listing))
-            {
-                _error = "This Host did not provide a listing token. Refresh to try again.";
-                _total = _items.Count;
-            }
-        }
-        catch (OperationCanceledException) when (browse.IsCancellationRequested) { return; }
-        catch (Exception) { if (!_closed && generation == _generation) _error = "Could not load this folder. Check the connection and try again."; }
-        finally
-        {
-            if (ReferenceEquals(_browseRequest, browse)) _browseRequest = null;
-            if (!_closed && generation == _generation)
-            {
-                _busy = false; Render();
-                // Remote Files speed work (2026-11-21): reply and first drawn rows, no names or paths.
-                Android.Util.Log.Info(InboundApplication.Tag, $"Remote Files browse: reply {replied} ms, rows drawn {Environment.TickCount64 - started} ms, {_items.Count} rows" + (append ? ", next page" : ""));
-                if (fillCounts && _path is not null && _listing is not null)
-                    _ = FillFolderCountsAsync(generation, siteId, _path, _listing, offset, _items.Count - offset);
-            }
-        }
-    }
-
-    /// <summary>Folder counts for rows already shown, from the listing the Host still holds (review P1).</summary>
-    private async Task FillFolderCountsAsync(int generation, string siteId, string path, string listing, int offset, int count)
-    {
-        using var counts = CancellationTokenSource.CreateLinkedTokenSource(_life.Token);
-        _countsRequest?.Cancel();
-        _countsRequest = counts;
-        try
-        {
-            var result = await _client.BrowseAsync(new SiteBrowseRequest
-            {
-                Id = siteId, Path = path, Offset = offset, Limit = count, Listing = listing,
-                ChronologicalFiles = true, IncludeFolderCounts = true,
-            }, counts.Token);
-            if (_closed || generation != _generation || !result.Ok || result.Listing != listing || result.Offset != offset) return;
-            bool changed = false;
-            for (int i = 0; i < result.Items.Count && offset + i < _items.Count; i++)
-            {
-                var shown = _items[offset + i];
-                var counted = result.Items[i];
-                if (!shown.IsFolder || counted.ChildCount is not { } children || shown.Name != counted.Name || shown.ChildCount == children) continue;
-                shown.ChildCount = children;
-                changed = true;
-            }
-            if (changed && !_busy) Render();
-        }
-        catch (OperationCanceledException) { }
-        catch (Exception) { /* Counts are optional; the folder stays as shown. */ }
-        finally
-        {
-            if (ReferenceEquals(_countsRequest, counts)) _countsRequest = null;
-        }
-    }
-
     private void Render()
     {
         if (_closed) return;
-        bool folder = !_showTransfers && !_adding && _site is not null;
+        bool folder = !_showTransfers && !_adding && _inFolder;
         SetFolderFullScreen(folder);
         if (!folder) ResetChrome();
         _content.RemoveAllViews();
         if (_showTransfers) RenderTransfers();
         else if (_adding) RenderAddLocation();
-        else if (_site is null) RenderLocations(); else RenderFolder();
-    }
-
-    private string? _phoneDestination;
-
-    private string? DownloadDestination => !_phoneHost ? _site?.LocalFolder
-        : _phoneDestination is { Length: > 0 } directory
-            ? System.IO.Path.Combine(AndroidHost.SharedDownloadFolder, directory)
-            : AndroidHost.SharedDownloadFolder;
-
-    private bool CanSelectRemoteFiles() => SameHost() && !_busy && !_startUncertain && _path is not null
-        && _safeDownloads() && !string.IsNullOrWhiteSpace(DownloadDestination);
-
-    private bool CanDeleteRemoteFiles() => SameHost() && !_busy && _path is not null && !string.IsNullOrEmpty(_listing)
-        && _secureHostConnection && _deleteFiles();
-
-    private void ConfirmDeleteFiles(IReadOnlyList<string> names)
-    {
-        if (!CanDeleteRemoteFiles() || _confirm is not null || _site is null || _path is null) return;
-        var selected = names.Distinct(StringComparer.Ordinal).ToArray();
-        if (selected.Length is 0 or > 100 || selected.Any(name =>
-            !SafeName(name) || !_items.Any(item => !item.IsFolder && item.Name == name))) return;
-        int generation = _generation;
-        var request = new SiteChangeRequest
-        {
-            Id = _site.Id, Path = _path, Listing = _listing,
-            Items = selected.Select(name => new SiteChangeItemDto { Name = name }).ToList()
-        };
-        _confirm = new MaterialAlertDialogBuilder(_activity)
-            .SetTitle(selected.Length == 1 ? $"Delete {selected[0]}?" : $"Delete {selected.Length} files?")!
-            .SetMessage($"Permanently delete the selected files from {_site.Name} · {_path}?\nHost: {_hostDisplay}\n\nCopies on this phone are not affected.")!
-            .SetNegativeButton("Cancel", (Android.Content.IDialogInterfaceOnClickListener?)null)!
-            .SetPositiveButton("Delete", (_, _) =>
-            {
-                if (generation == _generation && CanDeleteRemoteFiles()) _ = DeleteFilesAsync(request);
-            })!.Create();
-        _confirm.DismissEvent += (_, _) => _confirm = null;
-        _confirm.Show();
-    }
-
-    private async Task DeleteFilesAsync(SiteChangeRequest request)
-    {
-        int generation = ++_generation;
-        _busy = _mutation = true;
-        _error = null;
-        Render();
-        string? message;
-        try
-        {
-            var result = await _client.DeleteFilesAsync(request, _life.Token);
-            if (!SameHost() || generation != _generation) return;
-            message = result.Ok ? "Selected files deleted." : result.Message ?? "The Host did not delete every selected file.";
-        }
-        catch (OperationCanceledException) when (_life.IsCancellationRequested) { return; }
-        catch (Exception)
-        {
-            if (!SameHost() || generation != _generation) return;
-            message = "The Host's answer was lost. Check the refreshed list before trying again.";
-        }
-        finally
-        {
-            if (!_closed && generation == _generation) _busy = _mutation = false;
-        }
-        Toast.MakeText(_activity, message, ToastLength.Long)?.Show();
-        await BrowseAsync(_path, false, true);
-    }
-
-    private void BrowseBreadcrumb(int index)
-    {
-        if (!SameHost() || _mutation || _site is null || index < -1 || index >= _parents.Count) return;
-        CancelCurrent();
-        string? parent = index == -1 ? null : _parents[index];
-        _parents.RemoveRange(Math.Max(0, index), _parents.Count - Math.Max(0, index));
-        _ = BrowseAsync(parent, false, false);
+        else if (!_inFolder) RenderLocations(); else RenderFolder();
     }
 
     private void ResetChrome()
@@ -484,7 +258,7 @@ internal sealed partial class RemoteFilesScreen : IDisposable
         try
         {
             var result = await _client.ListTransfersAsync(_life.Token);
-            if (!SameHost() || generation != _generation || _site is not null || _adding || _showTransfers) return;
+            if (!SameHost() || generation != _generation || _inFolder || _adding || _showTransfers) return;
             _transfers = result.Transfers;
             _transfersLoaded = true;
             UpdateTransferSummary();
@@ -499,83 +273,11 @@ internal sealed partial class RemoteFilesScreen : IDisposable
         {
             using var timer = new PeriodicTimer(TimeSpan.FromSeconds(3));
             while (await timer.WaitForNextTickAsync(token))
-                if (!_busy && _site is null && !_adding && !_showTransfers && _surface.IsShown)
-                    await RefreshLocationTransfersAsync(_generation);
+                if (_busy || _adding || _showTransfers || !_surface.IsShown) continue;
+                if (_inFolder) await RefreshTransfersQuietAsync();
+                else await RefreshLocationTransfersAsync(_generation);
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }
-    }
-
-    private void ConfirmDownloads(IReadOnlyList<string> names, long knownBytes)
-    {
-        if (!CanSelectRemoteFiles() || _confirm is not null || _site is null || _path is null || DownloadDestination is not { } destination) return;
-        var selected = names.Distinct(StringComparer.Ordinal).ToArray();
-        if (selected.Length is 0 or > 100 ||
-            selected.Any(name => !SafeName(name) || !_items.Any(item => !item.IsFolder && item.Name == name))) return;
-        int generation = _generation;
-        string siteId = _site.Id, remoteFolder = _path;
-        _confirm = new MaterialAlertDialogBuilder(_activity)
-            .SetTitle(selected.Length == 1 ? "Download file?" : $"Download {selected.Length} files?")!
-            .SetMessage((selected.Length == 1 ? "File: " + selected[0] : $"{selected.Length} selected files" +
-                (knownBytes > 0 ? " · " + Fmt.Bytes(knownBytes) : ""))
-                + "\nFrom: " + _site.Name + " · " + remoteFolder
-                + "\nHost: " + _hostDisplay + "\nDestination on this Host: " + destination
-                + "\n\nExisting files are skipped, not replaced. Each file starts as its own transfer.")!
-            .SetNegativeButton("Cancel", (Android.Content.IDialogInterfaceOnClickListener?)null)!
-            .SetPositiveButton("Download", (_, _) =>
-            {
-                if (generation == _generation && CanSelectRemoteFiles())
-                    _ = StartDownloadsAsync(siteId, remoteFolder, selected, destination);
-            })!.Create();
-        _confirm.DismissEvent += (_, _) => _confirm = null;
-        _confirm.Show();
-    }
-
-    private async Task StartDownloadsAsync(string siteId, string folder, string[] names, string destination)
-    {
-        if (!SameHost() || !_safeDownloads() || _busy || _startUncertain) return;
-        int generation = ++_generation;
-        _busy = _mutation = true; _error = null;
-        Render();
-        int accepted = 0;
-        try
-        {
-            foreach (var name in names)
-            {
-                if (!SameHost() || !_safeDownloads() || generation != _generation) return;
-                var result = await _client.StartTransferAsync(new SiteTransferStartRequest
-                {
-                    SiteId = siteId, Direction = "download", RemoteFolder = folder, LocalFolder = destination, SafeSingleDownload = true,
-                    Conflict = "skip", Names = [new SiteTransferNameDto { Name = name, IsFolder = false }]
-                }, _life.Token);
-                if (!SameHost() || generation != _generation) return;
-                if (!result.Ok || result.Transfer is null)
-                {
-                    _startUncertain = accepted > 0 || result.Ok;
-                    var error = result.Ok ? "The Host did not identify a transfer. Check Transfers before trying again."
-                        : result.Message ?? "The Host did not start this transfer.";
-                    _error = $"{accepted} of {names.Length} transfers confirmed. {error}";
-                    return;
-                }
-                accepted++;
-            }
-            _showTransfers = true;
-            _transfersLoaded = false;
-            _busy = _mutation = false;
-            _ = LoadTransfersAsync();
-        }
-        catch (OperationCanceledException) when (_life.IsCancellationRequested) { }
-        catch (Exception)
-        {
-            if (SameHost() && generation == _generation)
-            {
-                _startUncertain = true;
-                _error = $"{accepted} of {names.Length} transfers confirmed. The last answer was lost; check Transfers before trying again.";
-            }
-        }
-        finally
-        {
-            if (!_closed && generation == _generation) { _busy = _mutation = false; Render(); }
-        }
     }
 
     private void OpenTransfers()
@@ -620,24 +322,14 @@ internal sealed partial class RemoteFilesScreen : IDisposable
         if (_busy) AddText("Loading or sending…", 16, Resource.Attribute.colorOnSurfaceVariant);
         if (_error is not null) AddText(_error, 16, Resource.Attribute.colorOnSurfaceVariant);
         if (!_transfersLoaded) return;
-        if (_startUncertain && !_busy)
-        {
-            AddText("Some downloads may already have started. Review this list before making a new selection.",
-                14, Resource.Attribute.colorOnSurfaceVariant);
-            AddButton("I reviewed these transfers", () =>
-            {
-                if (!SameHost() || _busy || !_transfersLoaded) return;
-                _startUncertain = false;
-                _selectedRemoteFiles.Clear();
-                Render();
-            });
-        }
         if (_transfers.Count == 0) AddText("No transfers on this Host.", 16, Resource.Attribute.colorOnSurfaceVariant);
         foreach (var transfer in _transfers.OrderByDescending(t => t.CreatedAt))
         {
             var detail = transfer.State + " · " + transfer.FilesDone + " copied, " + transfer.FilesSkipped
                 + " skipped, " + transfer.FilesFailed + " failed of " + transfer.Files
-                 + "\n" + transfer.RemoteFolder + " ↔ " + transfer.LocalFolder
+                 + "\n" + (transfer.Direction == "copy"
+                     ? transfer.RemoteFolder + " → " + RemoteFileList.Destination(transfer.DestinationSiteName ?? "", transfer.DestinationFolder ?? "/")
+                     : transfer.RemoteFolder + " ↔ " + transfer.LocalFolder)
                  + "\nStarted: " + transfer.CreatedAt.ToLocalTime().ToString("g") + " · ID " + transfer.Id;
             if (transfer.Direction == "download" && transfer.Conflict == "skip" && transfer.FilesSkipped > 0)
                 detail += transfer.FilesSkipped == 1
@@ -645,7 +337,7 @@ internal sealed partial class RemoteFilesScreen : IDisposable
                     : "\nItems with these names already exist at the destination and were kept.";
             if (!string.IsNullOrWhiteSpace(transfer.Message)) detail += "\n" + transfer.Message;
             if (transfer.State == "paused") detail += "\nUnfinished files restart from the beginning on resume.";
-            _content.AddView(Card(transfer.Direction + " · " + transfer.SiteName, detail, false));
+            _content.AddView(Card(RemoteTransfers.Title(transfer), detail, false));
             if (_busy) continue;
             bool canResume = transfer.State == "paused" || transfer.State == "failed"
                 && (transfer.Files - transfer.FilesDone - transfer.FilesSkipped - transfer.FilesFailed - transfer.FilesRunning > 0

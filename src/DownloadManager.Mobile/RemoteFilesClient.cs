@@ -51,6 +51,20 @@ public sealed class RemoteFilesClient
         return RequestAsync<SiteTransferResultDto>(IpcMessage.Create(command, request), SitesMessageTypes.TransferResult, cancellationToken);
     }
 
+    /// <summary>
+    /// r6: copies items from one location's folder to another location's folder through the Host's rclone. Only for a Host
+    /// that offers <see cref="SiteTransferStartRequest.RemoteCopyCapability"/>; an older one refuses the direction.
+    /// </summary>
+    public Task<SiteTransferResultDto> StartCopyAsync(string sourceSiteId, string sourceFolder, IReadOnlyCollection<SiteItemDto> items,
+        string targetSiteId, string targetFolder, CancellationToken cancellationToken = default, string conflict = RemoteConflicts.Skip)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceSiteId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetSiteId);
+        ArgumentNullException.ThrowIfNull(items);
+        if (items.Count == 0) throw new ArgumentException("Choose something to copy.", nameof(items));
+        return StartTransferAsync(RemoteTransfers.Copy(sourceSiteId, sourceFolder, items, targetSiteId, targetFolder, conflict), cancellationToken);
+    }
+
     public Task<SiteChangeResultDto> DeleteFilesAsync(SiteChangeRequest request, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -132,10 +146,40 @@ public sealed class RemoteFilesClient
         RequestAsync<SiteProbeResultDto>(IpcMessage.Create(SitesMessageTypes.Probe, new SiteProbeRequest { Host = host, Port = port }),
             SitesMessageTypes.ProbeResult, cancellationToken);
 
-    public Task<SiteResultDto> TrustSftpEndpointAsync(string id, string host, int port, string entry, CancellationToken cancellationToken = default) =>
-        RequestAsync<SiteResultDto>(IpcMessage.Create(SitesMessageTypes.TrustSftpEndpoint,
-            new SiteTrustRequest { Id = id, ExpectedHost = host, ExpectedPort = port, Entries = [entry] }),
+    /// <summary>Trusts every key in <paramref name="entries"/> together (the server may negotiate any of them); replaces the stored list.</summary>
+    public Task<SiteResultDto> TrustSftpEndpointAsync(string id, string host, int port, IReadOnlyList<string> entries, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(entries);
+        return RequestAsync<SiteResultDto>(IpcMessage.Create(SitesMessageTypes.TrustSftpEndpoint,
+            new SiteTrustRequest { Id = id, ExpectedHost = host, ExpectedPort = port, Entries = [.. entries.Distinct(StringComparer.Ordinal).Take(16)] }),
             SitesMessageTypes.Result, cancellationToken);
+    }
+
+    public Task<SiteResultDto> MakeFolderAsync(SiteMakeFolderRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return RequestAsync<SiteResultDto>(IpcMessage.Create(SitesMessageTypes.MakeFolder, request), SitesMessageTypes.Result, cancellationToken);
+    }
+
+    public Task<SiteResultDto> RenameAsync(SiteRenameRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return RequestAsync<SiteResultDto>(IpcMessage.Create(SitesMessageTypes.Rename, request), SitesMessageTypes.Result, cancellationToken);
+    }
+
+    /// <summary>What deleting the named items (folders included) would remove, to show before the user confirms.</summary>
+    public Task<SiteCountResultDto> CountAsync(SiteChangeRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return RequestAsync<SiteCountResultDto>(IpcMessage.Create(SitesMessageTypes.Count, request), SitesMessageTypes.CountResult, cancellationToken);
+    }
+
+    /// <summary>Deletes files and folders (a folder with everything in it); <see cref="DeleteFilesAsync"/> is the files-only form.</summary>
+    public Task<SiteChangeResultDto> DeleteAsync(SiteChangeRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return RequestAsync<SiteChangeResultDto>(IpcMessage.Create(SitesMessageTypes.Delete, request), SitesMessageTypes.ChangeResult, cancellationToken);
+    }
 
     public Task<SiteTransfersDto> ListTransfersAsync(CancellationToken cancellationToken = default) =>
         RequestAsync<SiteTransfersDto>(IpcMessage.Create(SitesMessageTypes.TransferList, new EmptyPayload()), SitesMessageTypes.TransferListResult, cancellationToken);

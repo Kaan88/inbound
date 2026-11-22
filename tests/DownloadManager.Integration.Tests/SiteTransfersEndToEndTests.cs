@@ -607,7 +607,7 @@ public sealed partial class SiteTransfersEndToEndTests : IAsyncLifetime
     /// <c>rclone serve &lt;protocol&gt;</c> over <see cref="Served"/> on a free loopback port (SITES.6: <c>ftp</c>, <c>webdav</c>
     /// and <c>s3</c> too), with <paramref name="login"/> as the server's own sign-in options.
     /// </summary>
-    private int StartServer(bool slow, string protocol, string[] login)
+    private int StartServer(bool slow, string protocol, string[] login, string? root = null)
     {
         var port = FreePort();
         var start = new ProcessStartInfo(Rclone!)
@@ -617,7 +617,7 @@ public sealed partial class SiteTransfersEndToEndTests : IAsyncLifetime
             RedirectStandardOutput = true,
             CreateNoWindow = true,
         };
-        foreach (var arg in new[] { "serve", protocol, Served, "--addr", $"127.0.0.1:{port}" }.Concat(login).Concat(new[] {
+        foreach (var arg in new[] { "serve", protocol, root ?? Served, "--addr", $"127.0.0.1:{port}" }.Concat(login).Concat(new[] {
                      "--cache-dir", Path.Combine(_root, "server-cache"), "--config", "",
                      // No folder cache: files the test adds or removes are seen at once, as on a real server.
                      "--dir-cache-time", "0s" }))
