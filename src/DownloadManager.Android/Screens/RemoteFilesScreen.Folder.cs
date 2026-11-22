@@ -412,17 +412,21 @@ internal sealed partial class RemoteFilesScreen
         }
     }
 
-    /// <summary>The mockup's file-type colours (dark theme: image green, video red-pink, zip amber, document blue, audio violet); light theme keeps the app's darker tones, with video red.</summary>
+    /// <summary>
+    /// The approved mockups' file-type colours, which are drawn in the dark theme: image green, video red-pink, zip amber,
+    /// document blue, audio violet. The light theme has no mockup, so it keeps the app's own colours.
+    /// </summary>
     internal static int RemoteIconColor(Android.Content.Context context, FileKind kind, (int Drawable, int ColorAttr, int ColorRes) fallback)
     {
         bool dark = (context.Resources?.Configuration?.UiMode & Android.Content.Res.UiMode.NightMask) == Android.Content.Res.UiMode.NightYes;
+        if (!dark) return FileIcons.Color(context, fallback);
         return kind switch
         {
-            FileKind.Image => dark ? Color.ParseColor("#7fc8a9") : Color.ParseColor("#1B7130"),
-            FileKind.Video => dark ? Color.ParseColor("#e88f8f") : Color.ParseColor("#B3261E"),
-            FileKind.Archive => dark ? Color.ParseColor("#e0a93e") : Color.ParseColor("#9A6A00"),
-            FileKind.Document => dark ? Color.ParseColor("#4aa3f0") : FileIcons.Color(context, fallback),
-            FileKind.Audio => dark ? Color.ParseColor("#b79cff") : FileIcons.Color(context, fallback),
+            FileKind.Image => Color.ParseColor("#7fc8a9"),
+            FileKind.Video => Color.ParseColor("#e88f8f"),
+            FileKind.Archive => Color.ParseColor("#e0a93e"),
+            FileKind.Document => Color.ParseColor("#4aa3f0"),
+            FileKind.Audio => Color.ParseColor("#b79cff"),
             _ => FileIcons.Color(context, fallback),
         };
     }
