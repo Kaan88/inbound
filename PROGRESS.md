@@ -28,6 +28,14 @@ it, since this branch does not merge into `main` without the owner's say-so.
   was open: SFTP key login on Android; owner, 2026-11-22: "well, yeah. with ppk support if possible." So Android gets
   SFTP key login (mockup first), and the Host converts PuTTY .ppk keys to OpenSSH on save (desktop and CLI gain it too). Building: Transfers and get-there (x1-x10b, x33) and locations/forms (x11-x31)
   on draft branches, then pane messages (x32), merge, S24 comparison, Fable, release.
+- SITES.11 Host part done: `PuttyKeyFile` (+ `Argon2`, BLAKE2b; .NET has neither) opens a .ppk (format 2 or 3, plain or
+  passphrase, RSA, ECDSA P-256/384/521, Ed25519; DSA and Ed448 refused with words) when a site is saved and seals the
+  OpenSSH key; the passphrase is not kept. `SiteKeyRules` takes a whole .ppk (and calls an RFC 4716 public key a public
+  key). Evidence: unit tests on the RFC 7693 and RFC 9106 vectors and PuTTY's own .ppk vectors (cryptsuite.py), a Host
+  save test (wrong passphrase refused, nothing stored; right one stored without passphrase or PuTTY text); 24 keys from a
+  Python writer that reproduces PuTTY's four vectors byte for byte, all converted, each signing a file that `ssh-keygen -Y`
+  verifies against the original public key, and 12 of them signing in to `rclone serve sftp` (an unknown key refused).
+  Left: the Android key UI (y1-y3, awaiting the owner), Fable.
 - Owner, 2026-11-22: "have an agent look at existing extension adaptability to mobile edge for capturing links, or other
   solutions. non critical or required for release." Research done (sources only, nothing tried on a device):
   - Edge for Android runs extensions only from Microsoft's allowlist (store listing, mobile value, QA test cases, a

@@ -285,6 +285,7 @@ public sealed class SitesCommandsTests : IAsyncLifetime
     [InlineData("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample me@pc", "public key")]
     [InlineData("PuTTY-User-Key-File-3: ssh-ed25519", "PuTTY")]
     [InlineData("b3BlbnNzaC1rZXktdjEAAAAA", "-----BEGIN")]
+    [InlineData(PuttyKey, "passphrase")]
     public async Task ATextThatIsNotAPrivateKeyIsRefusedOnSaveAndNothingIsStored(string key, string expected)
     {
         var commands = Open();
@@ -299,6 +300,53 @@ public sealed class SitesCommandsTests : IAsyncLifetime
         Assert.Contains(expected, refused.Message);
         Assert.DoesNotContain(key, refused.Message);
         Assert.Empty((await Call<SitesListDto>(commands, SitesMessageTypes.ListRequest)).Sites);
+    }
+
+    /// <summary>PuTTY's own passphrase-protected format 3 test key (test/cryptsuite.py, testPPKLoadSave; MIT licence).</summary>
+    private const string PuttyKey = """
+        PuTTY-User-Key-File-3: ssh-ed25519
+        Encryption: aes256-cbc
+        Comment: ed25519-key-20200105
+        Public-Lines: 2
+        AAAAC3NzaC1lZDI1NTE5AAAAIHJCszOHaI9X/yGLtjn22f0hO6VPMQDVtctkym6F
+        JH1W
+        Key-Derivation: Argon2id
+        Argon2-Memory: 8192
+        Argon2-Passes: 13
+        Argon2-Parallelism: 1
+        Argon2-Salt: 37c3911bfefc8c1d11ec579627d2b3d9
+        Private-Lines: 1
+        amviz4sVUBN64jLO3gt4HGXJosUArghc4Soi7aVVLb2Tir5Baj0OQClorycuaPRd
+        Private-MAC: 6f5e588e475e55434106ec2c3569695b03f423228b44993a9e97d52ffe7be5a8
+        """;
+
+    [Fact]
+    public async Task APuttyKeyIsOpenedOnSaveAndItsPassphraseIsNotKept()
+    {
+        var commands = Open();
+        await On(commands);
+
+        var keySite = Site(password: null);
+        keySite.AuthMethod = SiteAuthMethods.Key;
+        keySite.PrivateKey = PuttyKey;
+        keySite.KeyPassphrase = "not-it";
+        var refused = await Call<SiteResultDto>(commands, SitesMessageTypes.Save, keySite);
+        Assert.False(refused.Ok);
+        Assert.Equal(PuttyKeyFile.WrongPassphrase, refused.Message);
+        Assert.Empty((await Call<SitesListDto>(commands, SitesMessageTypes.ListRequest)).Sites);
+
+        keySite.KeyPassphrase = "test-passphrase";
+        var saved = await Call<SiteResultDto>(commands, SitesMessageTypes.Save, keySite);
+        Assert.True(saved.Ok, saved.Message);
+        Assert.True(saved.Site!.HasPrivateKey);
+        Assert.False(saved.Site.HasKeyPassphrase);
+        foreach (var file in Directory.EnumerateFiles(SitesFolder, "*", SearchOption.AllDirectories))
+        {
+            var text = await File.ReadAllTextAsync(file);
+            Assert.DoesNotContain("test-passphrase", text);
+            Assert.DoesNotContain("amviz4sVUBN64jLO3gt4HGXJosUArghc4", text);
+            Assert.DoesNotContain("PuTTY", text);
+        }
     }
 
     [Fact]

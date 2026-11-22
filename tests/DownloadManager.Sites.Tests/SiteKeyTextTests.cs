@@ -9,12 +9,15 @@ public sealed class SiteKeyTextTests
     [InlineData("  \r\n-----BEGIN RSA PRIVATE KEY-----\r\nProc-Type: 4,ENCRYPTED\r\nMIIE\r\n-----END RSA PRIVATE KEY-----")]
     [InlineData("-----BEGIN PRIVATE KEY-----\nMC4C\n-----END PRIVATE KEY-----")]
     [InlineData("-----BEGIN ENCRYPTED PRIVATE KEY-----\nMIIF\n-----END ENCRYPTED PRIVATE KEY-----")]
+    // SITES.11: a whole PuTTY key is taken; the Host opens it on save.
+    [InlineData("PuTTY-User-Key-File-3: ssh-ed25519\nEncryption: none\nPrivate-Lines: 1\nAAAA\nPrivate-MAC: 00")]
     public void PemPrivateKeysPass(string key) => Assert.Null(SiteKeyText.Problem(key));
 
     [Theory]
     [InlineData("ssh-ed25519 AAAAC3Nza me@pc", "public key")]
     [InlineData("ecdsa-sha2-nistp256 AAAAE2Vj me@pc", "public key")]
     [InlineData("PuTTY-User-Key-File-3: ssh-ed25519\nEncryption: none", "PuTTY")]
+    [InlineData("---- BEGIN SSH2 PUBLIC KEY ----\nComment: \"me\"\nAAAA\n---- END SSH2 PUBLIC KEY ----", "public key")]
     [InlineData("-----BEGIN SSH2 PUBLIC KEY-----\nAAAA\n-----END SSH2 PUBLIC KEY-----", "not a private key")]
     [InlineData("-----BEGIN OPENSSH PRIVATE KEY-----\nb3Bl", "not a private key")]
     [InlineData("b3BlbnNzaC1rZXktdjE", "not a private key")]

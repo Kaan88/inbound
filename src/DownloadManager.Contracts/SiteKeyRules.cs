@@ -9,13 +9,19 @@ public static class SiteKeyRules
     /// <summary>Why <paramref name="key"/> is not a private key file's text, or null when it looks like one.</summary>
     /// <remarks>
     /// rclone's key_pem takes PEM text: OpenSSH, PKCS#1 or PKCS#8, each between a <c>-----BEGIN ... PRIVATE KEY-----</c>
-    /// line and its END line. A public key, a PuTTY key or a few pasted lines would only fail later, at a test.
+    /// line and its END line. A public key or a few pasted lines would only fail later, at a test. A PuTTY key (.ppk,
+    /// SITES.11) is taken whole: the Host turns it into OpenSSH text when the site is saved, so it is only checked for
+    /// its private part here; whether it opens is the Host's to say.
     /// </remarks>
     public static string? Problem(string key)
     {
         var text = key.Trim();
         if (text.StartsWith("PuTTY-User-Key-File-", StringComparison.Ordinal))
-            return "PuTTY keys (.ppk) can't be used. Save the key in OpenSSH format with PuTTYgen (Conversions › Export OpenSSH key) and choose that file.";
+            return text.Contains("Private-Lines:", StringComparison.Ordinal) && text.Contains("Private-MAC:", StringComparison.Ordinal)
+                ? null
+                : "That PuTTY key file is cut short. Choose the .ppk file, or paste all of it.";
+        if (text.StartsWith("---- BEGIN SSH2 PUBLIC KEY", StringComparison.Ordinal))
+            return "That is a public key (the .pub file). Choose the private key, the file of the same name without .pub.";
         var begin = text.IndexOf("-----BEGIN ", StringComparison.Ordinal);
         if (begin < 0 || text.IndexOf("PRIVATE KEY-----", begin, StringComparison.Ordinal) < 0
             || text.IndexOf("-----END ", begin, StringComparison.Ordinal) < 0)

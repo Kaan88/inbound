@@ -611,6 +611,15 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
             // A key that rclone could not read would be sealed and only fail at the next test; it is refused here instead.
             if (!string.IsNullOrEmpty(request.PrivateKey) && SiteKeyText.Problem(request.PrivateKey) is { } keyProblem)
                 return Fail(keyProblem);
+            // SITES.11: rclone can't read a PuTTY key, so it is opened with its passphrase now and kept as an unencrypted
+            // OpenSSH key, sealed like every other secret. The passphrase has done its work and is not kept.
+            if (!string.IsNullOrEmpty(request.PrivateKey) && PuttyKeyFile.IsPuttyKey(request.PrivateKey))
+            {
+                var converted = PuttyKeyFile.ToOpenSsh(request.PrivateKey, request.KeyPassphrase);
+                if (converted.Problem is { } puttyProblem) return Fail(puttyProblem);
+                request.PrivateKey = converted.OpenSshKey;
+                request.KeyPassphrase = null;
+            }
 
             var (host, port, _) = KindAddress(request);
             var now = DateTimeOffset.UtcNow;
