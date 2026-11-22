@@ -18,7 +18,8 @@
   versionCode 15, APK SHA-256 `0874263374a55da15dde10954ef4ea89ab4490708d8d9e89d2f81b9871643abf`, manifest
   `9a17a4619ab7a328f804e1ea60049a36daa4c0fbd18ad8d8a7abe11ac89a4a50` also on `android-latest`; downloads match; desktop
   latest is still v0.9.0. The 0.1.1/0.1.2 fixes still wait for Fable (review queue).
-- **Open question for the owner:** was minipc trusted before the update? If so, its keys were lost somewhere.
+- **minipc (owner, 2026-11-23):** "no, key support wasn't in then. it works fine now." Not trusted before, nothing lost;
+  the owner checked it works on 0.1.3.
 
 ## Merge of main into the Android branch, 2026-11-23
 
