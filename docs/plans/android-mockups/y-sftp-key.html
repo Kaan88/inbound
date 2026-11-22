@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=412">
+<title>SFTP key login</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+<!-- SFTP key login on Android (owner, 2026-11-22: "well, yeah. with ppk support if possible"). Draft for the owner's approval.
+     Same tokens and components as x-remote-files-rest.html (x19, x31); only the key row (.keyf) is new.
+     Render one screen per hash: #y1 #y1b #y2 #y2b #y3, add "-light" (#y1-light) for the light theme, at 412x892, device scale 3. -->
+<style>
+:root{--bg:#181818;--surface:#202020;--raised:#2a2a2a;--icon:#383838;--line:#343434;--div:#2a2a2a;--sel:#2b3a4f;--on-sel:#dfe9f6;--card-blue:#2c3f57;
+  --blue:#4aa3f0;--on-blue:#0e1b2a;--text:#f2f2f2;--muted:#a3a3a3;--chiptext:#cfcfcf;--field:#4a4a4a;--outbtn:#5a5a5a;
+  --danger:#f08a80;--amber:#e0a93e;--green:#7ccf8a;--violet:#b79cff;--img:#7fc8a9;--vid:#e88f8f;
+  --ok-bg:#1e3a27;--fail-bg:#3d2323;--warn-bg:#3d2f14;--ok-text:#c9d8cc;--warn-text:#e6d4b4;--fail-text:#ecc8c3;
+  --strip:#4a3117;--strip-fg:#f6cfa6;--scrim:rgba(0,0,0,.55);--snack:#e6e6e6;--snack-fg:#1a1a1a;--snack-act:#1f6fc5;
+  --grab:#5a5a5a;--home:#e6e6e6;--cb:#8f8f8f;--shadow:rgba(0,0,0,.5);--mono:#d9d9d9;--dim:#6f6f6f}
+:root[data-theme=light]{--bg:#f7f7f8;--surface:#ededed;--raised:#e6e6e6;--icon:#e2e2e2;--line:#dadada;--div:#dadada;--sel:#dce9f7;--on-sel:#0b2a4a;--card-blue:#dce9f7;
+  --blue:#1f6fc5;--on-blue:#ffffff;--text:#1a1a1a;--muted:#666666;--chiptext:#1a1a1a;--field:#8a8a8a;--outbtn:#8a8a8a;
+  --danger:#c42b1c;--amber:#8a5a00;--green:#1b7130;--violet:#7b4fb8;--img:#1b7130;--vid:#c42b1c;
+  --ok-bg:#d5ebdb;--fail-bg:#f6d9d5;--warn-bg:#f6e6c4;--ok-text:#2b2b2b;--warn-text:#2b2b2b;--fail-text:#2b2b2b;
+  --strip:#fbe3cc;--strip-fg:#6b3a00;--scrim:rgba(0,0,0,.32);--snack:#2c2c2c;--snack-fg:#f2f2f2;--snack-act:#4aa3f0;
+  --grab:#c4c4c4;--home:#1a1a1a;--cb:#8a8a8a;--shadow:rgba(0,0,0,.18);--mono:#2b2b2b;--dim:#9a9a9a}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:412px;height:892px;overflow:hidden;background:var(--bg);color:var(--text);font-family:Roboto,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+.screen{position:relative;width:412px;height:892px;display:none;overflow:hidden}
+.screen.on{display:block}
+svg{display:block;flex:none}
+.status{height:36px;display:flex;align-items:center;justify-content:space-between;padding:0 22px 0 24px;font-size:14px}
+.status .r{display:flex;gap:8px;align-items:center}
+.appbar{height:64px;display:flex;align-items:center;padding:0 8px 0 12px;gap:12px}
+.appbar.r{height:72px}
+.appbar .t{font-size:22px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ib{width:48px;height:48px;display:grid;place-items:center;border-radius:24px;flex:none;position:relative}
+.badge{position:absolute;top:6px;right:5px;min-width:18px;height:18px;border-radius:9px;background:var(--blue);color:var(--on-blue);font-size:11px;font-weight:700;display:grid;place-items:center;padding:0 4px}
+.headline{display:flex;align-items:center;padding:27px 8px 14px 16px}
+.headline .t{font-size:32px;flex:1}
+.hostline{font-size:13px;color:var(--muted);padding:0 16px 10px}
+.appbar + .hostline{padding:0 16px 8px 72px;margin-top:-10px}
+/* r-style folder view */
+.tabs{display:flex;height:46px}
+.tab{flex:1;display:flex;align-items:center;justify-content:center;position:relative;font-size:15px;color:var(--muted);gap:4px}
+.tab.on{color:var(--blue)}
+.tab.on::after{content:"";position:absolute;bottom:0;left:50%;width:48px;margin-left:-24px;height:3px;border-radius:3px 3px 0 0;background:var(--blue)}
+.crumbs{display:flex;align-items:center;gap:6px;padding:10px 16px 6px;white-space:nowrap;overflow:hidden}
+.crumbs.end{justify-content:flex-end}
+.chip{height:32px;padding:0 12px;border:1px solid var(--line);border-radius:8px;display:flex;align-items:center;font-size:14px;color:var(--chiptext);gap:6px;flex:none}
+.chip.on{background:var(--sel);border-color:var(--sel);color:var(--on-sel)}
+.chips{display:flex;gap:8px;padding:6px 16px 4px;white-space:nowrap;overflow:hidden}
+.chev{color:var(--muted)}
+.row{height:62px;display:flex;align-items:center;gap:16px;padding:0 24px;position:relative}
+.row.sel{background:var(--sel);border-radius:16px;margin:0 16px;padding:0 8px}
+.row.hl{border-radius:16px;margin:0 16px;padding:0 8px 0 8px;box-shadow:inset 0 0 0 2px var(--blue)}
+.ico{width:40px;height:40px;border-radius:11px;background:var(--icon);display:grid;place-items:center;flex:none;color:var(--text)}
+.ico.rnd{border-radius:20px}
+.nm{font-size:15px;line-height:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sb{font-size:12.5px;color:var(--muted);line-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.txt{min-width:0;flex:1}
+.bottom{position:absolute;left:0;right:0;bottom:0;height:104px;background:var(--surface);display:flex;align-items:center;padding:0 16px 16px 16px;gap:8px}
+.bottom .c{flex:1;min-width:0}
+.bottom .c b{font-size:16px;font-weight:500;display:block}
+.bottom .c span{font-size:13px;color:var(--muted);display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.primary{height:56px;border-radius:28px;background:var(--blue);color:var(--on-blue);display:flex;align-items:center;gap:10px;padding:0 20px 0 18px;font-size:15px;font-weight:500;white-space:nowrap}
+.homebar{position:absolute;left:50%;bottom:6px;width:108px;margin-left:-54px;height:4px;border-radius:2px;background:var(--home);z-index:9}
+.scrim{position:absolute;inset:0;background:var(--scrim)}
+.sheet{position:absolute;left:0;right:0;bottom:0;background:var(--surface);border-radius:28px 28px 0 0;padding:10px 0 34px}
+.grab{width:32px;height:4px;border-radius:2px;background:var(--grab);margin:4px auto 14px}
+.sheet h3{font-size:14px;font-weight:500;color:var(--muted);padding:6px 24px 10px;letter-spacing:.2px}
+.sheet h2{font-size:22px;font-weight:400;padding:0 24px 6px}
+.sheet p{font-size:14px;color:var(--muted);line-height:20px;padding:0 24px}
+.sheet .in{padding:0 24px}
+.srow{height:56px;display:flex;align-items:center;gap:16px;padding:0 24px;font-size:16px}
+.srow .nm{font-size:16px}
+.srow .sb{font-size:13px}
+.divider{height:1px;background:var(--line);margin:8px 24px}
+.danger{color:var(--danger)}
+.head{display:flex;gap:16px;align-items:center;padding:4px 24px 14px}
+.menu{position:absolute;right:10px;top:52px;width:236px;background:var(--raised);border-radius:8px;padding:8px 0;box-shadow:0 8px 24px var(--shadow)}
+.mi{height:48px;display:flex;align-items:center;gap:14px;padding:0 16px;font-size:15px}
+.mi .end{margin-left:auto;color:var(--muted);font-size:13px}
+/* cards (Downloads pattern) */
+.card{background:var(--surface);border-radius:18px;margin:8px 16px 0;padding:16px}
+.dl{display:flex;align-items:center;gap:14px}
+.card .nm{font-size:16px;line-height:21px;font-weight:500}
+.card .sb{font-size:13px;line-height:18px}
+.route{display:flex;align-items:center;gap:5px;font-size:13px;color:var(--muted);line-height:18px;white-space:nowrap;overflow:hidden}
+.route span{overflow:hidden;text-overflow:ellipsis}
+.route span{white-space:nowrap}
+.route span:first-child{flex:0 1 auto;min-width:24px}
+.route span:last-child{flex:0 0 auto;max-width:74%}
+.round{width:40px;height:40px;border-radius:20px;background:var(--sel);display:grid;place-items:center;color:var(--on-sel);flex:none}
+.round.n{background:var(--icon);color:var(--text)}
+:root[data-theme=light] .round{color:var(--blue)}
+:root[data-theme=light] .round.n{color:var(--text)}
+.bar{height:5px;border-radius:3px;background:var(--icon);margin-top:10px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--blue);border-radius:3px}
+.bar.g i{background:var(--green)}.bar.a i{background:var(--amber)}.bar.p i{background:var(--cb)}.bar.r i{background:var(--danger)}
+.g{color:var(--green)}.a{color:var(--amber)}.bl{color:var(--blue)}.rd{color:var(--danger)}.mu{color:var(--muted)}
+.dimc{opacity:.55}
+.snack{position:absolute;left:16px;right:16px;bottom:120px;background:var(--snack);color:var(--snack-fg);border-radius:12px;min-height:52px;padding:8px 8px 8px 16px;display:flex;align-items:center;gap:8px;font-size:14.5px;line-height:20px;box-shadow:0 4px 14px var(--shadow);z-index:5}
+.snack .m{flex:1;min-width:0}
+.snack b{font-weight:500;color:var(--snack-act);padding:8px 10px;flex:none}
+.nav{position:absolute;left:0;right:0;bottom:0;height:104px;background:var(--surface);display:flex;padding:10px 0 0}
+.nav div{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;font-size:12.5px;color:var(--muted)}
+.nav .on{color:var(--text);font-weight:500}
+.nav .on svg{background:var(--sel);border-radius:16px;width:64px;padding:4px 20px;height:32px}
+.nav svg{height:32px;width:24px;padding:4px 0}
+.fab{position:absolute;right:16px;bottom:120px;height:56px;border-radius:16px;background:var(--blue);color:var(--on-blue);display:flex;align-items:center;gap:10px;padding:0 20px 0 16px;font-size:16px;font-weight:500;box-shadow:0 4px 12px var(--shadow)}
+.strip{margin:0 16px 12px;height:44px;border-radius:24px;background:var(--strip);color:var(--strip-fg);display:flex;align-items:center;gap:12px;padding:0 16px 0 18px;font-size:15px;font-weight:500}
+.strip.n{background:var(--surface);color:var(--text);font-weight:400}
+.loc{background:var(--surface);border-radius:18px;margin:0 16px 8px;height:66px;display:flex;align-items:center;gap:16px;padding:0 16px}
+.loc .nm{font-size:16px}
+.loc .sb{font-size:13px}
+.small{height:36px;padding:0 16px;border-radius:18px;background:var(--sel);color:var(--on-sel);display:flex;align-items:center;gap:6px;font-size:14px;font-weight:500;flex:none}
+.small.fill{background:var(--blue);color:var(--on-blue)}
+:root[data-theme=light] .small{color:var(--on-sel)}
+:root[data-theme=light] .small.fill{color:var(--on-blue)}
+.search{height:56px;margin:4px 16px 0;border-radius:28px;background:var(--surface);display:flex;align-items:center;gap:12px;padding:0 8px 0 18px;color:var(--muted);font-size:16px}
+.search .v{color:var(--text);flex:1}
+.hostpill{margin-left:auto;height:40px;border-radius:20px;background:var(--sel);color:var(--on-sel);display:flex;align-items:center;gap:6px;padding:0 12px;font-size:14px;font-weight:500}
+.sum{background:var(--card-blue);border-radius:24px;margin:12px 16px 0;padding:18px;display:flex;align-items:center}
+.sum .big{font-size:46px;font-weight:500;letter-spacing:-1px;line-height:50px}
+.sum .s{font-size:14px;color:var(--muted);margin-top:4px}
+:root[data-theme=light] .sum .big,:root[data-theme=light] .sum .s{color:#0b2a4a}
+.sum2{background:var(--card-blue);border-radius:24px;margin:12px 16px 0;padding:20px 20px 0;height:143px;overflow:hidden}
+.sum2 .top{display:flex;align-items:center}
+.sum2 .big{font-size:34px;font-weight:500;line-height:40px;color:var(--on-sel)}
+.sum2 .s{font-size:15px;line-height:20px;color:var(--on-sel);margin-top:2px}
+.spark{display:block;width:100%;height:61px;margin-top:0}
+.circ{width:48px;height:48px;border-radius:24px;background:var(--blue);color:var(--on-blue);display:grid;place-items:center;margin-left:auto}
+/* forms */
+.form{padding:4px 16px 0}
+.field{border:1px solid var(--field);border-radius:8px;padding:9px 14px;display:flex;align-items:center;gap:10px;margin-bottom:10px;min-height:58px}
+.field .l{font-size:12px;color:var(--muted)}
+.field .v{font-size:15.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.field .v.ph{color:var(--muted)}
+.field .txt{flex:1;min-width:0}
+.field.f{border:2px solid var(--blue);padding:8px 13px}
+.field.f .l{color:var(--blue)}
+.field.e{border:2px solid var(--danger);padding:8px 13px;margin-bottom:4px}
+.field.e .l{color:var(--danger)}
+.field.off{opacity:.5}
+.err{font-size:12.5px;color:var(--danger);margin:0 14px 10px;line-height:17px}
+.two{display:flex;gap:10px}.two .field{flex:1}
+.lbl{font-size:13px;color:var(--muted);margin:8px 2px 8px}
+.seg{display:flex;border:1px solid var(--field);border-radius:24px;height:44px;overflow:hidden;margin-bottom:12px}
+.seg div{flex:1;display:flex;align-items:center;justify-content:center;gap:8px;font-size:14.5px;font-weight:500}
+.seg div+div{border-left:1px solid var(--field)}
+.seg .on{background:var(--sel);color:var(--on-sel)}
+.hint{font-size:12.5px;color:var(--muted);line-height:17px;margin:2px 2px 10px}
+.banner{border-radius:12px;padding:12px 14px;display:flex;gap:12px;align-items:flex-start;margin:4px 0 12px}
+.banner b{font-weight:500;font-size:14.5px;display:block}
+.banner span{font-size:12.5px;line-height:17px;color:var(--ok-text);display:block;margin-top:2px}
+.banner.ok{background:var(--ok-bg)}.banner.ok svg{color:var(--green)}
+.banner.warn{background:var(--warn-bg)}.banner.warn span{color:var(--warn-text)}.banner.warn svg{color:var(--amber)}
+.banner.fail{background:var(--fail-bg)}.banner.fail span{color:var(--fail-text)}.banner.fail svg{color:var(--danger)}
+.banner.info{background:var(--sel)}.banner.info span{color:var(--on-sel)}.banner.info b{color:var(--on-sel)}.banner.info svg{color:var(--blue)}
+.banner .tbtn{margin:6px 0 -6px -12px;display:inline-flex}
+.banner .act{margin-top:10px}
+.exp{display:flex;align-items:center;gap:12px;padding:10px 2px 8px}
+.exp .t{font-size:16px}.exp .d{font-size:13px;color:var(--muted);margin-top:2px}
+.cbrow{display:flex;align-items:flex-start;gap:14px;font-size:14.5px;line-height:20px;margin:4px 2px 12px}
+.cb{width:20px;height:20px;border-radius:5px;border:2px solid var(--cb);display:grid;place-items:center;flex:none;margin-top:1px}
+.cb.on{background:var(--blue);border-color:var(--blue);color:var(--on-blue)}
+.banner .cb.on svg{color:var(--on-blue)}
+.foot{position:absolute;left:0;right:0;bottom:0;height:104px;background:var(--surface);display:flex;align-items:center;gap:12px;padding:0 16px 16px}
+.btn{height:56px;border-radius:28px;display:flex;align-items:center;justify-content:center;gap:10px;font-size:15.5px;font-weight:500;white-space:nowrap}
+.btn.out{border:1px solid var(--outbtn);color:var(--blue);padding:0 24px}
+.btn.fill{background:var(--blue);color:var(--on-blue);flex:1}
+.btn.fill.dis{background:var(--icon);color:var(--dim)}
+/* settings-style group cards */
+.group{font-size:13px;color:var(--blue);font-weight:500;margin:16px 28px 6px}
+.set{background:var(--surface);border-radius:20px;margin:0 16px;overflow:hidden}
+.sr{display:flex;align-items:center;gap:16px;padding:10px 16px;min-height:62px}
+.sr + .sr{border-top:1px solid var(--div)}
+.sr .t{font-size:16px}
+.sr .d{font-size:13px;color:var(--muted);line-height:18px;margin-top:1px}
+.sr .ico{border-radius:20px}
+/* dialogs */
+.dlg{position:absolute;left:24px;right:24px;top:50%;transform:translateY(-50%);background:var(--raised);border-radius:28px;padding:24px 24px 16px;box-shadow:0 8px 24px var(--shadow)}
+:root[data-theme=light] .dlg{background:#f7f7f8}
+.dlg .di{display:grid;place-items:center;margin-bottom:14px}
+.dlg h2{font-size:22px;font-weight:400;margin-bottom:12px;line-height:28px}
+.dlg h2.c{text-align:center}
+.dlg p{font-size:14px;color:var(--muted);line-height:20px;margin-bottom:10px}
+.dbtns{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
+.tbtn{height:40px;padding:0 12px;color:var(--blue);font-weight:500;font-size:14.5px;display:flex;align-items:center;border-radius:20px}
+.tbtn.d{color:var(--danger)}
+.tbtn.dis{color:var(--dim)}
+.keyb{background:var(--surface);border-radius:12px;padding:10px 12px;font-family:"Roboto Mono",Consolas,monospace;font-size:12.5px;line-height:18px;color:var(--mono);margin:6px 0 10px}
+:root[data-theme=light] .keyb{background:#ededed}
+.sheet .keyb{background:var(--bg)}
+:root[data-theme=light] .sheet .keyb,:root[data-theme=light] .kv{background:var(--icon)}
+.keyrow{display:flex;gap:4px;align-items:flex-start}.keyrow .keyb{flex:1;min-width:0;user-select:text}.keyrow .ib{width:40px;height:40px;margin-top:6px;color:var(--muted)}
+.keyb.wrap{white-space:normal;overflow-wrap:anywhere}
+.sheet .hl2{font-size:13px;padding-top:2px}
+.acts{display:flex;gap:8px;padding:0 24px 12px;flex-wrap:wrap}
+.frow{height:44px;display:flex;align-items:center;gap:14px;padding:0 24px}
+.frow .nm{font-size:14.5px}.frow .sb{font-size:12.5px}
+.frow .ico{width:32px;height:32px;border-radius:9px}
+.sheet h3.row2{display:flex;align-items:center;padding:8px 12px 4px 24px}.sheet h3.row2 .tbtn{margin-left:auto}
+.kv{background:var(--bg);border-radius:18px;margin:4px 16px 0;padding:6px 16px}
+.kv div{display:flex;padding:8px 0;font-size:14.5px}
+.kv div span:first-child{width:96px;color:var(--muted);flex:none}
+.kv div span:last-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.empty{position:absolute;left:32px;right:32px;top:250px;text-align:center}
+.empty .bigico{width:88px;height:88px;border-radius:44px;background:var(--surface);display:grid;place-items:center;margin:0 auto 20px;color:var(--blue)}
+:root[data-theme=light] .empty .bigico{background:var(--sel)}
+:root .empty .bigico.err{background:var(--fail-bg);color:var(--danger)}
+:root .empty .bigico.warn{background:var(--warn-bg);color:var(--amber)}
+.empty .small{display:inline-flex;margin-top:20px}
+.empty b{font-size:20px;font-weight:400;display:block;margin-bottom:8px}
+.empty span{font-size:14px;color:var(--muted);line-height:20px;display:block}
+.empty .btn{margin:22px auto 0;display:inline-flex;padding:0 24px}
+.msg{margin:28px 24px 0;text-align:center}
+.msg b{font-size:16px;font-weight:400;display:block;margin-bottom:6px}
+.msg span{font-size:13.5px;color:var(--muted);line-height:19px;display:block}
+.msg .small{display:inline-flex;margin-top:16px}
+.ptr{position:absolute;left:50%;top:150px;margin-left:-20px;width:40px;height:40px;border-radius:20px;background:var(--raised);display:grid;place-items:center;color:var(--blue);box-shadow:0 2px 8px var(--shadow)}
+.keyf{border:1px solid var(--field);border-radius:8px;padding:9px 8px 9px 14px;display:flex;align-items:center;gap:12px;margin-bottom:10px;min-height:64px}
+.keyf .kg{width:40px;height:40px;border-radius:20px;background:var(--icon);display:grid;place-items:center;flex:none}
+.keyf .txt{flex:1;min-width:0}
+.keyf .nm{font-size:15.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.keyf .sb{font-size:12.5px;color:var(--muted);margin-top:1px}
+.keyf.e{border:2px solid var(--danger);padding:8px 7px 8px 13px;margin-bottom:4px}
+.keyf.e .kg{background:var(--fail-bg);color:var(--danger)}
+.keyf.e .sb{color:var(--danger)}
+.keyf.pick{justify-content:flex-start;padding:9px 14px}
+.keyf.pick .small{margin-left:auto}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="M20 12H5M11 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.8" fill="currentColor"/><circle cx="12" cy="12" r="1.8" fill="currentColor"/><circle cx="12" cy="19" r="1.8" fill="currentColor"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4l2 2h9A1.5 1.5 0 0 1 21 9.5v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-music" viewBox="0 0 24 24"><path d="M9 18V6l11-2v12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="6.5" cy="18" r="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="17.5" cy="16" r="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
+    <symbol id="i-doc" viewBox="0 0 24 24"><path d="M7 3h7l5 5v12a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z M14 3v5h5 M9 13h6M9 16.5h6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/></symbol>
+    <symbol id="i-zip" viewBox="0 0 24 24"><rect x="6" y="3" width="12" height="18" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M11 3v2h2v2h-2v2h2v2h-2" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="10" y="13" width="4" height="4" rx="1" fill="none" stroke="currentColor" stroke-width="1.6"/></symbol>
+    <symbol id="i-image" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="9" cy="10" r="1.7" fill="currentColor"/><path d="M4 18l5-5 4 4 3-3 4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+    <symbol id="i-video" viewBox="0 0 24 24"><rect x="3" y="6" width="13" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M16 10.5l5-3v9l-5-3z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 4v11M7 10.5l5 5 5-5M5 20h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 16V5M7 9.5l5-5 5 5M5 20h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><path d="M5 12h12M12 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M4 12h15M14 7l5 5-5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 6.5h16M9 6.5V4.5h6v2M6.5 6.5l1 13a1 1 0 0 0 1 .9h7a1 1 0 0 0 1-.9l1-13M10 10.5v6M14 10.5v6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-open" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z M13.5 6.5l4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 11v5.5M12 7.6v.2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3.5l9.5 16.5h-19z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 10v4.5M12 17.2v.2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-caret" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-phone" viewBox="0 0 24 24"><rect x="6.5" y="2.5" width="11" height="19" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M10.5 18.5h3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+    <symbol id="i-pc" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="12" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M9 20h6M12 16.5V20" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+    <symbol id="i-server" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="4" y="13" width="16" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M7.5 7.5h3M7.5 16.5h3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3.5 12h17M12 3.5c2.5 2.6 3.6 5.4 3.6 8.5S14.5 17.9 12 20.5M12 3.5C9.5 6.1 8.4 8.9 8.4 12s1.1 5.9 3.6 8.5" fill="none" stroke="currentColor" stroke-width="1.6"/></symbol>
+    <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M7 18.5h10.5a4 4 0 0 0 .6-7.95A6 6 0 0 0 6.6 9.6 4.5 4.5 0 0 0 7 18.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+    <symbol id="i-box" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="4.5" rx="1" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M5 9v9.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9M10 12.5h4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+    <symbol id="i-ftp" viewBox="0 0 24 24"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4l2 2h9A1.5 1.5 0 0 1 21 9.5v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M9 11.5h6M13 9.8l2 1.7-2 1.7M15 15.5H9M11 13.8l-2 1.7 2 1.7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3M19.5 4.5v4.5H15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-retry" viewBox="0 0 24 24"><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3M4.5 4.5v4.5H9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-transfers" viewBox="0 0 24 24"><path d="M8 20V5M4 9l4-4 4 4M16 4v15M12 15l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><path d="M9 6v12M15 6v12" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13l10.5-6.5z" fill="currentColor"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6" fill="none" stroke="currentColor" stroke-width="2"/><path d="M15 15l5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-queue" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24"><path d="M9.17 5.16 L9.81 4.93 L10.09 2.59 L13.91 2.59 L14.19 4.93 L14.83 5.16 L15.45 5.45 L17.30 4.00 L20.00 6.70 L18.55 8.55 L18.84 9.17 L19.07 9.81 L21.41 10.09 L21.41 13.91 L19.07 14.19 L18.84 14.83 L18.55 15.45 L20.00 17.30 L17.30 20.00 L15.45 18.55 L14.83 18.84 L14.19 19.07 L13.91 21.41 L10.09 21.41 L9.81 19.07 L9.17 18.84 L8.55 18.55 L6.70 20.00 L4.00 17.30 L5.45 15.45 L5.16 14.83 L4.93 14.19 L2.59 13.91 L2.59 10.09 L4.93 9.81 L5.16 9.17 L5.45 8.55 L4.00 6.70 L6.70 4.00 L8.55 5.45Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="1.7"/></symbol>
+    <symbol id="i-clearall" viewBox="0 0 24 24"><path d="M5 7h14M7 12h12M9 17h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="12" r="3.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M11.5 12H21M17.5 12v3M20 12v2.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
+    <symbol id="i-unlock" viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8 10.5V8a4 4 0 0 1 7.6-1.7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+    <symbol id="i-paste" viewBox="0 0 24 24"><rect x="6" y="4.5" width="12" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="9" y="3" width="6" height="3.5" rx="1" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
+    <symbol id="i-cpy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M16 8V5.5A1.5 1.5 0 0 0 14.5 4h-9A1.5 1.5 0 0 0 4 5.5v9A1.5 1.5 0 0 0 5.5 16H8" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
+    <symbol id="i-power" viewBox="0 0 24 24"><path d="M12 3.5v8M7 6.3a7.5 7.5 0 1 0 10 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+    <symbol id="i-wifi" viewBox="0 0 24 24"><path d="M2.5 9a14 14 0 0 1 19 0M5.5 12.3a9.5 9.5 0 0 1 13 0M8.6 15.5a5 5 0 0 1 6.8 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="19" r="1.4" fill="currentColor"/></symbol>
+    <symbol id="i-batt" viewBox="0 0 24 24"><rect x="2.5" y="7" width="17" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="5" y="9.5" width="8" height="5" rx=".8" fill="currentColor"/><path d="M21.5 10.5v3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-disc" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="12" r="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
+  </defs>
+</svg>
+
+<template id="status"><div class="status"><span>9:30</span><span class="r"><svg width="20" height="20"><use href="#i-wifi"/></svg><svg width="22" height="22"><use href="#i-batt"/></svg></span></div></template>
+<template id="nav-rf"><div class="nav"><div><svg><use href="#i-down"/></svg>Downloads</div><div><svg><use href="#i-queue"/></svg>Queues</div><div class="on"><svg><use href="#i-cloud"/></svg>Remote Files</div><div><svg><use href="#i-gear"/></svg>Settings</div></div></template>
+<template id="nav-dl"><div class="nav"><div class="on"><svg><use href="#i-down"/></svg>Downloads</div><div><svg><use href="#i-queue"/></svg>Queues</div><div><svg><use href="#i-cloud"/></svg>Remote Files</div><div><svg><use href="#i-gear"/></svg>Settings</div></div></template>
+
+
+<!-- Y1: SFTP form, Sign in with Key, a .ppk key file chosen. -->
+<section class="screen" id="y1">
+  <div data-status></div>
+  <div class="appbar"><div class="ib"><i data-i="back" data-s="24"></i></div><div class="t">SFTP location</div></div>
+  <div class="form">
+    <div class="field"><div class="txt"><div class="l">Location name</div><div class="v">Home NAS</div></div></div>
+    <div class="two"><div class="field" style="flex:2.3"><div class="txt"><div class="l">Server name or address</div><div class="v">nas.local</div></div></div><div class="field"><div class="txt"><div class="l">Port</div><div class="v">22</div></div></div></div>
+    <div class="field"><div class="txt"><div class="l">User name</div><div class="v">media</div></div></div>
+    <div class="lbl" style="margin-top:2px">Sign in with</div>
+    <div class="seg"><div>Password</div><div class="on"><i data-i="check" data-s="18"></i>Key</div></div>
+    <div class="lbl" style="margin-top:0">Private key</div>
+    <div class="keyf"><div class="kg"><i data-i="key" data-s="22"></i></div><div class="txt"><div class="nm">nas-key.ppk</div><div class="sb">PuTTY key · Ed25519</div></div><div class="tbtn">Remove</div></div>
+    <div class="field f"><div class="txt"><div class="l">Key passphrase (if the key has one)</div><div class="v">••••••••••</div></div><i data-i="eye" data-s="24" class="mu"></i></div>
+    <div class="hint">OpenSSH and PuTTY (.ppk) keys both work. The key is stored by this phone's Host.</div>
+    <div class="exp"><div class="txt"><div class="t">More options</div><div class="d">Starting folder</div></div><i data-i="caret" data-s="24" class="mu"></i></div>
+  </div>
+  <div class="foot"><div class="btn out">Cancel</div><div class="btn fill"><i data-i="check" data-s="20"></i>Add location</div></div>
+  <div class="homebar"></div>
+</section>
+
+<!-- Y1b: before a key file is chosen; the button opens Android's file picker. -->
+<section class="screen" id="y1b">
+  <div data-status></div>
+  <div class="appbar"><div class="ib"><i data-i="back" data-s="24"></i></div><div class="t">SFTP location</div></div>
+  <div class="form">
+    <div class="field"><div class="txt"><div class="l">Location name</div><div class="v">Home NAS</div></div></div>
+    <div class="two"><div class="field" style="flex:2.3"><div class="txt"><div class="l">Server name or address</div><div class="v">nas.local</div></div></div><div class="field"><div class="txt"><div class="l">Port</div><div class="v">22</div></div></div></div>
+    <div class="field"><div class="txt"><div class="l">User name</div><div class="v">media</div></div></div>
+    <div class="lbl" style="margin-top:2px">Sign in with</div>
+    <div class="seg"><div>Password</div><div class="on"><i data-i="check" data-s="18"></i>Key</div></div>
+    <div class="lbl" style="margin-top:0">Private key</div>
+    <div class="keyf pick"><div class="txt"><div class="nm" style="color:var(--muted)">No key file chosen</div></div><div class="small"><i data-i="folder" data-s="18"></i>Choose key file</div></div>
+    <div class="field off"><div class="txt"><div class="l">Key passphrase (if the key has one)</div><div class="v ph">&nbsp;</div></div><i data-i="eye" data-s="24" class="mu"></i></div>
+    <div class="hint">OpenSSH and PuTTY (.ppk) keys both work. The key is stored by this phone's Host.</div>
+    <div class="exp"><div class="txt"><div class="t">More options</div><div class="d">Starting folder</div></div><i data-i="caret" data-s="24" class="mu"></i></div>
+  </div>
+  <div class="foot"><div class="btn out">Cancel</div><div class="btn fill"><i data-i="check" data-s="20"></i>Add location</div></div>
+  <div class="homebar"></div>
+</section>
+
+<!-- Y2: wrong passphrase for a .ppk key. -->
+<section class="screen" id="y2">
+  <div data-status></div>
+  <div class="appbar"><div class="ib"><i data-i="back" data-s="24"></i></div><div class="t">SFTP location</div></div>
+  <div class="form">
+    <div class="field"><div class="txt"><div class="l">Location name</div><div class="v">Home NAS</div></div></div>
+    <div class="two"><div class="field" style="flex:2.3"><div class="txt"><div class="l">Server name or address</div><div class="v">nas.local</div></div></div><div class="field"><div class="txt"><div class="l">Port</div><div class="v">22</div></div></div></div>
+    <div class="field"><div class="txt"><div class="l">User name</div><div class="v">media</div></div></div>
+    <div class="lbl" style="margin-top:2px">Sign in with</div>
+    <div class="seg"><div>Password</div><div class="on"><i data-i="check" data-s="18"></i>Key</div></div>
+    <div class="lbl" style="margin-top:0">Private key</div>
+    <div class="keyf"><div class="kg"><i data-i="key" data-s="22"></i></div><div class="txt"><div class="nm">nas-key.ppk</div><div class="sb">PuTTY key · Ed25519</div></div><div class="tbtn">Remove</div></div>
+    <div class="field e"><div class="txt"><div class="l">Key passphrase (if the key has one)</div><div class="v">••••••••</div></div><i data-i="alert" data-s="22" class="danger"></i></div>
+    <div class="err">The passphrase doesn't open this key. Check it and try again.</div>
+    <div class="exp"><div class="txt"><div class="t">More options</div><div class="d">Starting folder</div></div><i data-i="caret" data-s="24" class="mu"></i></div>
+  </div>
+  <div class="foot"><div class="btn out">Cancel</div><div class="btn fill"><i data-i="check" data-s="20"></i>Add location</div></div>
+  <div class="homebar"></div>
+</section>
+
+<!-- Y2b: a public key (.pub) was chosen. -->
+<section class="screen" id="y2b">
+  <div data-status></div>
+  <div class="appbar"><div class="ib"><i data-i="back" data-s="24"></i></div><div class="t">SFTP location</div></div>
+  <div class="form">
+    <div class="field"><div class="txt"><div class="l">Location name</div><div class="v">Home NAS</div></div></div>
+    <div class="two"><div class="field" style="flex:2.3"><div class="txt"><div class="l">Server name or address</div><div class="v">nas.local</div></div></div><div class="field"><div class="txt"><div class="l">Port</div><div class="v">22</div></div></div></div>
+    <div class="field"><div class="txt"><div class="l">User name</div><div class="v">media</div></div></div>
+    <div class="lbl" style="margin-top:2px">Sign in with</div>
+    <div class="seg"><div>Password</div><div class="on"><i data-i="check" data-s="18"></i>Key</div></div>
+    <div class="lbl" style="margin-top:0">Private key</div>
+    <div class="keyf e"><div class="kg"><i data-i="alert" data-s="22"></i></div><div class="txt"><div class="nm">nas-key.pub</div><div class="sb">Public key</div></div><div class="tbtn">Remove</div></div>
+    <div class="err">That is a public key (the .pub file). Choose the private key instead: the file with the same name and no .pub ending.</div>
+    <div class="field"><div class="txt"><div class="l">Key passphrase (if the key has one)</div><div class="v ph">&nbsp;</div></div><i data-i="eye" data-s="24" class="mu"></i></div>
+    <div class="hint">OpenSSH and PuTTY (.ppk) keys both work. The key is stored by this phone's Host.</div>
+    <div class="exp"><div class="txt"><div class="t">More options</div><div class="d">Starting folder</div></div><i data-i="caret" data-s="24" class="mu"></i></div>
+  </div>
+  <div class="foot"><div class="btn out">Cancel</div><div class="btn fill"><i data-i="check" data-s="20"></i>Add location</div></div>
+  <div class="homebar"></div>
+</section>
+
+<!-- Y3: Edit location with key login; saved key and passphrase kept unless replaced. -->
+<section class="screen" id="y3">
+  <div data-status></div>
+  <div class="appbar"><div class="ib"><i data-i="close" data-s="24"></i></div><div class="t">Edit Home NAS</div></div>
+  <div class="form">
+    <div class="field"><div class="txt"><div class="l">Location name</div><div class="v">Home NAS</div></div></div>
+    <div class="two"><div class="field" style="flex:2.3"><div class="txt"><div class="l">Server name or address</div><div class="v">nas.local</div></div></div><div class="field"><div class="txt"><div class="l">Port</div><div class="v">22</div></div></div></div>
+    <div class="field"><div class="txt"><div class="l">User name</div><div class="v">media</div></div></div>
+    <div class="lbl" style="margin-top:2px">Sign in with</div>
+    <div class="seg"><div>Password</div><div class="on"><i data-i="check" data-s="18"></i>Key</div></div>
+    <div class="lbl" style="margin-top:0">Private key</div>
+    <div class="keyf"><div class="kg"><i data-i="key" data-s="22"></i></div><div class="txt"><div class="nm">Key saved</div><div class="sb">Choose a file to replace it</div></div><div class="small"><i data-i="folder" data-s="18"></i>Replace</div></div>
+    <div class="field f"><div class="txt"><div class="l">Key passphrase</div><div class="v ph">Saved; type to replace</div></div><i data-i="eye" data-s="24" class="mu"></i></div>
+    <div class="field"><div class="txt"><div class="l">Starting folder (optional)</div><div class="v">/media</div></div></div>
+    <div class="srow danger" style="padding:0 2px;margin-top:4px"><i data-i="trash" data-s="24"></i><div class="nm">Remove location</div></div>
+  </div>
+  <div class="foot"><div class="btn out">Cancel</div><div class="btn fill"><i data-i="check" data-s="20"></i>Save</div></div>
+  <div class="homebar"></div>
+</section>
+
+<script>
+document.querySelectorAll('[data-tpl]').forEach(el => {
+  const t = document.getElementById(el.dataset.tpl).innerHTML;
+  if (el.className) { el.removeAttribute('data-tpl'); el.innerHTML = t; } else el.outerHTML = t;
+});
+const tpl = document.getElementById('status').innerHTML;
+document.querySelectorAll('[data-status]').forEach(el => el.outerHTML = tpl);
+document.querySelectorAll('i[data-i]').forEach(el => {
+  const s = el.dataset.s || 22;
+  el.outerHTML = `<svg width="${s}" height="${s}" class="${el.className}" style="${el.getAttribute('style') || ''}"><use href="#i-${el.dataset.i}"/></svg>`;
+});
+const show = () => {
+  let id = (location.hash || '#y1').slice(1);
+  const light = id.endsWith('-light');
+  if (light) id = id.slice(0, -6);
+  if (light) document.documentElement.dataset.theme = 'light'; else delete document.documentElement.dataset.theme;
+  document.querySelectorAll('.screen').forEach(s => s.classList.toggle('on', s.id === id));
+};
+addEventListener('hashchange', show); show();
+</script>
+</body>
+</html>
