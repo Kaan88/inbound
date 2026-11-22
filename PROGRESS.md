@@ -17,7 +17,14 @@ most minor ones are fixed, with the idle wake-ups A1, A2, A8 and S6 left from th
 
 Checks: Integration (torrent, archive, web, queue, Sites filters) 449 passed; Engine 214 passed; Server protocol 10
 passed; Mobile 661 passed; `check-apk.py --release` passes on the last signed release APK; Android emulator Debug build succeeded (no new warnings).
-Not done: no device run of the fixes; the fixes go back to the same two Fable agents for approval before the release.
+Fable's check of the fixes: both agents approved every fix and the follow-ups (`6a0d25c3`); the Android agent called it
+"approved for release from the Android side".
+
+Android 0.0.11 staged, not published: signed release APK from a clean Release output, SHA-256
+`034244f63bea3c904caeb751a7ee2925ee78a93b59b8f447ac872ae310a68c41`, versionCode 11, in
+`artifacts/android-app/release-0.0.11/` with the signed manifest and notes. Release verifier and `check-apk.py --release`
+passed. Publishing waits for one start on the S24 with the owner's OK (the owner was asleep and said not to count on
+the phone; no device run of the fixes yet).
 
 Owner, 2026-11-22, on delegation: Opus coordinates, checks every worker diff, owns merges and does risky and important
 changes itself; Haiku mechanical work; Sonnet routine implementation with an outcome, owned files and a check; Fable

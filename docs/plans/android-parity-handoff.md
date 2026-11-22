@@ -1,6 +1,6 @@
 # Android handoff
 
-Updated 2026-11-22. Claude leads the Android work again. Read `CLAUDE.md`, then
+Updated 2026-11-22 (after the Fable review). Claude leads the Android work again. Read `CLAUDE.md`, then
 `GOAL.md`, `ROADMAP.md` and `PROGRESS.md`, then the
 [operating notes](../android-operating-notes.md).
 
@@ -28,14 +28,25 @@ Updated 2026-11-22. Claude leads the Android work again. Read `CLAUDE.md`, then
 
 ## Next work, in order
 
-1. **Fable review** of ANDROID.9 and of the unreviewed range `49f5663c..c745317f`
-   (first entry in the [Fable review queue](android-fable-review-queue.md)). Fix the
-   findings first.
-2. **Release** the next Android version with all three store uploads once Fable
-   approves (run `tools/AndroidApp/check-apk.py` and one device start before it goes out).
-3. **Merge the redesign branch**, then compare r1-r6 on real data and on the owner's phone.
-4. Separate follow-ups: ANDROID.5/.6 real-account capture and deep Doze (ANDROID.14);
+1. **Start the 0.0.11 release on the S24 once, then publish it.** Fable reviewed ANDROID.9 and approved every fix
+   (2026-11-22, [review](android-review-android9.md)). The signed APK is staged, not published:
+   `artifacts/android-app/release-0.0.11/` (APK SHA-256 `034244f63bea3c904caeb751a7ee2925ee78a93b59b8f447ac872ae310a68c41`,
+   versionCode 11, signed manifest and notes from `docs/android-release-notes-0.0.11.txt`; built from a clean Release
+   output). `check-apk.py --release` and the release verifier passed. Still owed before publishing: one start of that
+   APK on the S24 (install in place over 0.0.10, launch, see Downloads) with the owner's OK, since the owner was
+   asleep and said not to count on the phone. Then publish per `docs/android-updates.md`: APK and manifest on
+   `android-v0.0.11`, the same manifest on `android-latest`, `latest=false` on both.
+2. **Merge the redesign branch** after the release, then compare r1-r6 on real data and on the owner's phone.
+3. Open from the reviews: earlier A3 (redirecting fixture first), A4, A5-A7, S4, S5, S7, S8-S10, T1-T8, P6, M4; the
+   F3 note (drop only the direct parent's listing); ANDROID.5/.6 real-account capture and deep Doze (ANDROID.14);
    expanded accessibility is optional (ANDROID.13).
+
+## Ask the owner
+
+- A9-15: on an unmetered 5G plan Android reports the network as not metered, so torrents run there although the
+  subtitle says "Peers never use mobile data". Keep the behaviour and reword the subtitle, or require Wi-Fi?
+- The decisions in [the review](android-review-android9.md#what-was-done) made while the owner was away (A9-6, A9-7,
+  A9-15, A9-18, earlier A4).
 
 ## Remind the owner (after the release)
 

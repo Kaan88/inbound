@@ -12,6 +12,12 @@ not the Opus findings first, so its read is its own), then compare, act on what 
 Each entry: date; what was reviewed (commit, or files if uncommitted); who reviewed; findings and what was done; what
 Fable should look at.
 
+## Done: ANDROID.9 and the speed fixes, 772cd2c0..8d26b536 (2026-11-22)
+
+Two Fable agents reviewed the range and then approved every fix and follow-up (`65264734`, `82c551c3`, `6a0d25c3`):
+[android-review-android9.md](android-review-android9.md). The fixes for the earlier range's S1-S3, M2, M3, P1-P5,
+A1, A2, A8 and S6 were approved in the same pass.
+
 ## Open: Android work from 49f5663c to c745317f (2026-11-21)
 
 **Reviewed 2026-11-21:** four Opus agents and then Fable reviewed this range; findings, verdicts and the fix order are in [android-review-49f5663c-c745317f.md](android-review-49f5663c-c745317f.md). It stays open until the findings are fixed and Fable checks the fixes.
