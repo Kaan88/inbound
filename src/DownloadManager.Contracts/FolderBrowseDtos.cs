@@ -10,8 +10,9 @@ public sealed class FolderBrowseRequest
     public string? Path { get; set; }
 
     /// <summary>
-    /// <see cref="FolderBrowseFiles.Archives"/> also lists the archive files in the folder (an extraction's chooser).
-    /// Null lists folders only, as before. Another value is refused.
+    /// <see cref="FolderBrowseFiles.Archives"/> also lists the archive files in the folder (an extraction's chooser);
+    /// <see cref="FolderBrowseFiles.All"/> lists every file (SITES.14: the web's "Files on the server" pane). Null lists
+    /// folders only, as before. Another value is refused (a Host from before SITES.14 refuses <c>all</c> too).
     /// </summary>
     public string? Files { get; set; }
 }
@@ -21,6 +22,9 @@ public static class FolderBrowseFiles
 {
     /// <summary>Files whose names extraction can start from (a RAR volume, 7z, zip, tar, compressed tar, .001).</summary>
     public const string Archives = "archives";
+
+    /// <summary>SITES.14: every file in the folder that a file dialog would show (hidden ones left out).</summary>
+    public const string All = "all";
 }
 
 public sealed class FolderFileDto
@@ -31,6 +35,9 @@ public sealed class FolderFileDto
     public string Path { get; set; } = string.Empty;
 
     public long Size { get; set; }
+
+    /// <summary>SITES.14: when the file was last written; null when it can't be read (and from a Host before SITES.14).</summary>
+    public DateTimeOffset? Modified { get; set; }
 }
 
 public sealed class FolderEntryDto

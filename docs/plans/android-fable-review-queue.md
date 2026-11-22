@@ -12,6 +12,29 @@ not the Opus findings first, so its read is its own), then compare, act on what 
 Each entry: date; what was reviewed (commit, or files if uncommitted); who reviewed; findings and what was done; what
 Fable should look at.
 
+## Open: merge of main (0.9.0, SITES.13/14) into the Android branch (2026-11-23)
+
+Owner, 2026-11-22: merge main into this branch, then this branch into main. Resolved by Opus, not reviewed. The two
+branches had each built the same two features; review the merge commit's resolution in these places:
+
+- Copy between remotes: main's `between` (SITES.13, `TargetSiteId`/`TargetFolder`) is kept; this branch's `copy`
+  (ANDROID.8 r6, `Destination*`) is gone from the engine. `SiteTransfers.StartAsync` maps an Android 0.1.0 to 0.1.2
+  request (`copy` + `Destination*`) to `between`, and `SiteTransferStore.LoadAll` migrates stored `copy` batches
+  (`Target* ??= Destination*`). The per-file tail of `MoveAsync` builds the copyfile call in one `CopyTo(name)` used for
+  both the safe single download's staging name and the normal name (`fs`/`local` cloned per call). Between records are
+  written with schema 3. The Android client now sends `between`; its titles still say "copy".
+- PuTTY keys: this branch's `PuttyKeyFile` (Argon2, format 3 with passphrase) is kept and main's `PuttyKey` deleted; its
+  generated-key tests now run against `PuttyKeyFile` (`PuttyKeyFileGeneratedKeyTests`). The conversion is
+  `SitesCommands.OpenPuttyKeyAsync`, called by both `sites.save` and main's `sites.testDraft` before `BuildRecord`.
+- `BuildRecord` (main's, shared by save and draft) gained this branch's review S3 rule: a saved password or key is kept
+  only for the same user, sign-in method and WebDAV vendor / S3 provider and region (`sameSignIn`), a key's kept
+  passphrase does not follow a new key, and a passphrase typed for an unencrypted kept key is dropped. Check that main's
+  desktop rule (a key may follow its remote to another server when not `OwnSignInOnly`) still holds with it.
+- `SiteRecord.Revision` (this branch) is set on every `SiteStore.SaveAsync`; main's new SiteRecord fields kept.
+- `ConcurrencyLimits`: this branch's preemption loop with main's `_savingHold`.
+- Hello capabilities: this branch's site capabilities kept beside main's `savingPauses`; `TestDraft`, `Preview`,
+  `SyncPlan`/`SyncRun` and `SafeDownloadStart`/`DeleteFiles`/`DeviceCreateOpen` all in the remote-session lists.
+
 ## Open: fixes released in 0.1.1 without Fable, 41ef14a8..5aa45d0a (2026-11-22)
 
 Owner, 2026-11-22: "no fable, release", then "note needed fable review for later". Fable approved the 0.1.0 code at

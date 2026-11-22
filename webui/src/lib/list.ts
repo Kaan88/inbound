@@ -781,6 +781,18 @@ export function archiveHasOwnRow(set: ArchiveSet, jobs: Record<string, Job>, sna
 
 export const downloadChoices = [1, 2, 3, 4, 5, 6, 8, 10, 12, 16];
 export const connectionChoices = [1, 2, 4, 6, 8, 12, 16, 24, 32];
+export const serverConnectionChoices = [1, 2, 4, 8, 16, 32, 64];
+
+/** CONN.1: the preset per-server numbers plus the current value when it is none of them, ascending. */
+export function serverConnectionOptions(current: number | undefined): number[] {
+  return [...new Set(current === undefined ? serverConnectionChoices : [...serverConnectionChoices, current])].sort((a, b) => a - b);
+}
+
+/** CONN.1: the per-download menu item's text; says so when the per-server limit is the lower of the two. */
+export function connectionsPerDownloadLabel(perDownload: number | undefined, perServer: number | undefined): string {
+  const base = `Connections per Download: ${perDownload ?? ''}`;
+  return perDownload !== undefined && perServer !== undefined && perDownload > perServer ? `${base} (${perServer} per server applies)` : base;
+}
 export const speedChoices = [1, 2, 5, 10, 20, 30, 50, 70, 100, 200, 500];
 export const megabyte = 1024 * 1024;
 

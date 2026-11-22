@@ -135,8 +135,8 @@ public sealed class TrayMenuTests
         Assert.Equal("Inbound Download Manager", TrayText.Tooltip(0, 0));
         Assert.Equal("2 active downloads", TrayText.Status(2, 0));
         Assert.Equal("Inbound — 2 active", TrayText.Tooltip(2, 0));
-        Assert.Equal("1 site transfer", TrayText.Status(0, 1));
-        Assert.Equal("Inbound — 1 active, 3 site transfers", TrayText.Tooltip(1, 3));
+        Assert.Equal("1 remote transfer", TrayText.Status(0, 1));
+        Assert.Equal("Inbound — 1 active, 3 remote transfers", TrayText.Tooltip(1, 3));
         Assert.True(TrayText.Tooltip(999, 999).Length <= 127);
     }
 }

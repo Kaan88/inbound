@@ -106,6 +106,9 @@ workers above the count stop after their current range, or before taking one
 if they were still waiting for a host connection. Every worker still
 queues for the per-host fair limiter, and the checkpoint format is unchanged.
 
+The per-host limit (`MaxConnectionsPerHost`) is shown as "Connections per server, all downloads" in Options, the
+Downloads menu and the web UI (CONN.1); the connection profiles ("Per-site limits") only cap each download from a site.
+
 - Ordinary and site-login downloads follow it unless their count was chosen
   by hand.
 - Provider (TorBox) jobs always follow it when they run segmented (see the

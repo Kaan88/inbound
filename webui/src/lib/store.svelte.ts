@@ -6,6 +6,7 @@ import { notifyEnabled } from './notify';
 import { noticeFor } from './details';
 import { Coalescer, type Item } from './coalesce';
 import { FrameBatcher } from './frameBatch';
+import { finishedNotices } from './sitesTransfers';
 import { becameReadyToChoose, readyToChooseText } from './torrentList';
 import { featuresOf, hostTexts, type Features, type HostTexts } from './hostKind';
 import type { Job, Settings } from './types';
@@ -18,6 +19,8 @@ export interface Toast {
   tone: 'info' | 'error';
   /** A download the toast is about; the toast then offers "Show". */
   jobId?: string;
+  /** A Remote files transfer the toast is about; "Show" opens the Transfers list on that row. */
+  transferId?: string;
 }
 
 function readTheme(): Theme {
@@ -37,7 +40,7 @@ const slowTypes = new Set([
   // Sites (SITES.7): each waits on a server somewhere else, or on rclone starting.
   'sites.setEnabled', 'sites.save', 'sites.probe', 'sites.trust', 'sites.test', 'sites.certificate', 'sites.signIn',
   'sites.browse', 'sites.mkdir', 'sites.rename', 'sites.count', 'sites.delete', 'sites.rclone.install', 'sites.rclone.check',
-  'sites.transfer.start',
+  'sites.transfer.start', 'sites.testDraft', 'sites.openOnce', 'sites.close', 'sites.keep', 'sites.here',
 ]);
 
 export class Store {
@@ -53,6 +56,8 @@ export class Store {
   revealId = $state<string | null>(null);
   /** A download the list screen should open (from a toast's Show). */
   showJob = $state<string | null>(null);
+  /** A Remote files transfer the Transfers list should open on (from a toast's Show). */
+  showTransfer = $state<string | null>(null);
   /** Counts every saved or cleared provider key, so screens drop what they read with the old key. */
   keyEpoch = $state(0);
   /** The Settings page to open next (a provider's account page, from My provider). */
@@ -126,7 +131,11 @@ export class Store {
     const event = message.type === 'job.event' ? (message.payload as { job?: Job; eventType?: string } | undefined) : undefined;
     const earlier = event?.job?.id ? this.model.jobs[event.job.id] : undefined;
     const before = earlier?.state;
+    const transfersBefore = message.type === 'sites.transfer.changed' ? this.model.siteTransfers : null;
     apply(this.model, message);
+    if (transfersBefore) {
+      for (const notice of finishedNotices(transfersBefore, this.model.siteTransfers)) this.toast(notice.text, 'info', undefined, notice.id);
+    }
     if (event?.job && event.eventType !== 'removed') {
       this.announce(before, event.job);
       // WEB-T12: a torrent whose file list came in and that waits for the choice of files, said once.
@@ -271,9 +280,9 @@ export class Store {
     return featuresOf(this.model.hello?.capabilities);
   }
 
-  toast(text: string, tone: Toast['tone'] = 'info', jobId?: string): void {
+  toast(text: string, tone: Toast['tone'] = 'info', jobId?: string, transferId?: string): void {
     const id = ++this.toastId;
-    this.toasts.push({ id, text, tone, jobId });
+    this.toasts.push({ id, text, tone, jobId, transferId });
     setTimeout(() => this.dismiss(id), tone === 'error' ? 8000 : 4000);
   }
 

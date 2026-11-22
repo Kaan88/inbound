@@ -108,9 +108,17 @@ Firefox is required (owner decision 2026-11-06, ROADMAP EXT.E1). The same source
   `background.scripts` instead of a service worker, and no `key` or `minimum_chrome_version`.
   `scripts\package-extension-firefox.ps1` checks it and zips it for addons.mozilla.org (AMO) into
   `artifacts\firefox-addon`. Release Firefox runs only signed add-ons.
-- **Self-distributed (EXT.S4, owner 2026-11-08).** The add-on stays unlisted on AMO, which signs it but gives it
-  no public page and no updates. `scripts\sign-extension-firefox.ps1 -ReleaseTag v<app version>` builds the
-  package, has AMO sign it as an unlisted version (`web-ext sign --channel unlisted`, with the owner's AMO API
+- **Listed on AMO (EXT.S5, owner 2026-11-17).** All three extensions are public and share one version (0.7.0 from
+  this release). The Firefox store build has no `update_url`: Firefox updates it from addons.mozilla.org
+  (https://addons.mozilla.org/firefox/addon/inbound-download-manager/, `BrowserBridge.FirefoxAddonsUrl`).
+  `scripts\sign-extension-firefox.ps1 -ReleaseTag v<app version>` (default `-Channel listed`) writes the source zip
+  AMO asks for (it rebuilds the XPI's files byte for byte; `-VerifySource` proves it) and submits the version;
+  after approval the signed file from the Developer Hub goes in with `-SignedXpi`. The older unlisted installs
+  (0.5.3 to 0.6.4) have the `update_url` below, which moves them once to the listed XPI, after which AMO updates
+  them. The rest of this item describes that self-distributed flow, still available as `-Channel unlisted`.
+- **Self-distributed (EXT.S4, owner 2026-11-08).** The add-on was unlisted on AMO, which signs it but gives it
+  no public page and no updates. `scripts\sign-extension-firefox.ps1 -Channel unlisted -ReleaseTag v<app version>`
+  builds the package (`-Unlisted`, with the `update_url`), has AMO sign it as an unlisted version (`web-ext sign --channel unlisted`, with the owner's AMO API
   key pair from a file outside the repository, passed to web-ext only through its environment), or takes an XPI
   signed by hand with `-SignedXpi`. It checks that the XPI carries AMO's signature and exactly the files built,
   writes `artifacts\firefox-addon\inbound-bridge-<version>-firefox.xpi`, and writes

@@ -14,6 +14,8 @@ public sealed partial class MainWindow
     private static readonly int[] DownloadChoices = [1, 2, 3, 4, 5, 6, 8, 10, 12, 16];
     private static readonly int[] ConnectionChoices = [1, 2, 4, 6, 8, 12, 16, 24, 32];
     private static readonly int[] SpeedChoices = [1, 2, 5, 10, 20, 30, 50, 70, 100, 200, 500];
+    private static readonly int[] ServerConnectionChoices = [1, 2, 4, 8, 16, 32, 64];
+    private int _serverChoicesFor;
     private bool _savingLimit;
     private RadioMenuFlyoutItem? _otherSpeed;
 
@@ -53,7 +55,18 @@ public sealed partial class MainWindow
         var speed = settings.GlobalSpeedLimitBytesPerSecond is > 0 ? settings.GlobalSpeedLimitBytesPerSecond.Value : 0;
         // The current value sits in each submenu's name, so it shows without opening it.
         DownloadsLimitMenu.Text = $"Simultaneous Downloads: {settings.MaxConcurrentDownloads}";
-        ConnectionsLimitMenu.Text = $"Connections per Download: {settings.DefaultConnections}";
+        ConnectionsLimitMenu.Text = ShellWords.ConnectionsPerDownloadMenu(settings.DefaultConnections, settings.MaxConnectionsPerHost);
+        ServerConnectionsLimitMenu.Text = $"Connections per server: {settings.MaxConnectionsPerHost}";
+        // The choices are the presets plus the current value when it is none of them.
+        if (_serverChoicesFor != settings.MaxConnectionsPerHost || ServerConnectionsLimitMenu.Items.Count == 0)
+        {
+            _serverChoicesFor = settings.MaxConnectionsPerHost;
+            ServerConnectionsLimitMenu.Items.Clear();
+            foreach (var value in ServerConnectionChoices.Append(settings.MaxConnectionsPerHost).Distinct().Order())
+                ServerConnectionsLimitMenu.Items.Add(LimitItem(value == 1 ? "1 connection" : $"{value} connections", "ServerConnections", value,
+                    updated => updated.MaxConnectionsPerHost = value));
+        }
+        Tick(ServerConnectionsLimitMenu, settings.MaxConnectionsPerHost);
         SpeedLimitMenu.Text = speed == 0 ? "Speed Limit: None" : $"Speed Limit: {SpeedText(speed)}";
         Tick(DownloadsLimitMenu, settings.MaxConcurrentDownloads);
         Tick(ConnectionsLimitMenu, settings.DefaultConnections);

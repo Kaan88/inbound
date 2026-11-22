@@ -155,7 +155,7 @@ internal static class SiteDeviceStreams
         {
             // Refused before Sites (not available, or this session may not).
             if (context is not null)
-                await FailAsync(context, StatusCodes.Status403Forbidden, reply.GetPayload<HostActionResult>().Message ?? "Sites can't be used from here.", null).ConfigureAwait(false);
+                await FailAsync(context, StatusCodes.Status403Forbidden, reply.GetPayload<HostActionResult>().Message ?? "Remote files can't be used from here.", null).ConfigureAwait(false);
             return null;
         }
 

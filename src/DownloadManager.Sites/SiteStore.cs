@@ -111,6 +111,43 @@ public sealed record SiteRecord
     public DateTimeOffset ModifiedAt { get; init; }
     /// <summary>Opaque content revision assigned on every write, independent of wall-clock precision.</summary>
     public Guid Revision { get; init; }
+
+    /// <summary>
+    /// SITES.11: when the user last browsed it or started a transfer on it, as last written (at most every ten minutes;
+    /// the Host keeps the newer value in memory). Null when never.
+    /// </summary>
+    public DateTimeOffset? LastUsedAt { get; init; }
+
+    /// <summary>SITES.13: the folder last shown (<c>sites.remember</c>), absolute; null when none.</summary>
+    public string? LastFolder { get; init; }
+
+    /// <summary>SITES.13: the sort column (<c>SiteSortKeys</c>), or null for the default.</summary>
+    public string? Sort { get; init; }
+
+    public bool SortDescending { get; init; }
+
+    /// <summary>SITES.13: download and upload speed limits in KB/s (1024 bytes); 0 for none.</summary>
+    public int DownLimit { get; init; }
+
+    public int UpLimit { get; init; }
+
+    /// <summary>SITES.13: the sync each schedule with "Remote files transfers" runs at its start, or null.</summary>
+    public SiteSyncRecord? ScheduledSync { get; init; }
+
+    /// <summary>
+    /// SITES.11, "Open an address once": held in the Host's memory only (<see cref="SiteStore"/>), never written to a file
+    /// until the user keeps it. Never part of a site file.
+    /// </summary>
+    [JsonIgnore]
+    public bool Unsaved { get; init; }
+}
+
+/// <summary>SITES.13: a saved one-way sync: <c>download</c> or <c>upload</c> between a server folder and a folder here.</summary>
+public sealed record SiteSyncRecord
+{
+    public required string Direction { get; init; }
+    public required string RemoteFolder { get; init; }
+    public required string LocalFolder { get; init; }
 }
 
 /// <summary>SITES.6b: one server certificate a site trusts. Public data: the certificate and its SHA-256 fingerprint.</summary>
@@ -172,6 +209,12 @@ public sealed class SiteStore
     private readonly Action<string>? _log;
     private readonly SemaphoreSlim _gate = new(1, 1);
 
+    // SITES.11: the unsaved sites, by id. Changed under _gate and this lock; read under this lock.
+    private readonly Dictionary<string, SiteRecord> _unsaved = new(StringComparer.Ordinal);
+
+    /// <summary>The most unsaved sites open at once.</summary>
+    public const int MaxUnsaved = 8;
+
     public SiteStore(string stateDirectory, Action<string>? log = null)
     {
         _folder = Path.Combine(stateDirectory, "sites");
@@ -180,10 +223,17 @@ public sealed class SiteStore
 
     public string Folder => _folder;
 
-    public async Task<IReadOnlyList<SiteRecord>> ListAsync(CancellationToken cancellationToken = default)
+    /// <param name="includeUnsaved">SITES.11: the unsaved sites too (marked <see cref="SiteRecord.Unsaved"/>).</param>
+    public async Task<IReadOnlyList<SiteRecord>> ListAsync(CancellationToken cancellationToken = default, bool includeUnsaved = false)
     {
-        if (!Directory.Exists(_folder)) return [];
         var sites = new List<SiteRecord>();
+        List<SiteRecord> open = [];
+        if (includeUnsaved)
+        {
+            lock (_unsaved) open.AddRange(_unsaved.Values);
+        }
+
+        if (!Directory.Exists(_folder)) return Sorted(open);
         foreach (var file in Directory.EnumerateFiles(_folder, "*.json"))
         {
             // Only files named by a site id: the folder also holds Sites' own config.json.
@@ -192,23 +242,51 @@ public sealed class SiteStore
             if (site is not null) sites.Add(site);
         }
 
-        return [.. sites.OrderBy(s => s.Name, StringComparer.CurrentCultureIgnoreCase).ThenBy(s => s.Id, StringComparer.Ordinal)];
+        // One being kept may be in both places for a moment (KeepAsync writes the file first): the file wins.
+        sites.AddRange(open.Where(o => !sites.Any(s => s.Id == o.Id)));
+        return Sorted(sites);
     }
+
+    private static List<SiteRecord> Sorted(List<SiteRecord> sites) =>
+        [.. sites.OrderBy(s => s.Name, StringComparer.CurrentCultureIgnoreCase).ThenBy(s => s.Id, StringComparer.Ordinal)];
 
     public async Task<SiteRecord?> GetAsync(string id, CancellationToken cancellationToken = default)
     {
         var path = PathFor(id);
+        lock (_unsaved)
+        {
+            if (_unsaved.TryGetValue(id, out var open)) return open;
+        }
+
         return File.Exists(path) ? await ReadAsync(path, cancellationToken).ConfigureAwait(false) : null;
     }
 
+    /// <summary>
+    /// Writes a saved site. SITES.11: a site whose id is held unsaved changes only its memory copy and stays unsaved (only
+    /// <see cref="KeepAsync"/> writes it); a record marked unsaved whose id is no longer open is refused, so a closed
+    /// address never comes back as a file.
+    /// </summary>
     public async Task SaveAsync(SiteRecord site, CancellationToken cancellationToken = default)
     {
         Validate(site);
-        var bytes = JsonSerializer.SerializeToUtf8Bytes(site with { Revision = Guid.NewGuid() }, SitesJsonContext.Default.SiteRecord);
+        // Opaque content revision on every write (memory copies of unsaved addresses too), so cached listings know it changed.
+        site = site with { Revision = Guid.NewGuid() };
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            await AtomicFile.WriteBytesAsync(PathFor(site.Id), bytes, cancellationToken).ConfigureAwait(false);
+            lock (_unsaved)
+            {
+                if (_unsaved.ContainsKey(site.Id))
+                {
+                    _unsaved[site.Id] = site with { Unsaved = true };
+                    return;
+                }
+            }
+
+            if (site.Unsaved) throw new SiteStoreException("That address is no longer open.");
+            var path = PathFor(site.Id);
+            var bytes = JsonSerializer.SerializeToUtf8Bytes(site, SitesJsonContext.Default.SiteRecord);
+            await AtomicFile.WriteBytesAsync(path, bytes, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -223,9 +301,74 @@ public sealed class SiteStore
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            lock (_unsaved)
+            {
+                if (_unsaved.Remove(id)) return true;
+            }
+
             if (!File.Exists(path)) return false;
             File.Delete(path);
             return true;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    /// <summary>SITES.11: an unsaved site is open under that id.</summary>
+    public bool IsUnsaved(string id)
+    {
+        lock (_unsaved) return _unsaved.ContainsKey(id);
+    }
+
+    /// <summary>SITES.11: holds a new unsaved site in memory (a new id). Refused past <see cref="MaxUnsaved"/>.</summary>
+    public async Task AddUnsavedAsync(SiteRecord site, CancellationToken cancellationToken = default)
+    {
+        site = site with { Unsaved = true };
+        Validate(site);
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (File.Exists(PathFor(site.Id))) throw new SiteStoreException("That id is taken.");
+            lock (_unsaved)
+            {
+                if (_unsaved.ContainsKey(site.Id)) throw new SiteStoreException("That id is taken.");
+                if (_unsaved.Count >= MaxUnsaved) throw new SiteStoreException($"At most {MaxUnsaved} addresses can be open at once; close one first.");
+                _unsaved[site.Id] = site;
+            }
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    /// <summary>
+    /// SITES.11, "Remember": writes an unsaved site as a saved one (named <paramref name="name"/> when given) and drops the
+    /// memory copy. The saved record, or null when no unsaved site has that id.
+    /// </summary>
+    public async Task<SiteRecord?> KeepAsync(string id, string? name, DateTimeOffset now, CancellationToken cancellationToken = default)
+    {
+        var path = PathFor(id);
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            SiteRecord? open;
+            lock (_unsaved) _unsaved.TryGetValue(id, out open);
+            if (open is null) return null;
+            var kept = open with
+            {
+                Unsaved = false,
+                Name = string.IsNullOrWhiteSpace(name) ? open.Name : name.Trim(),
+                ModifiedAt = now,
+            };
+            Validate(kept);
+            // Written before the memory copy goes, so the site is never in neither place.
+            var bytes = JsonSerializer.SerializeToUtf8Bytes(kept, SitesJsonContext.Default.SiteRecord);
+            await AtomicFile.WriteBytesAsync(path, bytes, cancellationToken).ConfigureAwait(false);
+            lock (_unsaved) _unsaved.Remove(id);
+            return kept;
         }
         finally
         {
@@ -239,30 +382,42 @@ public sealed class SiteStore
     private string PathFor(string id)
     {
         // The id names a file: only our own form, so no client can reach outside the folder with "../" or a drive.
-        if (!IsId(id)) throw new SiteStoreException("That is not a site id.");
+        if (!IsId(id)) throw new SiteStoreException("That is not a remote id.");
         return Path.Combine(_folder, id + ".json");
     }
+
+    /// <summary>SITES.13: the highest speed limit in KB/s (about 10 GB/s).</summary>
+    public const int MaxLimit = 10_000_000;
 
     public static bool IsId(string id) => id.Length == 32 && id.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f');
 
     private static void Validate(SiteRecord site)
     {
-        if (site.SchemaVersion != SiteRecord.CurrentSchemaVersion) throw new SiteStoreException("A site of another version can't be saved.");
-        if (DownloadManager.Contracts.SiteKindCatalog.Find(site.Kind) is null) throw new SiteStoreException($"Sites of kind \"{site.Kind}\" are not supported.");
-        if (string.IsNullOrWhiteSpace(site.Name)) throw new SiteStoreException("A site needs a name.");
+        if (site.SchemaVersion != SiteRecord.CurrentSchemaVersion) throw new SiteStoreException("A remote of another version can't be saved.");
+        if (DownloadManager.Contracts.SiteKindCatalog.Find(site.Kind) is null) throw new SiteStoreException($"Remotes of kind \"{site.Kind}\" are not supported.");
+        if (string.IsNullOrWhiteSpace(site.Name)) throw new SiteStoreException("A remote needs a name.");
         if (string.IsNullOrWhiteSpace(site.Host) || site.Host.Any(c => char.IsWhiteSpace(c) || c is '/' or '@' or '?' or '#'))
-            throw new SiteStoreException("A site needs a server name or address, without a path, user or password in it.");
+            throw new SiteStoreException("A remote needs a server name or address, without a path, user or password in it.");
         if (site.Port is < 1 or > 65535) throw new SiteStoreException("The port must be between 1 and 65535.");
         ValidateKind(site);
         foreach (var sealedValue in new[] { site.SealedPassword, site.SealedPrivateKey, site.SealedKeyPassphrase, site.SealedClientSecret, site.SealedSignIn })
             if (sealedValue is not null && !SecretProtector.IsProtected(sealedValue))
-                throw new SiteStoreException("A site secret must be sealed before it is saved.");
+                throw new SiteStoreException("A remote secret must be sealed before it is saved.");
         foreach (var entry in site.HostKeys)
             if (!IsHostKeyEntry(entry)) throw new SiteStoreException("A host key must be \"type base64\", with the key's own type.");
         ValidateCertificates(site);
-        if (site.Stars.Count > SitePaths.MaxStars) throw new SiteStoreException($"A site can have at most {SitePaths.MaxStars} starred folders.");
+        if (site.Stars.Count > SitePaths.MaxStars) throw new SiteStoreException($"A remote can have at most {SitePaths.MaxStars} starred folders.");
         foreach (var star in site.Stars)
             if (!SitePaths.IsStarrable(star)) throw new SiteStoreException("A starred folder must be an absolute path on the server.");
+        if (site.LastFolder is not null && SitePaths.Normalize(site.LastFolder) != site.LastFolder)
+            throw new SiteStoreException("The last folder must be an absolute path on the server.");
+        if (site.ScheduledSync is { } sync && (sync.Direction is not (SiteTransferDirections.Download or SiteTransferDirections.Upload)
+                || SitePaths.Normalize(sync.RemoteFolder) != sync.RemoteFolder || !Path.IsPathFullyQualified(sync.LocalFolder)))
+            throw new SiteStoreException("A scheduled sync needs download or upload, a folder on the server and a full folder path here.");
+        if (site.Sort is not null && !DownloadManager.Contracts.SiteSortKeys.IsKnown(site.Sort))
+            throw new SiteStoreException("That sort order is not known.");
+        if (site.DownLimit is < 0 or > MaxLimit || site.UpLimit is < 0 or > MaxLimit)
+            throw new SiteStoreException($"A speed limit must be between 0 (none) and {MaxLimit:N0} KB/s.");
         if (site.RemoteFolder.Length > 0 && SitePaths.Normalize(site.RemoteFolder) is null)
             throw new SiteStoreException("The folder on the server must be a path such as /home/me/files, without . or .. in it.");
     }
@@ -273,9 +428,9 @@ public sealed class SiteStore
         if (site.TrustedCertificates.Count == 0) return;
         if (site.Kind == SiteKinds.Sftp || !DownloadManager.Contracts.SiteKindCatalog.Encrypted(site.Kind, site.Tls, site.Url, site.Endpoint)
             || (site.Kind == SiteKinds.S3 && string.IsNullOrEmpty(site.Endpoint)))
-            throw new SiteStoreException("Only an encrypted FTP or https site can trust a server certificate.");
+            throw new SiteStoreException("Only an encrypted FTP or https remote can trust a server certificate.");
         if (site.TrustedCertificates.Count > SiteCertificateRecord.MaxPerSite)
-            throw new SiteStoreException($"A site can trust at most {SiteCertificateRecord.MaxPerSite} certificates.");
+            throw new SiteStoreException($"A remote can trust at most {SiteCertificateRecord.MaxPerSite} certificates.");
         foreach (var certificate in site.TrustedCertificates)
         {
             if (!certificate.Matches()) throw new SiteStoreException("A trusted certificate must be a certificate with its own fingerprint.");
@@ -287,7 +442,7 @@ public sealed class SiteStore
     {
         static void Unused(params string?[] values)
         {
-            if (values.Any(value => value is not null)) throw new SiteStoreException("A site has a setting its kind does not use.");
+            if (values.Any(value => value is not null)) throw new SiteStoreException("A remote has a setting its kind does not use.");
         }
 
         switch (site.Kind)
@@ -321,7 +476,7 @@ public sealed class SiteStore
                 break;
             case SiteKinds.Drive or SiteKinds.OneDrive or SiteKinds.Dropbox:
                 Unused(site.Tls, site.Url, site.Vendor, site.Provider, site.Endpoint, site.Region, site.SealedPassword);
-                if (site.AuthMethod != SiteAuthMethods.SignIn) throw new SiteStoreException("This kind of site signs in through the browser.");
+                if (site.AuthMethod != SiteAuthMethods.SignIn) throw new SiteStoreException("This kind of remote signs in through the browser.");
                 if (site.ClientId is { } clientId && (clientId.Length is 0 or > 256 || !clientId.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '-' or '_')))
                     throw new SiteStoreException("A client ID is letters, digits, dots, dashes and underscores.");
                 if (site.ClientId is null && site.SealedClientSecret is not null) throw new SiteStoreException("A client secret needs its client ID.");
@@ -332,12 +487,12 @@ public sealed class SiteStore
         }
 
         if (!DownloadManager.Contracts.SiteKindCatalog.SignsIn(site.Kind) && (site.ClientId is not null || site.SealedClientSecret is not null || site.SealedSignIn is not null))
-            throw new SiteStoreException("Only a site that signs in through the browser has an app registration or a token.");
+            throw new SiteStoreException("Only a remote that signs in through the browser has an app registration or a token.");
         if (site.Kind != SiteKinds.Sftp && !DownloadManager.Contracts.SiteKindCatalog.SignsIn(site.Kind)
             && (site.AuthMethod != SiteAuthMethods.Password || site.SealedPrivateKey is not null || site.HostKeys.Count > 0))
-            throw new SiteStoreException("Only SFTP sites sign in with a key.");
+            throw new SiteStoreException("Only SFTP remotes sign in with a key.");
         if (DownloadManager.Contracts.SiteKindCatalog.SignsIn(site.Kind) && (site.SealedPrivateKey is not null || site.HostKeys.Count > 0))
-            throw new SiteStoreException("Only SFTP sites sign in with a key.");
+            throw new SiteStoreException("Only SFTP remotes sign in with a key.");
     }
 
     /// <summary>"type base64", where the blob is an SSH public key whose own type (its first string) is that type.</summary>

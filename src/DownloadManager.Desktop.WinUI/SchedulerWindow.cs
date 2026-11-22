@@ -46,7 +46,7 @@ public sealed class SchedulerWindow : Window
     // SITES.4: site transfers are in no queue, so a schedule holds them only when this is ticked.
     private readonly CheckBox _siteTransfers = new()
     {
-        Content = "Also pause site transfers at the stop time, and resume them at the start time",
+        Content = "Also pause remote transfers at the stop time, and resume them at the start time",
     };
     private readonly CheckBox _allowSystemActions = new() { Content = "Allow computer actions (shut down, restart, log off) when downloads finish" };
     private readonly TextBlock _scheduleHint = InboundUi.Secondary();
@@ -392,7 +392,7 @@ public sealed class SchedulerWindow : Window
         timing.Children.Add(_days); Grid.SetRow(_days, 1); Grid.SetColumnSpan(_days, 2);
         timing.Children.Add(_oneTimeDate); Grid.SetRow(_oneTimeDate, 2);
         panel.Children.Add(timing);
-        ToolTipService.SetToolTip(_siteTransfers, "Site transfers paused by a schedule go on at its next start; ones you paused stay paused.");
+        ToolTipService.SetToolTip(_siteTransfers, "Remote transfers paused by a schedule go on at its next start; ones you paused stay paused.");
         panel.Children.Add(_siteTransfers);
         var completion = new StackPanel { Spacing = 8 };
         completion.Children.Add(_openWhenDone); completion.Children.Add(_exitWhenDone);

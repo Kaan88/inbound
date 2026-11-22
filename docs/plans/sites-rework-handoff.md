@@ -1,0 +1,98 @@
+# Handoff: Sites UI rework (SITES.11) and where everything else stands
+
+Written 2026-11-16, last updated the same day after the pull request work, for the session that picks this up. Read `CLAUDE.md` first, then this, then
+`docs/plans/sites-rework.md` (the plan) and open `docs/plans/sites-mockups/4-agreed-design.html` in a browser.
+
+## Where things stand
+
+- **Sites UI rework: R0 done (2026-11-16), R1 next.** The owner accepted the plan and all nine decisions, then said
+  "start". R0's pairs are in `docs/plans/sites-mockups/compare/` (README there), and the gap tables are corrected in
+  the plan's "R0 check by screenshot". No product code has changed. The owner looks at the pairs before R1 starts.
+- **How to look at the app without disturbing the owner:** run the test window on a hidden desktop
+  (`scripts/run-on-hidden-desktop.ps1`, `scripts/ui-drive-hidden.sh`); never send real mouse or key input. Have the
+  same Fable reviewer check every major change or decision.
+- **main** is pushed and the local checkout equals origin. The last code merges are #18 (`ca1dc79`) and #13
+  (`72954f6`); later commits are records only.
+- **The macOS build is on the v0.8.0 release:** `.dmg`, `.zip`, signed `manifest-macos-<arch>.json` and
+  `SHA256SUMS-macos-<arch>` for arm64 and x64, and the Mac lines in the release notes.
+- **Merged branches deleted on GitHub** (owner: "Yes, delete them"): `macos-0.8.0`, `deps-upkeep`,
+  `extension-open-files`.
+- **Pull requests left open on purpose:** #14 and #16 (TypeScript 7), blocked as ROADMAP CI.6 says. Nothing else is
+  open.
+- **CI on main at `72954f6`:** macOS packages passed; the CI workflow was still running when this was written, so
+  look at it once. GitHub's Windows job is unreliable (ROADMAP CI.5; owner: "windows is windows. deal with ci
+  later"), so a local `scripts	est.ps1` pass decides. The full local Windows suite has not been run on main since
+  #13 and #18 went in; R0 is a good moment to run it.
+
+## What the owner said about Sites (2026-11-16)
+
+"current implementation is TERRIBLE ... a tacked on feature that is borderline unusable"; "backend seems sound and it
+seems to work but ui is not finished"; "I agreed on mockups for the design USE THEM"; "it's also clear you never
+checked them".
+
+Reported faults:
+
+- Web UI: a download goes to the browser, where the extension catches it, instead of to the server.
+- Web UI: Google Drive files are not listed.
+- Desktop: no context menu over files; a double click on a file does nothing.
+- Desktop: the transfers list is unlike the rest of the app, nothing can be done with a downloaded file, and the
+  Files button is of no use.
+- Desktop: the Sites page "leaves a lot to be desired".
+
+## The nine decisions, all answered yes by the owner
+
+1. **Double click on a file** downloads it at once, to the site's linked folder or by category rules, with no
+   dialog. "Open" (download to a temporary folder and open) is in the context menu.
+2. **Download has no dialog.** Button, Enter, double click and the arrow start at once; the conflict question shows
+   only when a file exists. "Download to…" in the context menu asks for a folder.
+3. **Context menus.** Server pane: Download, Download to…, Open | Rename, Delete on server…, New folder | Copy
+   address, Star this folder. This PC pane: Upload, Open, Show in Explorer, Rename, Delete (Recycle Bin), New folder.
+   Empty space: New folder, Upload…, Refresh, Paste address. What a site cannot do is hidden.
+4. **A finished transfer.** Double click opens the file or folder. Menu: Open, Open folder, Show on the site, Retry
+   (failed), Remove from list. For an upload, Open and Open folder act on the local source.
+5. **No "Rights" column.** rclone's listing does not report permissions.
+6. **Per-file progress** (bar and rate on each running file of an opened batch) is built, in R1.
+7. **"Open an address once"** on All sites is built as drawn, in R4.
+8. **Linux Uno window** gets the rework because it shares the files; built, not walked (Linux is deferred).
+9. **One release at the end**, with a test build for the owner after each stage.
+
+## How to work, so the first build's miss is not repeated
+
+- The mockup file is the spec. Build each screen from it, not from a summary.
+- Before a screen counts as done: a screenshot of the mockup screen and one of the built screen, same window size,
+  saved as `docs/plans/sites-mockups/compare/<screen>-mockup.png` and `<screen>-built.png`. The owner sees each
+  stage's pairs before the next stage starts. Dark mode; light mode at the end.
+- Look at the running app by sight at the end of each stage; UI Automation walks alone are not enough.
+- Transfer rows reuse the main list's row template, columns, colours and progress bar. No new look.
+- Every pointer action has a key. Anything the mockup leaves open is asked, not guessed.
+- Sonnet subagents build the routine parts; review what they return against the mockup before accepting it. Keep the
+  IPC additions (R1) in the main model.
+- The Host code stays as it is outside R1. The existing end-to-end tests run at every stage.
+
+## Stages (details in the plan)
+
+R0 baseline screenshots of all 19 mockup screens and the built ones (no product code); R1 Host additions (per-file
+progress, time left, last used, an unsaved site); R2 desktop browse view; R3 desktop transfers; R4 All sites, Add a
+site tiles, sidebar; R5 dialogs and a full desktop pass; R6 web UI (the two bugs first, then the screens, then
+phone); R7 owner's walk, light mode, docs, release.
+
+## Known before starting
+
+- **Web download bug:** cause found in the code, not reproduced. The only download control on a file row is a browser
+  link to this device (`webui/src/screens/sites/SiteBrowser.svelte:342`); "Download to <server>" appears only after
+  a row is ticked (`:275`). The fix is the mockup's dialog, server first.
+- **Drive not listing in the web UI:** cause not found. Same `sites.browse` request as the window. Suspect: rows
+  keyed by file name (`SiteBrowser.svelte:325`) while Drive allows two items of one name. Reproduce first with the
+  owner's Drive site in a test instance; read the browser console and the `/api/ipc` answer.
+- **Desktop:** `SitesPanel.xaml` has no context menu; `ItemsList_DoubleTapped` only opens folders;
+  `SiteTransfersBar.xaml` rows are cards with up to six buttons; Download always asks for a folder
+  (`MainWindow.SiteTransfers.cs`, `SitesDownloadButton_Click`); sites are added in Options > Sites through one form
+  with a Kind drop-down (`SiteDialog.cs`); there is no All sites page and no Site menu.
+- The gap tables in the plan come from reading the code. R0's screenshots confirm or correct them.
+
+## Also recorded today
+
+- Firefox: the listed add-on, version 0.6.5, was approved at addons.mozilla.org (ROADMAP EXT.S5, PROGRESS AS).
+- Pull requests merged: #9 `4633baf`, #11 `1ceaebe`, #10 `3c6a760`, #5 `ef82afb`, #7 `cf75467`, #8 `2ba7b6c`, #17
+  `b6d52ce`, #15 `1de6d90`, #18 `ca1dc79`, #13 `72954f6`. Closed, not merged: #6 and #12 (Ubuntu 22.10), #19 (a copy
+  of #18). PROGRESS AT and AV.

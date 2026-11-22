@@ -86,6 +86,8 @@ public sealed partial class TestServerHost : IAsyncDisposable
 
     public int ThrottledRequests(string name) => _requestCounts.GetValueOrDefault($"throttled-{name}");
 
+    public int OddRangeRequests(string name) => _requestCounts.GetValueOrDefault($"odd-{name}");
+
     /// <summary>Range headers the expiring endpoint served, oldest first, since its stats were reset.</summary>
     public IReadOnlyList<string> ExpiringRanges() => _expiringRanges.ToArray();
 
@@ -498,6 +500,28 @@ public sealed partial class TestServerHost : IAsyncDisposable
             context.Response.ContentLength = end - start + 1;
             await context.Response.Body.WriteAsync(content.AsMemory((int)start, (int)(end - start + 1)), context.RequestAborted)
                 .ConfigureAwait(false);
+        });
+
+        // Range answers a split can trip over (CONN.2), counted by name. mode=ignore: says Accept-Ranges: bytes but
+        // answers every request 200. mode=once: serves the first request, then 403s, like a one-time link; mode=busy
+        // the same with 503s.
+        // mode=closed: serves bytes=0-0 and open ranges, but answers any other closed range (a segment) 200.
+        _app.MapGet("/oddrange/{name}", async (HttpContext context, string name) =>
+        {
+            var count = _requestCounts.AddOrUpdate($"odd-{name}", 1, (_, existing) => existing + 1);
+            var mode = context.Request.Query["mode"].ToString();
+            if (mode is "once" or "busy" && count > 1)
+            {
+                context.Response.StatusCode = mode == "once" ? 403 : 503;
+                await context.Response.WriteAsync(mode == "once" ? "link used" : "busy").ConfigureAwait(false);
+                return;
+            }
+
+            var range = context.Request.Headers.Range.ToString();
+            var closedSegment = range.StartsWith("bytes=", StringComparison.Ordinal) && !range.EndsWith('-') && range != "bytes=0-0";
+            await ServeAsync(context, ContentFor(name, QueryInt(context, "size", 4 * 1024 * 1024), QueryInt(context, "seed", 1)), name,
+                allowRanges: true, throttleBytesPerSecond: QueryInt(context, "bps", 0), unknownLength: false,
+                forceFullForRange: mode == "ignore" || (mode == "closed" && closedSegment)).ConfigureAwait(false);
         });
 
         _app.MapGet("/flaky-range/{name}", async (HttpContext context, string name) =>

@@ -2,131 +2,119 @@
 <UserControl
     x:Class="DownloadManager.Desktop.WinUI.SitesPanel"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-    <!-- SITES.3: the read-only browse view of one saved site, shown in place of the download list. -->
-    <Grid Background="{ThemeResource InboundSurfaceBrush}">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
-            <RowDefinition Height="Auto" />
-        </Grid.RowDefinitions>
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:DownloadManager.Desktop.WinUI">
+    <!-- SITES.3 / SITES.11 R2a: the browse view of one saved site as the mockup's card (browse, remote-only, trouble). -->
+    <!-- Top-aligned: the card ends after its last row (the list scrolls once it reaches the window's height). -->
+    <Border CornerRadius="8" BorderThickness="1" BorderBrush="{ThemeResource InboundCardStrokeBrush}"
+            Background="{ThemeResource InboundCardBrush}" VerticalAlignment="Top">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
 
-        <!-- The path, one clickable part at a time, and the starred folders of the site. -->
-        <Border Grid.Row="0" Padding="10,6" BorderBrush="{ThemeResource InboundDividerBrush}" BorderThickness="0,0,0,1"
-                Background="{ThemeResource InboundChromeBrush}">
-            <Grid ColumnSpacing="8">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-                <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                    <TextBlock x:Name="SiteNameText" VerticalAlignment="Center" FontWeight="SemiBold" FontSize="13" MaxWidth="220"
-                               TextTrimming="CharacterEllipsis" Foreground="{ThemeResource SystemControlForegroundBaseHighBrush}" />
-                    <!-- SITES.6: plain FTP and http:// sites say so where the files are. -->
-                    <Border x:Name="PlainChip" Visibility="Collapsed" CornerRadius="9" Padding="7,1" BorderThickness="1"
-                            BorderBrush="{ThemeResource InboundErrorTextBrush}" VerticalAlignment="Center"
-                            AutomationProperties.Name="Not encrypted"
-                            ToolTipService.ToolTip="This site's connection is not encrypted: the password and the files can be read on the way.">
-                        <TextBlock Text="Not encrypted" FontSize="11" Foreground="{ThemeResource InboundErrorTextBrush}" />
-                    </Border>
-                </StackPanel>
-                <ScrollViewer Grid.Column="1" HorizontalScrollMode="Enabled" HorizontalScrollBarVisibility="Hidden"
-                              VerticalScrollBarVisibility="Disabled" VerticalAlignment="Center">
-                    <StackPanel x:Name="CrumbsPanel" Orientation="Horizontal" Spacing="2" AutomationProperties.Name="Path" />
-                </ScrollViewer>
-                <Button x:Name="StarredButton" Grid.Column="2" Padding="8,3" AutomationProperties.Name="Starred folders"
-                        ToolTipService.ToolTip="Starred folders of this site">
-                    <StackPanel Orientation="Horizontal" Spacing="6">
-                        <FontIcon Glyph="&#xE734;" FontSize="14" Foreground="{ThemeResource InboundIconPauseBrush}" />
-                        <TextBlock Text="Starred" FontSize="12" />
-                    </StackPanel>
-                    <Button.Flyout>
-                        <MenuFlyout x:Name="StarredMenu" Placement="BottomEdgeAlignedRight" />
-                    </Button.Flyout>
-                </Button>
-            </Grid>
-        </Border>
-
-        <!-- Column titles, in the widths of a line. -->
-        <Grid Grid.Row="1" Padding="10,4,10,4" ColumnSpacing="8" BorderBrush="{ThemeResource InboundDividerBrush}" BorderThickness="0,0,0,1">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="22" />
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="100" />
-                <ColumnDefinition Width="170" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-            <TextBlock Grid.Column="1" Text="Name" Style="{StaticResource InboundHeaderTextStyle}" />
-            <TextBlock Grid.Column="2" Text="Size" Style="{StaticResource InboundHeaderTextStyle}" HorizontalTextAlignment="Right" />
-            <TextBlock Grid.Column="3" Text="Modified" Style="{StaticResource InboundHeaderTextStyle}" />
-            <!-- SITES.5: only for a site with a linked folder on this PC (Edit site). -->
-            <TextBlock x:Name="HereHeader" Grid.Column="4" Width="96" Text="On this PC" Style="{StaticResource InboundHeaderTextStyle}"
-                       Visibility="Collapsed" ToolTipService.ToolTip="Compared with the site's folder on this PC by name, size and time" />
-        </Grid>
-
-        <Grid Grid.Row="2">
-            <ListView x:Name="ItemsList" SelectionMode="Extended" IsDoubleTapEnabled="True"
-                      AutomationProperties.Name="Folder contents"
-                      ItemContainerStyle="{StaticResource InboundListRowStyle}"
-                      DoubleTapped="ItemsList_DoubleTapped"
-                      ScrollViewer.HorizontalScrollBarVisibility="Disabled">
-                <ListView.ItemContainerTransitions>
-                    <TransitionCollection />
-                </ListView.ItemContainerTransitions>
-                <ListView.ItemTemplate>
-                    <DataTemplate>
-                        <Grid MinHeight="27" Padding="10,0,10,0" ColumnSpacing="8" Background="Transparent"
-                              AutomationProperties.Name="{Binding AccessibleName}">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="22" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="100" />
-                                <ColumnDefinition Width="170" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <FontIcon Glyph="{Binding Glyph}" FontSize="15" VerticalAlignment="Center"
-                                      Foreground="{ThemeResource InboundIconInfoBrush}" />
-                            <TextBlock Grid.Column="1" Text="{Binding Name}" FontSize="12" VerticalAlignment="Center"
-                                       TextTrimming="CharacterEllipsis" ToolTipService.ToolTip="{Binding Name}" />
-                            <TextBlock Grid.Column="2" Text="{Binding SizeText}" FontSize="12" VerticalAlignment="Center"
-                                       HorizontalTextAlignment="Right" Foreground="{ThemeResource InboundSecondaryTextBrush}" />
-                            <TextBlock Grid.Column="3" Text="{Binding ModifiedText}" FontSize="12" VerticalAlignment="Center"
-                                       Foreground="{ThemeResource InboundSecondaryTextBrush}" />
-                            <TextBlock Grid.Column="4" Width="96" Text="{Binding HereText}" FontSize="12" VerticalAlignment="Center"
-                                       Visibility="{Binding HereVisibility}" Foreground="{ThemeResource InboundSecondaryTextBrush}" />
-                        </Grid>
-                    </DataTemplate>
-                </ListView.ItemTemplate>
-            </ListView>
-
-            <!-- Loading, an error, or an empty folder: one message in place of the list. -->
-            <StackPanel x:Name="MessagePanel" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="10" MaxWidth="560"
-                        Visibility="Collapsed">
-                <ProgressRing x:Name="LoadingRing" IsActive="False" Width="32" Height="32" HorizontalAlignment="Center" />
-                <TextBlock x:Name="MessageText" TextWrapping="Wrap" HorizontalTextAlignment="Center" FontSize="13"
-                           AutomationProperties.LiveSetting="Polite"
-                           Foreground="{ThemeResource SystemControlForegroundBaseHighBrush}" />
-                <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center">
-                    <Button x:Name="RetryButton" Content="Try again" Click="RetryButton_Click" />
-                    <Button x:Name="OptionsButton" Content="Open Options" Click="OptionsButton_Click" />
-                </StackPanel>
+            <!-- The header: server icon, name, kind chip, "Not encrypted" chip. -->
+            <StackPanel Orientation="Horizontal" Spacing="8" Padding="12,10,12,4" VerticalAlignment="Center">
+                <FontIcon Glyph="&#xE839;" FontSize="14" VerticalAlignment="Center" />
+                <TextBlock x:Name="SiteNameText" VerticalAlignment="Center" FontWeight="SemiBold" FontSize="12" MaxWidth="260"
+                           TextTrimming="CharacterEllipsis" Foreground="{ThemeResource SystemControlForegroundBaseHighBrush}" />
+                <Border x:Name="KindChip" Visibility="Collapsed" CornerRadius="9" Padding="8,1" BorderThickness="1"
+                        BorderBrush="{ThemeResource InboundStatusDoneBrush}" VerticalAlignment="Center">
+                    <TextBlock x:Name="KindChipText" FontSize="11" Foreground="{ThemeResource InboundStatusDoneBrush}" />
+                </Border>
+                <!-- SITES.6: plain FTP and http:// sites say so where the files are. -->
+                <Border x:Name="PlainChip" Visibility="Collapsed" CornerRadius="9" Padding="7,1" BorderThickness="1"
+                        BorderBrush="{ThemeResource InboundErrorTextBrush}" VerticalAlignment="Center"
+                        AutomationProperties.Name="Not encrypted"
+                        ToolTipService.ToolTip="This remote's connection is not encrypted: the password and the files can be read on the way.">
+                    <TextBlock Text="Not encrypted" FontSize="11" Foreground="{ThemeResource InboundErrorTextBrush}" />
+                </Border>
             </StackPanel>
-        </Grid>
 
-        <Border Grid.Row="3" Padding="10,4" BorderBrush="{ThemeResource InboundDividerBrush}" BorderThickness="0,1,0,0"
-                Background="{ThemeResource InboundChromeBrush}">
-            <Grid ColumnSpacing="10">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-                <TextBlock x:Name="CountText" FontSize="12" VerticalAlignment="Center" AutomationProperties.LiveSetting="Polite"
-                           Foreground="{ThemeResource InboundSecondaryTextBrush}" />
-                <Button x:Name="MoreButton" Grid.Column="1" Visibility="Collapsed" Padding="10,2" Click="MoreButton_Click"
-                        AutomationProperties.Name="Load more items" />
+            <local:PathBar x:Name="Bar" Grid.Row="1" />
+            <local:PaneColumnHeader x:Name="Titles" Grid.Row="2" />
+
+            <Grid x:Name="ListHost" Grid.Row="3">
+                <ListView x:Name="ItemsList" SelectionMode="Extended" IsDoubleTapEnabled="True"
+                          AutomationProperties.Name="Folder contents"
+                          ItemContainerStyle="{StaticResource InboundListRowStyle}"
+                          DoubleTapped="ItemsList_DoubleTapped"
+                          ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                    <ListView.ItemContainerTransitions>
+                        <TransitionCollection />
+                    </ListView.ItemContainerTransitions>
+                    <ListView.ItemTemplate>
+                        <DataTemplate>
+                            <Grid MinHeight="27" Padding="10,0,10,0" ColumnSpacing="8" Background="Transparent"
+                                  AutomationProperties.Name="{Binding AccessibleName}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="22" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="70" />
+                                    <ColumnDefinition Width="100" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <FontIcon Glyph="&#xE8B7;" FontSize="15" VerticalAlignment="Center" Visibility="{Binding FolderVisibility}"
+                                          Foreground="{ThemeResource InboundIconPauseBrush}" />
+                                <FontIcon Glyph="&#xE8A5;" FontSize="15" VerticalAlignment="Center" Visibility="{Binding FileVisibility}"
+                                          Foreground="{ThemeResource InboundSecondaryTextBrush}" />
+                                <TextBlock Grid.Column="1" Text="{Binding Name}" FontSize="12" VerticalAlignment="Center"
+                                           TextTrimming="CharacterEllipsis" ToolTipService.ToolTip="{Binding Name}" />
+                                <TextBlock Grid.Column="2" Text="{Binding SizeText}" FontSize="12" VerticalAlignment="Center"
+                                           HorizontalTextAlignment="Right" Foreground="{ThemeResource InboundSecondaryTextBrush}" />
+                                <TextBlock Grid.Column="3" Text="{Binding ModifiedText}" FontSize="12" VerticalAlignment="Center"
+                                           Foreground="{ThemeResource InboundSecondaryTextBrush}" />
+                                <!-- SITES.5: only for a site with a linked folder on this PC. Same green, older orange, others plain. -->
+                                <Grid Grid.Column="4" Width="100" Visibility="{Binding HereVisibility}" VerticalAlignment="Center">
+                                    <StackPanel Orientation="Horizontal" Spacing="4" Visibility="{Binding HereSameVisibility}">
+                                        <FontIcon Glyph="&#xE73E;" FontSize="11" Foreground="{ThemeResource InboundStatusDoneBrush}" />
+                                        <TextBlock Text="{Binding HereText}" FontSize="12" Foreground="{ThemeResource InboundStatusDoneBrush}" />
+                                    </StackPanel>
+                                    <TextBlock Text="{Binding HereText}" FontSize="12" Visibility="{Binding HereOlderVisibility}"
+                                               Foreground="{ThemeResource InboundStatusWaitingBrush}" />
+                                    <TextBlock Text="{Binding HereText}" FontSize="12" Visibility="{Binding HereOtherVisibility}"
+                                               Foreground="{ThemeResource InboundSecondaryTextBrush}" />
+                                </Grid>
+                            </Grid>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
+
+                <!-- Loading, an empty folder, or trouble: one state in place of the list. -->
+                <StackPanel x:Name="MessagePanel" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="8" MaxWidth="480" Margin="0,28"
+                            Visibility="Collapsed">
+                    <ProgressRing x:Name="LoadingRing" IsActive="False" Width="32" Height="32" HorizontalAlignment="Center" />
+                    <FontIcon x:Name="TroubleIcon" Glyph="&#xE7BA;" FontSize="28" HorizontalAlignment="Center" Visibility="Collapsed"
+                              Foreground="{ThemeResource InboundStatusWaitingBrush}" />
+                    <TextBlock x:Name="TitleText" FontWeight="SemiBold" FontSize="14" HorizontalAlignment="Center" Visibility="Collapsed"
+                               TextWrapping="Wrap" HorizontalTextAlignment="Center" />
+                    <TextBlock x:Name="MessageText" TextWrapping="Wrap" HorizontalTextAlignment="Center" FontSize="12"
+                               AutomationProperties.LiveSetting="Polite"
+                               Foreground="{ThemeResource InboundSecondaryTextBrush}" />
+                    <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center" Margin="0,4,0,0">
+                        <Button x:Name="RetryButton" Content="Retry now" Click="RetryButton_Click" Style="{StaticResource AccentButtonStyle}" />
+                        <Button x:Name="EditSiteButton" Content="Edit remote" Click="EditSiteButton_Click" />
+                        <Button x:Name="OptionsButton" Content="Open Options > Remote files" Click="OptionsButton_Click" />
+                    </StackPanel>
+                </StackPanel>
             </Grid>
-        </Border>
-    </Grid>
+
+            <Border Grid.Row="4" Padding="12,6" BorderBrush="{ThemeResource InboundDividerBrush}" BorderThickness="0,1,0,0">
+                <Grid ColumnSpacing="10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock x:Name="CountText" FontSize="12" VerticalAlignment="Center" AutomationProperties.LiveSetting="Polite"
+                               TextTrimming="CharacterEllipsis" Foreground="{ThemeResource InboundSecondaryTextBrush}" />
+                    <Button x:Name="MoreButton" Grid.Column="1" Visibility="Collapsed" Padding="10,2" Click="MoreButton_Click"
+                            AutomationProperties.Name="Load more items" />
+                </Grid>
+            </Border>
+        </Grid>
+    </Border>
 </UserControl>

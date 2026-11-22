@@ -1,8 +1,43 @@
 {
   "versions": [
     {
+      "version": "0.9.0",
+      "date": "2026-11-17",
+      "sections": [
+        {
+          "title": "New",
+          "items": [
+            { "text": "Sites is now called Remote files. Each server or cloud account is a remote; dm remotes works as dm sites.", "tags": ["all"] },
+            { "text": "All remotes, with \"Open an address once\", and Add a remote, which starts from the kind of remote, tests it and can test before saving.", "tags": ["all"] },
+            { "text": "Browse a remote beside a folder on this PC or in two panes, with the same or another remote on the left, right-click menus, double click to download or open, drag and drop, and \"Some of it\" on folders that are partly here.", "tags": ["desktop"] },
+            { "text": "A transfers list like the downloads list, with stop, resume and retry for each transfer and progress for each file.", "tags": ["all"] },
+            { "text": "Delete asks with the number of files; on this PC it goes to the Recycle Bin, and Shift+Delete deletes for good. Overwrite asks file by file, with sizes and dates.", "tags": ["windows"] },
+            { "text": "Copy files from one remote to another, sync a linked folder one way with a preview, and run a sync again at every schedule.", "tags": ["all"] },
+            { "text": "Preview text and images in a remote without downloading the whole file, copy a file's path or address from its menu, and give each remote its own bandwidth limit.", "tags": ["all"] },
+            { "text": "Inbound remembers the last folder and sort of each remote, and takes PuTTY .ppk keys for SFTP.", "tags": ["all"] },
+            { "text": "The web UI has the same Remote files pages, made for a phone too: tick boxes, an action bar, bottom sheets, Select all and a filter. Downloads go to the server; \"To this device\" is a choice in the Download dialog.", "tags": ["webui", "server"] },
+            { "text": "dm sites rclone downloads rclone for Remote files from the command line.", "tags": ["all"] },
+            { "text": "Connections per server is in Options > Connection and the Downloads menu; it caps all downloads from one server, and the menu says when it is lower than Connections per download.", "tags": ["all"] },
+            { "text": "The browser extension's toolbar ring is easier to see, and a count marks downloads that finished since the popup was last opened.", "tags": ["extension"] },
+            { "text": "The extension can show a \"Download finished\" notification with Open and Show in folder, or open its popup when a download finishes. Choose in its options.", "tags": ["extension"] },
+            { "text": "The extension's popup has a \"Finished just now\" divider and a Clear finished button, and its tooltip names the newest finished file.", "tags": ["extension"] }
+          ]
+        },
+        {
+          "title": "Fixes",
+          "items": [
+            { "text": "A window that was last left very small opens at its least size, and Options can't be made smaller than its pages.", "tags": ["desktop"] },
+            { "text": "Raising the connections of a download that runs on one connection now splits it into more parts, while it runs or when it is started again.", "tags": ["all"] },
+            { "text": "Extractions in the sidebar has its icon.", "tags": ["linux"] },
+            { "text": "Manage remotes on All remotes opens Options in front, and its empty list no longer overlaps the column headings.", "tags": ["desktop"] },
+            { "text": "Files copied to a remote through the desktop bridge show in the web UI's target folder, and a folder with many files shows that it is loading.", "tags": ["webui", "server"] }
+          ]
+        }
+      ]
+    },
+    {
       "version": "0.8.0",
-      "date": null,
+      "date": "2026-11-15",
       "sections": [
         {
           "title": "New",
@@ -12,7 +47,14 @@
             { "text": "The Docker image includes rclone, so Sites works without a download. Turn it on in the web UI.", "tags": ["docker"] },
             { "text": "dm sites adds, tests, browses and changes sites, and starts and controls transfers.", "tags": ["all"] },
             { "text": "Each finished download is checked by your antivirus before anything opens or extracts it, as a browser's own downloads are. A file the antivirus removes ends the download with a note, and it is not downloaded again by itself.", "tags": ["windows"] },
-            { "text": "Help, About links the notices of the software Inbound is built with.", "tags": ["desktop"] }
+            { "text": "Help, About links the notices of the software Inbound is built with.", "tags": ["desktop"] },
+            { "text": "Inbound for macOS, for Apple silicon and Intel Macs: the same window, downloads, torrents, Sites and browser extension as on Windows and Linux.", "tags": ["macos"] },
+            { "text": "While the window is closed, Inbound stays in the menu bar: open it again from there, open Options, stop or resume all downloads, or quit.", "tags": ["macos"] },
+            { "text": "The Mac app checks for updates and installs them itself, as the Windows app does.", "tags": ["macos"] },
+            { "text": "On the Mac too: the Mac stays awake while downloads run, a finished queue can shut down, restart or sign out, notifications and event sounds play, links you copy can be added, and saved passwords are sealed with a key in your login Keychain.", "tags": ["macos"] },
+            { "text": "Mac touches: the menu-bar icon shows what is downloading and lets you pause or show each download, takes links and .torrent files dropped on it, and Services > Download with Inbound sends a selected link. Notifications let you open a finished file, show it in Finder or retry a failed one.", "tags": ["macos"] },
+            { "text": "On the Mac, ⌘ shortcuts, the usual Inbound and Window menus, and the number of running downloads and their progress on the Dock icon.", "tags": ["macos"] },
+            { "text": "Finished downloads on a Mac are marked as from the internet, as Safari does, and Finder shows the site they came from. Options can pause downloads on a phone hotspot, in Low Data Mode or in Low Power Mode.", "tags": ["macos"] }
           ]
         },
         {
@@ -23,6 +65,12 @@
             { "text": "The web UI's download list stays quick with thousands of downloads: it uses a fraction of the processor time it did, and its files load compressed.", "tags": ["webui", "server"] },
             { "text": "The browser extension hands a download to Inbound faster.", "tags": ["windows"] },
             { "text": "Downloads write their progress to disk less often, with the same protection against a crash or power cut.", "tags": ["all"] }
+          ]
+        },
+        {
+          "title": "Upgrade notes",
+          "items": [
+            { "text": "Inbound for macOS isn't notarized by Apple. The first time, open it, then choose Open Anyway in System Settings > Privacy & Security.", "tags": ["macos"] }
           ]
         }
       ]

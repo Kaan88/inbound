@@ -65,6 +65,60 @@ public sealed class SiteHereTests : IDisposable
         Assert.Equal(SiteHereStates.Different, SiteHere.Of(_linked, "/pub", "/pub", new SiteItemDto { Name = "notes", IsFolder = true }));
     }
 
+    [Fact]
+    public void AFolderComparesEveryFileUnderIt()
+    {
+        Directory.CreateDirectory(Path.Combine(_linked, "docs", "deep"));
+        Write(Path.Combine("docs", "a.txt"), 1, Remote);
+        Write(Path.Combine("docs", "deep", "b.txt"), 2, Remote);
+        Write(Path.Combine("docs", "old.txt"), 3, Remote.AddMinutes(-5));
+        Write(Path.Combine("docs", "cut.txt"), 1, Remote);
+
+        Assert.Equal(SiteHereStates.Same, Folder(("a.txt", 1), ("deep/b.txt", 2)));
+        // An empty folder on the server is all here.
+        Assert.Equal(SiteHereStates.Same, Folder());
+        Assert.Equal(SiteHereStates.OlderHere, Folder(("a.txt", 1), ("old.txt", 3)));
+        Assert.Equal(SiteHereStates.NotHere, Folder(("x.txt", 1), ("deep/y.txt", 1)));
+        // One missing, one cut short or one different makes it partly here.
+        Assert.Equal(SiteHereStates.SomeOfIt, Folder(("a.txt", 1), ("deep/missing.txt", 1)));
+        Assert.Equal(SiteHereStates.SomeOfIt, Folder(("a.txt", 1), ("cut.txt", 5)));
+        Assert.Equal(SiteHereStates.SomeOfIt, Folder(("old.txt", 3), ("missing.txt", 1)));
+        // No such folder here, a file in its place, or outside the start folder: not compared.
+        Assert.Null(SiteHere.OfFolder(_linked, "/pub", "/pub", "music", [("a.txt", 1, Remote)]));
+        Write("notes", 3, Remote);
+        Assert.Null(SiteHere.OfFolder(_linked, "/pub", "/pub", "notes", [("a.txt", 1, Remote)]));
+        Assert.Null(SiteHere.OfFolder(_linked, "/pub", "/", "docs", [("a.txt", 1, Remote)]));
+        // Deeper in: the parent is the folder shown.
+        Assert.Equal(SiteHereStates.Same, SiteHere.OfFolder(_linked, "/pub", "/pub/docs", "deep", [("b.txt", 2, Remote)]));
+    }
+
+    [Fact]
+    public void AFolderTallySettlesAsSoonAsItIsSomeOfIt()
+    {
+        var tally = new SiteHere.FolderTally();
+        tally.Add(SiteHereStates.Same);
+        tally.Add(SiteHereStates.OlderHere);
+        Assert.False(tally.Settled);
+        tally.Add(SiteHereStates.NotHere);
+        Assert.True(tally.Settled);
+        Assert.Equal(SiteHereStates.SomeOfIt, tally.Result);
+
+        var different = new SiteHere.FolderTally();
+        different.Add(SiteHereStates.Different);
+        Assert.True(different.Settled);
+        Assert.Equal(SiteHereStates.SomeOfIt, different.Result);
+
+        var none = new SiteHere.FolderTally();
+        none.Add(null);
+        none.Add(SiteHereStates.NotHere);
+        Assert.False(none.Settled);
+        Assert.Equal(SiteHereStates.NotHere, none.Result);
+        Assert.Equal(SiteHereStates.Same, new SiteHere.FolderTally().Result);
+    }
+
+    private string? Folder(params (string Path, long Size)[] files) =>
+        SiteHere.OfFolder(_linked, "/pub", "/pub", "docs", files.Select(f => (f.Path, f.Size, (DateTimeOffset?)Remote)));
+
     private string? State(string name, long size) =>
         SiteHere.Of(_linked, "/pub", "/pub", new SiteItemDto { Name = name, Size = size, Modified = Remote });
 

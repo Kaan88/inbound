@@ -47,6 +47,9 @@
   <!-- UPD.N1: What's new opens by itself only for an installed build, read from install.json the way the Host reads it. -->
   <ItemGroup>
     <Compile Include="..\DownloadManager.Core\InstalledBuild.cs" Link="InstalledBuild.cs" />
+    <!-- SITES.11 R2b: the same rules for names on this PC as the Host's transfers (Rename and New folder in This PC). -->
+    <Compile Include="..\DownloadManager.Sites\SiteTransferPaths.cs" Link="Sites\SiteTransferPaths.cs" />
+    <Compile Include="..\DownloadManager.Sites\SitePaths.cs" Link="Sites\SitePaths.cs" />
   </ItemGroup>
 
   <!-- A saved server's token is sealed for this Windows user the way the Host seals site logins (design D9). -->

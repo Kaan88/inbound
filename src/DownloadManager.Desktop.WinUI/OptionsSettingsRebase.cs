@@ -23,6 +23,7 @@ public static class OptionsSettingsRebase
         if (Changed(atOpen.DefaultDownloadDirectory, edited.DefaultDownloadDirectory)) latest.DefaultDownloadDirectory = edited.DefaultDownloadDirectory;
         if (Changed(atOpen.MaxConcurrentDownloads, edited.MaxConcurrentDownloads)) latest.MaxConcurrentDownloads = edited.MaxConcurrentDownloads;
         if (Changed(atOpen.DefaultConnections, edited.DefaultConnections)) latest.DefaultConnections = edited.DefaultConnections;
+        if (Changed(atOpen.MaxConnectionsPerHost, edited.MaxConnectionsPerHost)) latest.MaxConnectionsPerHost = edited.MaxConnectionsPerHost;
         if (Changed(atOpen.GlobalSpeedLimitBytesPerSecond, edited.GlobalSpeedLimitBytesPerSecond)) latest.GlobalSpeedLimitBytesPerSecond = edited.GlobalSpeedLimitBytesPerSecond;
         if (Changed(atOpen.LaunchAtStartup, edited.LaunchAtStartup)) latest.LaunchAtStartup = edited.LaunchAtStartup;
         if (Changed(atOpen.CloseWindowCompletely, edited.CloseWindowCompletely)) latest.CloseWindowCompletely = edited.CloseWindowCompletely;
@@ -32,6 +33,7 @@ public static class OptionsSettingsRebase
         if (Changed(atOpen.UseTorrentCategoryFolders, edited.UseTorrentCategoryFolders)) latest.UseTorrentCategoryFolders = edited.UseTorrentCategoryFolders;
         if (Changed(atOpen.TorrentCategoryFoldersRoot, edited.TorrentCategoryFoldersRoot)) latest.TorrentCategoryFoldersRoot = edited.TorrentCategoryFoldersRoot;
         if (Changed(atOpen.ClipboardMonitoring, edited.ClipboardMonitoring)) latest.ClipboardMonitoring = edited.ClipboardMonitoring;
+        if (Changed(atOpen.PauseOnCostlyNetworkOrLowPower, edited.PauseOnCostlyNetworkOrLowPower)) latest.PauseOnCostlyNetworkOrLowPower = edited.PauseOnCostlyNetworkOrLowPower;
         if (Changed(atOpen.BrowserIntegrationEnabled, edited.BrowserIntegrationEnabled)) latest.BrowserIntegrationEnabled = edited.BrowserIntegrationEnabled;
         if (Changed(atOpen.NotifyOnCompletion, edited.NotifyOnCompletion)) latest.NotifyOnCompletion = edited.NotifyOnCompletion;
         if (Changed(atOpen.PlayCompletionSound, edited.PlayCompletionSound)) latest.PlayCompletionSound = edited.PlayCompletionSound;

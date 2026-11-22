@@ -23,22 +23,30 @@ framework assemblies are not trimmed yet, and the increase is accepted for now. 
 `DownloadManager.Server.exe` of that install. Setup never adds or removes the firewall rule; `INSTALL.txt` tells how to remove
 "Inbound Download Manager web UI" after uninstalling.
 
-First have the Firefox add-on signed (EXT.S4). This writes the signed XPI and
-`extensions/firefox-updates.json`, which points Firefox at this release:
+First have the Firefox add-on signed (EXT.S4, EXT.S5). All three extensions are public (Chrome Web Store, Edge
+Add-ons, Firefox Add-ons) and share one version (0.7.0 from this release; bump manifest.json, package.json and
+package-lock.json together). Firefox is a listed add-on: the store build has no `update_url`, AMO reviews each
+version and updates every user, and AMO asks for source. The default channel does that:
 
 ```powershell
 .\scripts\sign-extension-firefox.ps1 -ReleaseTag vX.Y.Z -ApiKeysPath <AMO API key file>
 ```
 
-The key file holds `{ "issuer": "...", "secret": "..." }` from addons.mozilla.org,
-Developer Hub, Manage API Keys, and stays outside the repository. AMO signs a
-version number only once: if signing stops after the upload, run the same command
-again (it resumes from `artifacts\firefox-addon\.sign-<version>`), or download the
-signed file from the Developer Hub and pass `-SignedXpi <file>`. For an app release
-that keeps the same extension version, re-point the update file at the new release
-with the XPI already signed:
+It builds and checks the package, writes `artifacts\firefox-addon\inbound-bridge-<version>-firefox-source.zip`
+(the tracked extension files plus the few web UI files its build reads, with README-BUILD.txt; add `-VerifySource` to
+rebuild the add-on from that zip in a scratch folder and compare every file byte for byte), and submits the version
+with the source attached (`web-ext sign --channel listed`). web-ext cannot download a listed version, so when AMO has
+approved it, download the signed file from the Developer Hub and run the script again with
+`-SignedXpi <file>`: it checks that the XPI is signed and holds exactly the built files, copies it to
+`artifacts\firefox-addon\inbound-bridge-<version>-firefox.xpi` and writes `extensions/firefox-updates.json`,
+which points the older unlisted installs (their `update_url` names that file) at this release's XPI once, after which
+they update from AMO. `-Channel unlisted` is the older self-distributed flow (AMO signs it at once, the manifest has an
+`update_url`). The key file holds `{ "issuer": "...", "secret": "..." }` from addons.mozilla.org,
+Developer Hub, Manage API Keys, and stays outside the repository. AMO takes a version number only once. For an app
+release that keeps the same extension version, re-point the update file at the new release with the XPI already signed:
 `-ReleaseTag vX.Y.Z -SignedXpi artifacts\firefox-addon\inbound-bridge-<version>-firefox.xpi`.
-Then build Setup (`scripts/build-installer.ps1`, which bundles that XPI).
+Then build Setup (`scripts/build-installer.ps1`, which bundles that XPI; `prepare-release.ps1` accepts a listed or an
+unlisted XPI of the extension's version).
 
 The Chrome Web Store (Chrome) is published with the Chrome Web Store API v2. Keep a second key
 file outside the repository, `{ "client_id", "client_secret", "publisher_id", "refresh_token" }`: the OAuth
@@ -57,9 +65,23 @@ The store listing (screenshots, texts) is still edited in the dashboard.
 Edge has its own listing on Microsoft Edge Add-ons (Partner Center; store ID `0RDCKGXFWJ1N`). Edge assigns the
 extension its own ID (`ifoagddcenmjpbklkhghbdmgplldcdci`), which differs from Chrome's; the app trusts it
 (`BrowserBridge.EdgeStoreExtensionId`) from 0.6.7, so a release carrying that ID must be out before a listing goes live.
-Submit the zip from `scripts/package-extension-store.ps1` in Partner Center. There is no publish script for Edge yet
-(Microsoft's Edge Add-ons API can only update an existing product; keep any API credentials in environment
-variables or a file outside the repository).
+`scripts/publish-extension-edge.ps1` replaces the manual Partner Center upload. It uses the Edge Add-ons API v1.1
+(updates the existing product only; the listing texts and screenshots stay in Partner Center):
+
+```powershell
+.\scripts\package-extension-store.ps1
+.\scripts\publish-extension-edge.ps1 -KeysPath <file>             # upload the draft, then submit it
+.\scripts\publish-extension-edge.ps1 -KeysPath <file> -NoSubmit   # upload the draft only
+.\scripts\publish-extension-edge.ps1 -KeysPath <file> -StatusOnly -OperationId <id> [-Kind Package|Submission]
+```
+
+The keys file is JSON with `client_id`, `api_key` and `product_id`, kept outside the repository (the default place is
+`Downloads\secrets`, like the other keys). Create the API key in Partner Center under Microsoft Edge > Publish API; it
+**expires after 72 days**, so make a new one (which replaces the old) and update the file when an upload answers 401.
+The script uploads the zip, waits for the package operation, then submits with certification notes (`-Notes`) and waits
+for the submission operation, printing the API's status and error messages (never the key). The API cannot list the
+latest submission, so `-StatusOnly` needs the operation id a run printed; otherwise look in Partner Center. Edge then
+certifies the version before it goes live.
 
 ## Changelog: What's new (UPD.N1)
 
@@ -78,12 +100,14 @@ feeds What's new in the Windows app (opened once after an update, and from Help 
   more.
 - Tag each line with where it applies: `desktop` (the desktop window, which is one code base for Windows and Linux:
   the list, menus, dialogs, Options; use this unless the line is about one system only), `windows` (the Windows app
-  only: Setup, the tray, Windows itself), `linux` (the Linux app only: the AppImage, packages), `webui` (the browser
+  only: Setup, the tray, Windows itself), `linux` (the Linux app only: the AppImage, packages), `macos` (the macOS app
+  only: Inbound.app, the menu-bar icon, macOS itself), `webui` (the browser
   web UI), `server` and `docker` (the headless server), `extension` (the browser extension), or `all`.
   Add `torrents` for a line about torrents the app downloads (shown only while torrents are on) and `torbox` (the provider's id) for one
   about the TorBox account (shown only with an account set). The Windows app shows `desktop`, `windows` and `all` lines; the Linux
-  window `desktop`, `linux` and `all`; the web UI `webui`, `server`, `docker` and `all`. In the manifest a `desktop` tag
-  is written as `windows` and `linux`, because apps from before the tag (0.7.7 or older) would hide the line. This can go once no
+  window `desktop`, `linux` and `all`; the macOS window `desktop`, `macos` and `all`; the web UI `webui`, `server`, `docker` and `all`. In the manifest a `desktop` tag
+  is written as `windows` and `linux`, because apps from before the tag (0.7.7 or older) would hide the line; the macOS
+  manifests (`manifest-macos-<arch>.json`) keep `desktop`, as only newer apps read them. This can go once no
   such install updates directly (ROADMAP UPD.N3); `changelog.json` itself uses `desktop`. The rest is folded under "N changes in the web UI and the browser extension".
 - `dotnet test tests\DownloadManager.Core.Tests -c Release --filter ChangelogTests` checks the file: it parses, versions
   go newest first, every tag is known and each version fits a manifest.
@@ -93,7 +117,8 @@ which writes the version's lines into `manifest.json` as `notes`. They are outsi
 0.7.2 still verify the manifest. They have their own signature, `notesSignature`, over the signed text and the notes, made
 with the same key; the app shows notes only when it verifies, reads them with limits and shows them as plain text. UpdateSigner reads
 `changelog.json` with the Contracts library, so rebuild it after pulling (`dotnet build tools\UpdateSigner -c Release`).
-`prepare-appimage-release.sh` passes the same file for `manifest-linux-x64.json`.
+`prepare-appimage-release.sh` passes the same file for `manifest-linux-x64.json`, and `prepare-macos-release.sh` for
+`manifest-macos-arm64.json` and `manifest-macos-x64.json`.
 
 ## Preparing the release assets
 
@@ -175,12 +200,51 @@ and `SHA256SUMS-linux-packages`. The three packages need [nfpm](https://nfpm.gor
 `/usr/lib/inbound`, the launcher `/usr/bin/inbound`, a menu entry and an icon. None of them updates itself: the
 in-app updater is for the AppImage, so they are not in `manifest-linux-x64.json` and are not signed.
 
+## macOS app (MAC.1)
+
+`scripts/package-macos.sh osx-arm64` (or `osx-x64`) builds `Inbound.app` on a Mac with the .NET 10 SDK and Xcode's
+command-line tools, and packs `artifacts/macos/Inbound-<version>-macos-<arch>.zip` and `.dmg` with
+`SHA256SUMS-macos-<arch>`. It uses the macOS torrent worker from `artifacts/torrent-worker/<rid>/inbound-torrent` when
+there is one (built with vcpkg and the `*-osx-static-rel` triplets in `native/torrent-worker/triplets`); without it the
+app runs with torrents off.
+
+| Inside Inbound.app | What |
+| --- | --- |
+| `Contents/MacOS/InboundLauncher` | The bundle's program: starts the Host, then becomes the window (`--cli`, `--host`, `--background` as AppRun) |
+| `Contents/Resources/window/` | The Uno window. `Resources -> .` beside it, as Uno's macOS host reads its files from there when started from Finder |
+| `Contents/Resources/host/` | `inbound-host` (the Linux Host's project, built for macOS), the CLI, the native host, the server and the torrent worker |
+| `Contents/Helpers/Inbound Menu.app` | `inbound-menu` (the menu-bar icon, `native/macos-menu`) as its own LSUIElement app (`local.inbound.menu`), so its notifications are Inbound's and it offers Services > Download with Inbound; signed before the outer bundle |
+
+The app is signed ad hoc only, not with a Developer ID, and not notarized: Gatekeeper asks on the first open
+(open it once, then System Settings > Privacy & Security > Open Anyway; macOS 15 dropped the right-click > Open way.
+Or `xattr -dr com.apple.quarantine /Applications/Inbound.app`).
+
+It updates itself as the AppImage does: it reads `manifest-macos-arm64.json` or `manifest-macos-x64.json` beside the
+Windows `manifest.json`, downloads the signed zip, unpacks it with `ditto` beside the running bundle, swaps the bundles
+with two renames and restarts (`MacAppRestarter`). Sign a release's zip with the same key:
+
+```sh
+scripts/prepare-macos-release.sh X.Y.Z artifacts/macos/Inbound-X.Y.Z-macos-arm64.zip arm64 <path to update-signing.pem>
+```
+
+The macOS workflow does this for both architectures when a release is published. To try the updater without a
+release, run the workflow by hand with `test_version` (higher than the installed one, e.g. `0.8.1`): it publishes that
+build to the pre-release `macos-update-test`, which never becomes "latest". On a test Mac:
+`/Applications/Inbound.app/Contents/MacOS/InboundLauncher --cli settings set updatemanifest
+https://github.com/Kaan88/inbound/releases/download/macos-update-test/manifest.json`, then Help > Check for Updates.
+Put it back afterwards with `--cli settings set updatemanifest https://github.com/Kaan88/inbound/releases/latest/download/manifest.json`.
+
+A copy of the app put in place of an older one by hand stops the older Host when it starts (MAC.3); to stop
+everything anyway: `pkill -f 'Inbound.app/Contents/'`. Start Inbound when I sign in writes the LaunchAgent
+`~/Library/LaunchAgents/local.inbound.host.plist`.
+
 ## GitHub workflows (CI.1)
 
 | Workflow | Starts | Does |
 | --- | --- | --- |
 | `ci.yml` (CI) | Every push to main and every pull request, except Markdown and docs only | Windows: `scripts\build.ps1` and `scripts\test.ps1`. Linux: the web UI, the extension, the programs the Linux build ships, and the tests that pass on Linux |
 | `appimage.yml` (Linux packages) | A published release, or by hand | With a tag: builds the AppImage and the four packages from the tag, signs `manifest-linux-x64.json` and attaches everything to the release. By hand without a tag: builds the chosen branch and keeps the files as run artifacts |
+| `macos.yml` (macOS packages) | Every push to main or a `macos-*` branch, every pull request (except Markdown and docs only), a published release, or by hand (with a tag, or with `test_version`) | Builds the torrent worker and `Inbound.app` for arm64 and x64 as run artifacts (14 days), starts the Host and the CLI, has Remote files download rclone and runs it, and drives the window through `DOWNLOADMANAGER_UNO_SELFTEST` (About, Progress Details, Options, closing and reopening the main window) with screenshots and the trace in the log. On a published release, or by hand with a tag, it also signs `manifest-macos-<arch>.json` with `UPDATE_SIGNING_KEY` (after checking that it is the key the apps trust) and attaches the zip, the dmg, the manifest and `SHA256SUMS-macos-<arch>` to that release. By hand with `test_version`, it publishes the zip and manifest to the `macos-update-test` pre-release instead |
 | `docker.yml` (Docker image) | A published release, or by hand from a tag | Builds and pushes the server image |
 | `windows.yml` (Windows build) | A pushed version tag, or by hand | With a tag: builds Setup (with the signed Firefox add-on) and the zip, signs `manifest.json`, and puts the six files in a **draft** release with notes drafted from `changelog.json` (CI.2). By hand without a tag: a test Setup (no Firefox add-on) and zip of the chosen branch as run artifacts, nothing signed |
 
@@ -194,14 +258,25 @@ in-app updater is for the AppImage, so they are not in `manifest-linux-x64.json`
 2. For a **new** extension version only: make a draft release for the tag by hand and attach the signed XPI to it,
    since no earlier release has that file. Otherwise the workflow takes it from the newest earlier release that has
    it. Either way it is checked against the hash in `extensions/firefox-updates.json`.
+   If addons.mozilla.org hasn't approved the listed Firefox version yet, there is no XPI to attach and the build would
+   fail at that step. Instead push the tag alone first (`git push origin vX.Y.Z`; the by-hand run checks out the tag
+   and `gh release create --verify-tag` needs it on GitHub). The Windows build that the push starts fails at "Signed
+   Firefox add-on" (no entry for the extension version in `extensions/firefox-updates.json`), before anything is
+   signed or released; that is expected. Then run Windows build by hand (Actions, Windows build, Run workflow) with
+   the tag and `no_firefox_xpi` ticked: the Firefox add-on step is skipped, Setup is built with `-NoFirefoxXpi` (its
+   finish page then links the AMO listing), and the draft release gets five files (no XPI; `SHA256SUMS` lists only
+   what is there). Skip step 3 in this case. After AMO approves the version, add its entry (for example 0.7.0) to
+   `extensions/firefox-updates.json`, pointing at the AMO file with its hash, so unlisted 0.6.x installs move over to
+   the listed add-on, and push `main`. A run started by a pushed tag always requires the XPI.
 3. Push the tag alone (`git push origin vX.Y.Z`). The Windows build runs: Setup, the zip, `manifest.json` signed with
    the `UPDATE_SIGNING_KEY` secret (and refused unless its `public.pem` equals the latest release's), `SHA256SUMS`, all
    six files in a draft release. If the tag's commit did have `[skip ci]`, or to build again: Actions, Windows build,
    Run workflow, and give the tag.
 4. Read the draft: the files, the manifest, the notes. The notes come from `changelog.json`; add the summary
    paragraph, the browser extension line and Known issues by hand, as in earlier releases.
-5. Publish the draft. That starts the Linux packages and the Docker image, which attach their files to the release
-   a few minutes later. (A release that GitHub's own token publishes would start neither, which is one reason the
+5. Publish the draft. That starts the Linux packages, the macOS packages and the Docker image, which attach their
+   files to the release a few minutes later. Check afterwards that the Mac files (zip, dmg and
+   `manifest-macos-<arch>.json` for arm64 and x64) and both other manifests are attached. (A release that GitHub's own token publishes would start neither, which is one reason the
    publishing stays a person's step.)
 6. Push `main`, so Firefox finds `extensions/firefox-updates.json`.
 

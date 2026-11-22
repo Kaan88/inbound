@@ -307,7 +307,7 @@ internal sealed partial class RemoteFilesScreen
         var active = _transfers.Where(t => t.State is "queued" or "running" or "paused").ToArray();
         int uploads = active.Count(t => t.Direction == "upload");
         int downloads = active.Count(t => t.Direction == "download");
-        int copies = active.Count(t => t.Direction == "copy");
+        int copies = active.Count(t => t.Direction == "between");
         var directions = new List<string>();
         if (uploads > 0) directions.Add(uploads + " up");
         if (downloads > 0) directions.Add(downloads + " down");

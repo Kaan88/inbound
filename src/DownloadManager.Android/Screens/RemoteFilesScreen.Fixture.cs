@@ -21,7 +21,7 @@ internal sealed partial class RemoteFilesScreen
             RemoteFolder = remote, LocalFolder = local, Files = files, FilesDone = done, FilesFailed = failed, FilesSkipped = skipped,
             Bytes = bytes, BytesDone = bytesDone, Speed = speed, Message = message,
             CreatedAt = DateTimeOffset.Now.AddMinutes(-minutesAgo), FinishedAt = state is "done" or "failed" or "canceled" ? DateTimeOffset.Now.AddMinutes(-minutesAgo + 2) : null,
-            DestinationSiteId = destSite, DestinationSiteName = destSite switch { null => null, "backups" => "Backups", _ => "Home NAS" }, DestinationFolder = destFolder,
+            TargetSiteId = destSite, TargetSiteName = destSite switch { null => null, "backups" => "Backups", _ => "Home NAS" }, TargetFolder = destFolder,
         };
 
     private static SiteDto FixtureKeySite() => new()
@@ -118,12 +118,12 @@ internal sealed partial class RemoteFilesScreen
         _transfers = FixtureMode == "empty" ? [] :
         [
             Fx("t1", "running", "download", "home", "/music", "/storage/emulated/0/Download/Inbound/Music", 1, 0, 455_000_000, 212_000_000, 9_800_000, 1),
-            Fx("t2", "running", "copy", "drive", "/Wedding", "", 640, 118, 6_400_000_000, 1_200_000_000, 4_100_000, 4, destSite: "home", destFolder: "/photos"),
+            Fx("t2", "running", "between", "drive", "/Wedding", "", 640, 118, 6_400_000_000, 1_200_000_000, 4_100_000, 4, destSite: "home", destFolder: "/photos"),
             Fx("t3", "queued", "upload", "work", "/shared", "/storage/emulated/0/Download/Scans", 1, 0, 3_000_000, 0, 0, 5),
             Fx("t4", "paused", "download", "home", "/media/rehearsals", "/storage/emulated/0/Download/Inbound/Video", 1, 0, 1_400_000_000, 310_000_000, 0, 20),
             Fx("t5", "failed", "upload", "home", "/backup", "/storage/emulated/0/Download/Photos 2025", 24, 21, 112_000_000, 96_000_000, 0, 30, "The connection to Home NAS was lost.", failed: 3),
             Fx("t6", "done", "download", "work", "/", "/storage/emulated/0/Download", 1, 1, 220_000, 220_000, 0, 50),
-            Fx("t7", "done", "copy", "dropbox", "/Invoices", "", 14, 12, 120_000_000, 120_000_000, 0, 90, skipped: 2, destSite: "backups", destFolder: "/invoices"),
+            Fx("t7", "done", "between", "dropbox", "/Invoices", "", 14, 12, 120_000_000, 120_000_000, 0, 90, skipped: 2, destSite: "backups", destFolder: "/invoices"),
             Fx("t8", "canceled", "download", "home", "/video", "/storage/emulated/0/Download/Inbound", 1, 0, 700_000_000, 10_000_000, 0, 200),
         ];
         _transferPaths["t1"] = ["session-0503.flac"];

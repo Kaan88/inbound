@@ -16,8 +16,8 @@ public sealed partial class SiteTransfersEndToEndTests
         var port = StartServer(slow: false);
         await using var host = await SandboxHost.StartAsync("https://example.invalid/v1/api/");
 
-        Assert.Contains("Sites: off", (await host.RunCliAsync(null, "sites", "status")).Output);
-        Assert.Contains("Sites: on", (await host.RunCliAsync(null, "sites", "on")).Output);
+        Assert.Contains("Remote files: off", (await host.RunCliAsync(null, "sites", "status")).Output);
+        Assert.Contains("Remote files: on", (await host.RunCliAsync(null, "sites", "on")).Output);
 
         // A password as an argument is refused before anything is sent; on standard input it is used.
         var argument = await host.RunCliAsync(null, "sites", "add", "Box", "--kind", "sftp", "--host", "127.0.0.1", "--port", $"{port}",
@@ -71,6 +71,6 @@ public sealed partial class SiteTransfersEndToEndTests
         Assert.True((await host.RunCliAsync(null, "sites", "remove", "Box")).ExitCode == 0);
         Assert.DoesNotContain("Box", (await host.RunCliAsync(null, "sites", "list")).Output);
         Assert.True(Directory.Exists(Path.Combine(Served, "pub")));
-        Assert.Contains("Sites: off", (await host.RunCliAsync(null, "sites", "off")).Output);
+        Assert.Contains("Remote files: off", (await host.RunCliAsync(null, "sites", "off")).Output);
     }
 }

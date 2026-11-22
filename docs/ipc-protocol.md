@@ -51,7 +51,9 @@ started: 7-Zip found; one installed later shows on the next connection, and at o
 commands read their references; the Docker server has it, and the Windows Host where its web bridge program is
 installed, since the bridge serves both uploads into the Host's data folder), and `sites` (the `sites.*` messages are
 answered for this session: the Host has Sites and the session is the desktop user at this PC or, since SITES.7, a web
-session or the server's own; sent with the switch on or off). The list is per session: a `web` session on the desktop Host gets fewer. `server.hello` also carries
+session or the server's own; sent with the switch on or off), and `savingPauses` (MAC.6: the Host sees a costly
+network, such as a phone hotspot or Low Data Mode, and Low Power Mode, so the setting `pauseOnCostlyNetworkOrLowPower`
+does something; only the Mac Host lists it, and a client shows that setting only then). The list is per session: a `web` session on the desktop Host gets fewer. `server.hello` also carries
 `hostKind`: `windows` for the desktop Host, `server` for the headless one. A Host on a machine that can't do something answers instead of
 acting: `host.openUi` and `host.shutdown` reply `ok: false`, `host.pickFolder` replies with an `error`, and
 `update.check`, `update.download`, `update.install` and `update.defer` reply `ok: false` with "Updates are not
@@ -207,7 +209,9 @@ replacing a file may already have removed the old one. Any failed or aborted pie
 `sites.device.close {streamId}` stops one (a piece in flight is cancelled first); one unused for two minutes, or a
 piece rclone does not move for two minutes, is closed, and 8 at once is the most. Pausing a download in the browser for
 longer than that ends it. The idle timer runs only while a stream is open. A scoped session (a web session, or any
-caller on the server) can't resume or retry a transfer batch whose folder on this computer is outside its folders; it
+caller on the server) can't resume or retry a transfer batch whose folder on this computer is outside its folders, start
+one of its files again (`sites.transfer.startFile`) or set it waiting for a schedule (`sites.transfer.schedule` with
+`wait: true`); it
 can still see every site and batch, folders included (it is the admin). rclone reads the file over its own served address (`--rc-serve`, named in-memory remotes) and takes an upload
 with `operations/uploadfile`, so nothing is written to a disk on the way. The browser uses the server's
 `GET /api/sites/device?id=&path=` (the file as a download) and `POST /api/sites/device?id=&folder=&replace=1` (the body,
@@ -349,6 +353,12 @@ update counts as `ready` once its `waitUntil` has passed. Neither runs with Site
 `remoteFolder` and `localFolder?`. The host is trimmed. A key login needs a private key stored. The reply is
 `sites.result`; on success its `site` is set. A refusal (an unknown site, a bad id, no secret protection on this
 system, a site rule broken) comes back as `sites.result` with `ok: false` and `message`, and nothing is saved.
+`privateKey` is PEM text (OpenSSH, PKCS#1, PKCS#8) or, from SITES.14, a PuTTY key file's text (`.ppk` format 2 or 3;
+RSA, Ed25519, ECDSA). The Host turns a `.ppk` into OpenSSH text with no passphrase of its own, after checking the
+file's MAC, and stores that sealed; `keyPassphrase` then only opens the `.ppk` and is not kept (`hasKeyPassphrase`
+false). A format 3 key with a passphrase (Argon2) is refused with "Convert it with PuTTYgen › Conversions › Export
+OpenSSH key"; so is DSA. A wrong passphrase is refused with "The key passphrase is wrong." `sites.testDraft` converts
+the same way. A Host from before SITES.14 refuses any `.ppk` with its own words.
 
 Secrets: they go in on save and never come back out. A `SiteDto` (in `sites.listResult`, `sites.result` and
 `sites.changed`) has only `hasPassword`, `hasPrivateKey` and `hasKeyPassphrase`. In `SiteSaveRequest`, a secret field
@@ -503,11 +513,127 @@ files, folders, filesDone, filesSkipped, filesFailed, filesRunning, bytes, bytes
 failed, or the batch was stopped) or `canceled`. `problem` is `hostKeyChanged` or absent. `files` counts every item, `folders` the empty folders among them,
 `filesRunning` those moving now. `bytes` counts files of unknown size (an item `size` of -1) as 0, and `bytesDone` includes the files in flight and the
 skipped ones. `speed` is bytes a second, as rclone measures it over its last few seconds. `sites.transfer.get` adds `items`, each `{path, target?, size, state,
-tries, error?, isFolder}` with `state` `waiting`, `running`, `done`, `skipped` or `failed`.
+tries, error?, isFolder}` with `state` `waiting`, `running`, `done`, `skipped`, `failed` or `stopped` (SITES.11, below).
+`filesStopped` counts the stopped ones; a Host from before SITES.11 leaves it out.
 
 `sites.transfer.changed` (the same sessions as `sites.changed`) carries `{transfers}`, every batch. It is sent after
 each change of state and about once a second while files move, never more than once every 400 ms. Nothing is sent, and
 nothing runs, while no batch is running.
+
+#### Remote files extras (SITES.13, 2026-11-17)
+
+All additive: an older Host answers the new requests as unknown requests,
+and the new fields are left out by an older Host and ignored by an older client. With Remote files off, `sites.preview`
+gets `sites.previewResult`, `sites.sync.plan` gets `sites.sync.planResult`, `sites.sync.run` and
+`sites.transfer.schedule` get `sites.transfer.result`, and `sites.remember`/`sites.sync.schedule` get `sites.result`,
+each `{ok: false, problem: "off"}`.
+
+| Request | Payload | Reply |
+| --- | --- | --- |
+| `sites.remember` | `{id, lastFolder?, sort?, sortDescending?}` | `sites.result` (`site` set), then `sites.changed` |
+| `sites.preview` | `{id, path, maxBytes?}` | `sites.previewResult` `SitePreviewDto` |
+| `sites.sync.plan` | `SiteSyncRequest` `{siteId, direction, remoteFolder, localFolder?}` | `sites.sync.planResult` `SiteSyncPlanDto` |
+| `sites.sync.run` | `SiteSyncRequest` plus `waitForSchedule?` | `sites.transfer.result` |
+| `sites.sync.schedule` | `{siteId, enabled, direction, remoteFolder, localFolder}` | `sites.result` (`site` set), then `sites.changed` |
+| `sites.transfer.schedule` | `{id, wait}` | `sites.transfer.result` |
+
+- **Remembered per remote** (`sites.remember`): `lastFolder` (absolute; `""` forgets it), `sort` (`name`, `size`,
+  `modified` or `type`, `SiteSortKeys`) and `sortDescending`. A field left out is not changed. Stored in the remote's
+  file and shown to every client in `SiteDto` as `lastFolder`, `sort`, `sortDescending`; a change sends `sites.changed`
+  (nothing is written or sent when nothing changed). Pointing the remote at another server forgets `lastFolder`.
+- **Speed limit per remote**: `SiteSaveRequest.downLimit` and `upLimit` (KB/s of 1024 bytes, 0 for none, at most
+  10,000,000; null keeps the saved value, so an older client's edit keeps them), shown in `SiteDto` as `downLimit` and
+  `upLimit`. A remote with a limit moves one file at a time, at that limit (rclone's per-file `BwLimitFile` on that
+  copy); its other files wait their turn. A download uses `downLimit`, an upload `upLimit`, a copy between remotes the
+  lower of the source's `downLimit` and the target's `upLimit`. The overall limit (Options, shared with downloads) still
+  applies on top.
+- **Preview** (`sites.preview`): at most `maxBytes` (default and cap 2 MiB, `SitePreviewLimits.MaxBytes`) from the start
+  of the file. `SitePreviewDto` `{ok, message?, problem?, name, kind, mimeType?, data?, size, truncated}`: `kind` is
+  `image` (by its signature: PNG, JPEG, GIF, WebP, BMP; `mimeType` `image/…`), `text` (a known text extension or no NUL
+  byte in the first 8 KiB; `mimeType` `text/plain`; SVG counts as text and is never drawn) or `none` (no `data`). An
+  image larger than the cap has `truncated: true`, no `data` and a `message`. `data` is base64 on the wire. A web client
+  uses it through `POST /api/ipc`, so the same sign-in and origin checks hold; no new endpoint.
+- **Copy between remotes**: `sites.transfer.start` with `direction: "between"`, `targetSiteId` (any saved or unsaved
+  remote, the same one included) and `targetFolder` (absolute); `localFolder` is not used. Names are in `remoteFolder`
+  of the source remote, as for a download. Refused: an unknown target, a folder copied into itself, the same folder of
+  the same remote, a target whose server key is not accepted yet. rclone copies server to server (through this
+  computer). Conflicts, retries, pause, resume and the partial-file sweep (on the target) work as for an upload.
+  `SiteTransferDto` adds `targetSiteId`, `targetSiteName` and `targetFolder` (null for the other directions) and
+  `localFolder` is `""`. Removing either remote cancels the batch. A scoped session (web, server) has no folder to check
+  for it.
+- **One-way sync** (`sites.sync.plan`, `sites.sync.run`): `download` copies the server folder to the folder here,
+  `upload` the folder here to the server folder; `localFolder` left out is the remote's linked folder (the matching
+  folder under it, for a folder below the remote's start folder). Every file of both sides is compared, all the way
+  down (at most 20,000 a side): one missing at the target is `new`; one newer at the source (by more than two seconds),
+  or of another size when not older, is `changed`; one newer at the target is left alone and counted in `newerThere`;
+  the rest are counted in `same`. Nothing is ever deleted. `SiteSyncPlanDto` `{ok, message?, problem?, direction,
+  remoteFolder, localFolder, files: [{path, size, reason}], count, bytes, same, newerThere}` lists at most 2,000 files
+  (`count` is all of them). `sites.sync.run` works the plan out again and starts one ordinary batch of those files with
+  conflict `replace`; with nothing to copy it answers `{ok: true, message: "Nothing to copy: the folders match."}` and
+  no `transfer`. A scoped session must name `localFolder`, which is held to its folders.
+- **Scheduled transfers**: `sites.transfer.start` and `sites.sync.run` with `waitForSchedule: true` make the batch
+  paused with `message: "Waits for a schedule to start it."` (`waitsForSchedule: true` in `SiteTransferDto`).
+  `sites.transfer.schedule {id, wait: true}` does the same to a running or paused batch; `wait: false` leaves it paused
+  for the user. `sites.sync.schedule` keeps one sync per remote (`SiteDto.scheduledSync`, a `SiteSyncRequest`;
+  `enabled: false` forgets it; `localFolder` is required). At the start of a schedule with `siteTransfers: true`, the
+  batches it paused and those waiting for a schedule go on, and each remote's scheduled sync runs as `sites.sync.run`
+  would, unless a batch of that same sync is still unfinished. At its stop, running batches pause as before.
+- **Test on save**: `sites.testDraft` (SITES.11 R4) already tries a form without saving it; no new request.
+
+#### Open an address once, folder comparison and single files (SITES.11)
+
+All additive: an older Host answers these as unknown Sites requests. With Remote files off, `sites.here` gets
+`sites.hereResult`, `sites.transfer.stopFile` and `.startFile` get `sites.transfer.result`, and `sites.openOnce`,
+`sites.close` and `sites.keep` get `sites.result`, each `{ok: false, problem: "off"}`.
+
+| Request | Payload | Reply |
+| --- | --- | --- |
+| `sites.openOnce` | `{address, password?}` or `{id, password}` | `sites.result` (`site` set, `unsaved: true`), then `sites.changed` |
+| `sites.close` | `{id}` | `sites.result`, then `sites.changed` |
+| `sites.keep` | `{id, name?}` | `sites.result` (`site` set, `unsaved: false`), then `sites.changed` |
+| `sites.here` | `{id, path, names}` | `sites.hereResult` `{ok, message?, problem?, path, folders: [{name, here?}]}` |
+| `sites.transfer.stopFile` | `{id, path}` | `sites.transfer.result` |
+| `sites.transfer.startFile` | `{id, path}` | `sites.transfer.result` |
+
+- **Open an address once** (`sites.openOnce`): `address` is `sftp://`, `ftp://` (plain), `ftps://` (explicit TLS;
+  port 990 means implicit TLS), `http://` or `https://` (WebDAV), each with an optional `user@`, port and folder
+  (`SiteAddress`). A password in the address, a `?` or `#` part, control characters and more than 2,048 characters are
+  refused with the reason in `message`. The address becomes an unsaved remote: held in the Host's memory only, gone
+  when the Host stops, shown in `SiteDto` with `unsaved: true` and named after the server. An open unsaved remote of the
+  same kind, server, port, user and TLS is answered again instead of opening a second one (and gets `password` if one
+  is sent). At most 8 addresses are open at once (`SiteStore.MaxUnsaved`); a ninth is refused with "At most 8
+  addresses can be open at once; close one first." `{id, password}` sets the password of an open unsaved remote ("That
+  address is no longer open." when it is gone). Saved remotes are never reached this way. An unsaved SFTP remote with
+  no password is never tried with this PC's SSH keys: `sites.browse`, `sites.test`, `sites.here` and the other requests
+  that would sign in answer `problem: "passwordNeeded"` ("Type the password for this server."), and so does a server
+  that refuses the sign-in of an unsaved remote; the client asks for the password and sends `sites.openOnce {id,
+  password}`. An SFTP address starts with no accepted host key, so `hostKeyNotAccepted` comes first, as for a new
+  saved remote.
+- **Close** (`sites.close`): forgets an unsaved remote as `sites.remove` would, its unfinished batches canceled with
+  "Canceled because the address was closed." A saved remote is refused ("Only an address opened once can be closed.");
+  so is one saved by `sites.keep` while the close waited ("That remote was saved meanwhile; …"), whose batches then
+  stay as they are.
+- **Keep** (`sites.keep`, "Remember"): writes an unsaved remote as a saved one, under `name` (at most 200 characters;
+  left out, it keeps the server's name), with its batches, accepted keys and password. Refused for a saved remote
+  ("Only an address opened once can be remembered.") and for an SFTP one with no password yet ("Type the password for
+  this server before remembering it.").
+- **Folders here** (`sites.here`): for the folder `names` in the server folder `path` (absolute; at most 100,
+  `SiteHereRequest.MaxNames`, more is refused), each folder that is also under the remote's linked folder here is read
+  all the way down on the server and its files compared by name, size and time with the files here. Each entry of
+  `folders` has `here`, a `SiteHereStates` value (`same`, `olderHere`, `someOfIt`, `notHere`, `different`), or null when
+  it was not compared: no such folder here, more than 20,000 files or 2,000 folders inside it, a folder the server would not list, or the
+  one-minute budget for the whole request ran out. A null keeps the value `sites.browse` gave (`folderHere`). Read only
+  and on demand: a client asks once for the folders it shows after a page arrives, never on a timer. Failures are as
+  for `sites.browse` (`hostKeyNotAccepted`, `passwordNeeded`, a server out of reach), and a server that can't be
+  reached or refuses the sign-in marks the remote's `reach` as trouble.
+- **Stop one file** (`sites.transfer.stopFile`): `path` is the item's `path` in `sites.transfer.get`. A moving file is
+  cut (rclone removes its partial file, as for a pause) and waited for; a waiting one is set aside. Either way the item
+  becomes `stopped`, uses no try and is not started again by Resume or Retry; the batch goes on with the others, and
+  one whose files were all stopped ends `done` with none copied. A `done`, `skipped` or `failed` file, or a file of a
+  canceled batch, is left as it is (`ok: true`). An unknown batch or path gets `ok: false` with the reason.
+- **Start one file** (`sites.transfer.startFile`): a `stopped` or `failed` item goes back in line with its tries reset.
+  A `done` or `failed` batch runs again for it; a paused one stays paused and runs it at Resume. A canceled batch is
+  refused ("A canceled transfer can't be started again; start it anew."). Any other item is left as it is (`ok: true`).
 
 ### The server's transports (D1b)
 
@@ -685,7 +811,9 @@ folder dialog) and get `error` "Folder browsing is not available here." A web se
   `.tar.bz2`, `.tbz2`, `.tbz`, `.tar.xz`, `.txz`, `.tar.zst`, `.tzst`) and the first piece of a split 7z, zip, RAR or
   tar set (`name.7z.001`); not a lone `.gz` or `.xz`, any other `.001`, or a set's later pieces. Each has `name`,
   `path` and `size` (a link's target's size), under the same rules as the folders (hidden ones left out, a link only
-  when it leads inside the roots, at most 2,000). Any other `files` value is refused.
+  when it leads inside the roots, at most 2,000). `files: "all"` (SITES.14, for the web's "Files on the server" pane)
+  lists every file under the same rules, each also with `modified` (last write, UTC; null when unreadable). Any other
+  `files` value is refused (a Host from before SITES.14 refuses `all` as well, so a client falls back to folders only).
 - `folders.create` `{ parent, name }`: makes the folder `name` inside `parent` and answers with the listing of the
   new folder. A name with a slash, a leading or trailing space or a trailing dot, `.`, `..`, a colon, a control
   character, more than 255 bytes, a character or device name Windows can't keep (`<>"|?*`, `CON`) or the app's own

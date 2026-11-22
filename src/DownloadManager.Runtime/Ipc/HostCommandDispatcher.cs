@@ -153,6 +153,7 @@ public sealed partial class HostCommandDispatcher
         if (platform.SupportsMeteredNetworkRule) capabilities.Add("meteredNetworkRule");
         if (platform.SupportsQueueConditions) capabilities.Add("queueConditions");
         if (platform.SupportsQueueCompletionNotifications) capabilities.Add("queueCompletionNotification");
+        if (platform.SupportsSavingPauses) capabilities.Add("savingPauses");
         return capabilities;
     }
 
@@ -199,7 +200,7 @@ public sealed partial class HostCommandDispatcher
     /// lifetime that ends when their client goes away (<see cref="IpcOperationLifetime"/>). The rest are quick.
     /// </summary>
     public static bool NeedsLifetime(string type) => type == MessageTypes.FileMetadata || WaitsOnProvider(type)
-        || type is SitesMessageTypes.Probe or SitesMessageTypes.Test or SitesMessageTypes.Browse or SitesMessageTypes.RcloneInstall or SitesMessageTypes.RcloneCheck
+        || type is SitesMessageTypes.Probe or SitesMessageTypes.Test or SitesMessageTypes.TestDraft or SitesMessageTypes.Browse or SitesMessageTypes.RcloneInstall or SitesMessageTypes.RcloneCheck
         || type is SitesMessageTypes.TransferStart or SitesMessageTypes.SafeDownloadStart
         // SITES.6b: both read a server's certificate first.
         || type is SitesMessageTypes.Certificate or SitesMessageTypes.Trust or SitesMessageTypes.TrustSftpEndpoint
@@ -209,7 +210,9 @@ public sealed partial class HostCommandDispatcher
         || type is SitesMessageTypes.DeviceReadOpen or SitesMessageTypes.DeviceWriteOpen or SitesMessageTypes.DeviceCreateOpen
             or SitesMessageTypes.DeviceRead or SitesMessageTypes.DeviceWrite
         || type is SitesMessageTypes.MakeFolder or SitesMessageTypes.Rename or SitesMessageTypes.Count or SitesMessageTypes.Delete
-            or SitesMessageTypes.DeleteFiles;
+            or SitesMessageTypes.DeleteFiles
+        // SITES.13: each reads files on a server.
+        || type is SitesMessageTypes.Preview or SitesMessageTypes.SyncPlan or SitesMessageTypes.SyncRun;
 
     /// <summary>
     /// Registers the session and sends it the hello and the snapshot, directly. Registered first, so nothing that

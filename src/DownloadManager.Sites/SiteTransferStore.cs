@@ -11,11 +11,13 @@ public static class SiteTransferDirections
     public const string Upload = "upload";
 
     /// <summary>
-    /// ANDROID.8 (r6): from <see cref="SiteTransferRecord.RemoteFolder"/> on the batch's site to
-    /// <see cref="SiteTransferRecord.DestinationFolder"/> on <see cref="SiteTransferRecord.DestinationSiteId"/>, streamed
-    /// through the Host's rclone.
+    /// Android 0.1.0 to 0.1.2's name for <see cref="Between"/> (ANDROID.8, r6), with the target in the Destination fields. A
+    /// request or a saved transfer that uses it is read as <see cref="Between"/>; nothing writes it any more.
     /// </summary>
     public const string Copy = "copy";
+
+    /// <summary>SITES.13: from one remote to another (or to another folder of the same one); no folder on this PC.</summary>
+    public const string Between = "between";
 }
 
 /// <summary>What a file does when its target is already there, chosen once for the batch.</summary>
@@ -58,6 +60,9 @@ public static class SiteTransferItemStates
     public const string Done = "done";
     public const string Skipped = "skipped";
     public const string Failed = "failed";
+
+    /// <summary>SITES.11: stopped by the user on its own; not moved, not a failure, started again by Retry.</summary>
+    public const string Stopped = "stopped";
 }
 
 /// <summary>
@@ -105,7 +110,7 @@ public sealed class SiteTransferRecord
 
     public const int SafeDownloadSchemaVersion = 2;
 
-    /// <summary>A copy between two sites: an older Host, which would take it for an upload, leaves the file alone.</summary>
+    /// <summary>A copy between two remotes: an older Host, which would take it for an upload, leaves the file alone.</summary>
     public const int RemoteCopySchemaVersion = 3;
     public const int CurrentSchemaVersion = RemoteCopySchemaVersion;
 
@@ -121,16 +126,27 @@ public sealed class SiteTransferRecord
     /// <summary>The folder on this PC, fully qualified: the target of a download, the source of an upload; empty for a copy.</summary>
     public string LocalFolder { get; set; } = "";
 
-    /// <summary>A copy's target site (it may be <see cref="SiteId"/>); null otherwise.</summary>
+    /// <summary>
+    /// Read only from a transfer Android 0.1.0 to 0.1.2 saved (<see cref="SiteTransferDirections.Copy"/>): moved into the
+    /// Target fields on load and not written again.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? DestinationSiteId { get; set; }
 
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? DestinationSiteName { get; set; }
 
-    /// <summary>A copy's target folder on <see cref="DestinationSiteId"/>, absolute; null otherwise.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? DestinationFolder { get; set; }
 
     public string Conflict { get; set; } = SiteTransferConflicts.Skip;
     public string State { get; set; } = SiteTransferStates.Running;
+
+    /// <summary>SITES.13, <see cref="SiteTransferDirections.Between"/>: the target remote, its name then, and its folder (absolute).</summary>
+    public string? TargetSiteId { get; set; }
+
+    public string? TargetSiteName { get; set; }
+    public string? TargetFolder { get; set; }
 
     /// <summary>A <c>SiteProblems</c> value when the batch was stopped by a problem that needs its own words (a changed host key).</summary>
     public string? Problem { get; set; }
@@ -209,9 +225,19 @@ public sealed class SiteTransferStore
                     continue;
                 }
 
+                if (record.Direction == SiteTransferDirections.Copy)
+                {
+                    // Saved by Android 0.1.0 to 0.1.2 under the old name.
+                    record.Direction = SiteTransferDirections.Between;
+                    record.TargetSiteId ??= record.DestinationSiteId;
+                    record.TargetSiteName ??= record.DestinationSiteName;
+                    record.TargetFolder ??= record.DestinationFolder;
+                    record.DestinationSiteId = record.DestinationSiteName = record.DestinationFolder = null;
+                }
+
                 if (record.Id != name || !SiteStore.IsId(record.SiteId) || record.Items is null
-                    || (record.Direction == SiteTransferDirections.Copy
-                        && (!SiteStore.IsId(record.DestinationSiteId ?? "") || SitePaths.Normalize(record.DestinationFolder ?? "") is null)))
+                    || (record.Direction == SiteTransferDirections.Between
+                        && (!SiteStore.IsId(record.TargetSiteId ?? "") || SitePaths.Normalize(record.TargetFolder ?? "") is null)))
                 {
                     _log?.Invoke($"Transfer file {name}.json does not describe a transfer; it is left as it is.");
                     continue;

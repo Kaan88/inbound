@@ -73,10 +73,80 @@ export function iconState(jobs: Iterable<JobSummary>): IconState {
 /** Steps of the ring: the icon is drawn again only when the state or the step changes, never per event. */
 export const RING_STEPS = 24;
 
-/** Equal for two states that draw the same icon. */
-export function drawKey(state: IconState): string {
+/** Equal for two states that draw the same icon; finished is how many finished downloads have not been looked at (EXT.R14). */
+export function drawKey(state: IconState, finished = 0): string {
   const step = state.progress === null ? "-" : String(Math.floor(Math.min(Math.max(state.progress, 0), 1) * RING_STEPS));
-  return `${state.kind}:${step}`;
+  return `${state.kind}:${step}:${Math.min(finished, FINISHED_SHOWN_MAX)}`;
+}
+
+/** EXT.R14: finished downloads the icon counts (and the session storage keeps), newest first. */
+export const FINISHED_KEEP = 20;
+/** The badge shows at most this many. */
+export const FINISHED_SHOWN_MAX = 99;
+
+/** The finished list with one more at the front (a download finishing again moves to the front). */
+export function addFinished(ids: readonly string[], id: string): string[] {
+  return [id, ...ids.filter((known) => known !== id)].slice(0, FINISHED_KEEP);
+}
+
+/** Reads the stored finished list: only non-empty strings. */
+export function parseFinished(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((id): id is string => typeof id === "string" && id.length > 0).slice(0, FINISHED_KEEP)
+    : [];
+}
+
+/** The badge text for the finished count, or "" for none. */
+export function finishedBadge(count: number): string {
+  return count > 0 ? String(Math.min(count, FINISHED_SHOWN_MAX)) : "";
+}
+
+/** EXT.R16: the id to file-name map, only strings. */
+export function parseFinishedNames(value: unknown): Record<string, string> {
+  const names: Record<string, string> = {};
+  if (value && typeof value === "object") {
+    for (const [id, name] of Object.entries(value as Record<string, unknown>)) {
+      if (typeof name === "string" && name.length > 0) names[id] = name;
+    }
+  }
+  return names;
+}
+
+/** EXT.R16: the names of the ids still in the list only. */
+export function keepNames(names: Readonly<Record<string, string>>, ids: readonly string[]): Record<string, string> {
+  const kept: Record<string, string> = {};
+  for (const id of ids) if (names[id]) kept[id] = names[id];
+  return kept;
+}
+
+/**
+ * The tooltip for finished downloads, or null for none. With the newest one's file name (EXT.R16): "ubuntu.iso
+ * finished" or "ubuntu.iso and 2 more finished".
+ */
+export function finishedTitle(count: number, newestName?: string): string | null {
+  if (count <= 0) return null;
+  if (newestName) {
+    const more = count - 1;
+    return `Inbound Download Manager: ${newestName}${more > 0 ? ` and ${more} more` : ""} finished. Open the popup to see ${count === 1 ? "it" : "them"}.`;
+  }
+  const what = count === 1 ? "a download has" : `${count} downloads have`;
+  return `Inbound Download Manager: ${what} finished. Open the popup to see ${count === 1 ? "it" : "them"}.`;
+}
+
+/**
+ * The tooltip while automatic sending is off or paused (the badge says OFF then), with the finished downloads after it;
+ * null when sending is on.
+ */
+export function offTitle(off: boolean, paused: boolean, finished: number): string | null {
+  const base = off
+    ? "Inbound Download Manager: automatic sending is off"
+    : paused
+      ? "Inbound Download Manager: sending is paused"
+      : null;
+  if (!base) return null;
+  if (finished <= 0) return base;
+  const what = finished === 1 ? "A download has" : `${finished} downloads have`;
+  return `${base}. ${what} finished. Open the popup to see ${finished === 1 ? "it" : "them"}.`;
 }
 
 /** The icon's tooltip for a state, or null when idle (the catching status shows then). */

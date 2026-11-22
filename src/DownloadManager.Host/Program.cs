@@ -235,6 +235,7 @@ internal static class Program
             var sites = new DownloadManager.Runtime.Sites.SitesCommands(paths.Root, log.Info,
                 updater: DownloadManager.Runtime.Sites.SitesCommands.CreateUpdater(paths.Root, new ProxiedClientHandler(engine), log.Info),
                 sleepPrevention: sharedSleep.Share(), preventSleep: () => service.GetSettings().PreventSleepWhileDownloading);
+            sites.Transfers.DownloadFolder = service.SiteDownloadFolder; // SITES.11: a download with no folder named
             var dispatcher = new HostCommandDispatcher(service, controller, log, remoteStarted ? remoteCommands : null)
             {
                 Archives = archivesStarted ? new ArchiveIpcDispatcher(archives) : null,
@@ -249,7 +250,7 @@ internal static class Program
             sites.Transfers.ActivityChanged += service.OnSiteTransfersActivityChanged;
             sites.Transfers.Measured += service.OnSiteTransfersMeasured;
             service.AttachSiteTransfers(sites.Transfers.Demand, sites.Transfers.SetSpeedLimit);
-            service.AttachSiteSchedule(start => start ? sites.Transfers.ResumeForScheduleAsync() : sites.Transfers.PauseForScheduleAsync());
+            service.AttachSiteSchedule(sites.ScheduleAsync);
             webUi.CloseWebSessions = () => dispatcher.CloseSessions(ClientRoles.Web);
             var pipe = new HostPipeServer(dispatcher, log);
             archives.Changed += (_, change) => dispatcher.BroadcastArchiveChanged(change);

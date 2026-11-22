@@ -2,7 +2,7 @@
 param(
     [string]$Source,
     [string]$InstallRoot = (Join-Path $env:LOCALAPPDATA "Programs\Inbound Download Manager"),
-    [string]$Version = "0.8.0",
+    [string]$Version = "0.9.0",
     [switch]$NoShortcut,
     [switch]$NoLaunch,
     [switch]$LaunchAtSignIn
@@ -107,9 +107,8 @@ Browser extension:
   Edge: install Inbound Download Manager Bridge from Microsoft Edge Add-ons:
     https://microsoftedge.microsoft.com/addons/detail/ifoagddcenmjpbklkhghbdmgplldcdci
 
-  Firefox: download inbound-bridge-<version>-firefox.xpi from the latest release,
-    https://github.com/Kaan88/inbound/releases/latest
-  and drag it onto a Firefox window. Firefox updates it after that.
+  Firefox: install Inbound Download Manager Bridge from Firefox Add-ons:
+    https://addons.mozilla.org/firefox/addon/inbound-download-manager/
 
 Native host registration (Chrome and Edge share one manifest; Firefox has its own):
   HKCU\Software\Google\Chrome\NativeMessagingHosts\com.kaank.downloadmanager

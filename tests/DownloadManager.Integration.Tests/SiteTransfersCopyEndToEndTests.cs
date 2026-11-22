@@ -24,8 +24,8 @@ public sealed partial class SiteTransfersEndToEndTests
 
         var started = await StartCopyAsync(commands, from, to, "/backup", SiteTransferConflicts.Skip,
             new SiteTransferNameDto { Name = "docs", IsFolder = true }, new SiteTransferNameDto { Name = "one-mb.bin" });
-        Assert.Equal(SiteTransferDirections.Copy, started.Direction);
-        Assert.Equal((to, "Other", "/backup"), (started.DestinationSiteId, started.DestinationSiteName, started.DestinationFolder));
+        Assert.Equal(SiteTransferDirections.Between, started.Direction);
+        Assert.Equal((to, "Other", "/backup"), (started.TargetSiteId, started.TargetSiteName, started.TargetFolder));
         Assert.Equal("", started.LocalFolder);
         Assert.Equal(3, started.Files);
         var record = JsonNode.Parse(await File.ReadAllTextAsync(Path.Combine(State, "sites", "transfers", started.Id + ".json")))!.AsObject();

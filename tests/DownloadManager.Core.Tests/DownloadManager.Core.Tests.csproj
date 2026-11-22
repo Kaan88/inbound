@@ -14,9 +14,9 @@
 
   <ItemGroup>
     <PackageReference Include="coverlet.collector" Version="6.0.4" />
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.2" />
     <PackageReference Include="xunit" Version="2.9.3" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" />
   </ItemGroup>
 
   <ItemGroup>
@@ -81,6 +81,10 @@
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\ProgressOverviewText.cs" Link="WinUI\ProgressOverviewText.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\UiFormat.cs" Link="WinUI\UiFormat.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\SitesBrowseRules.cs" Link="WinUI\SitesBrowseRules.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\SitesHomeRules.cs" Link="WinUI\SitesHomeRules.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\SitesCommandRules.cs" Link="WinUI\SitesCommandRules.cs" />
+    <Compile Include="..\..\src\DownloadManager.Sites\SiteTransferPaths.cs" Link="WinUI\SiteTransferPaths.cs" />
+    <Compile Include="..\..\src\DownloadManager.Sites\SitePaths.cs" Link="WinUI\SitePaths.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\RegionSelection.cs" Link="WinUI\RegionSelection.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\SpeedLimitText.cs" Link="WinUI\SpeedLimitText.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\PackageArchiveSection.cs" Link="WinUI\PackageArchiveSection.cs" />
@@ -88,6 +92,7 @@
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Servers\ServerSecrets.cs" Link="WinUI\ServerSecrets.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Servers\RemoteRules.cs" Link="WinUI\RemoteRules.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Servers\ServerSwitch.cs" Link="WinUI\ServerSwitch.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\CommandKey.cs" Link="WinUI\CommandKey.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\ProgressWindowSet.cs" Link="WinUI\ProgressWindowSet.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Servers\VersionStatus.cs" Link="WinUI\VersionStatus.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\WindowCascadeRules.cs" Link="WinUI\WindowCascadeRules.cs" />

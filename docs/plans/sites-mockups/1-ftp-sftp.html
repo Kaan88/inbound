@@ -1,0 +1,465 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Inbound Sites Mockups</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: a situation list on the left, one WinUI-styled Inbound window on the right, notes underneath. Palette = App.xaml Inbound tokens. */
+:root{
+--font:"Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,sans-serif;
+--page:#E6E6E6;--panel:#F4F4F4;--text:#1A1A1A;--sec:#666666;
+--win:#F3F3F3;--chrome:rgba(255,255,255,.55);--surface:#FFFFFF;--divider:#DADADA;--fill:#1F6FC5;--on-acc:#FFFFFF;--upload:#B35C00;--track:#E2E2E2;--hl:#DCE9F7;--sel:rgba(0,0,0,.08);--card:rgba(255,255,255,.7);--cardstroke:rgba(0,0,0,.075);--ctl:rgba(255,255,255,.8);--ctl-stroke:rgba(0,0,0,.13);--dlg:#FAFAFA;
+--active:#1B65B4;--done:#1B7130;--failed:#B3261E;--wait:#8A5A00;--neutral:#5F5F5F;
+--i-start:#2E8B3E;--i-pause:#B7791F;--i-danger:#C42B1C;--i-info:#1F6FC5;--i-neutral:#6A6A6A;--i-media:#7B4FB8;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+--page:#101010;--panel:#1A1A1A;--text:#FFFFFF;--sec:#A3A3A3;
+--win:#202020;--chrome:rgba(255,255,255,.031);--surface:#181818;--divider:#343434;--fill:#4AA3F0;--on-acc:#0B1A2A;--upload:#F0A35E;--track:#383838;--hl:#2B3A4F;--sel:rgba(255,255,255,.094);--card:rgba(255,255,255,.05);--cardstroke:rgba(255,255,255,.08);--ctl:rgba(255,255,255,.06);--ctl-stroke:rgba(255,255,255,.1);--dlg:#2B2B2B;
+--active:#6DB3F2;--done:#5DC879;--failed:#F58B8B;--wait:#E0A93E;--neutral:#A3A3A3;
+--i-start:#8CCF8C;--i-pause:#E8B36A;--i-danger:#E08A8A;--i-info:#6FA8DC;--i-neutral:#A8A8A8;--i-media:#B49AD6;color-scheme:dark}}
+:root[data-theme="dark"]{
+--page:#101010;--panel:#1A1A1A;--text:#FFFFFF;--sec:#A3A3A3;
+--win:#202020;--chrome:rgba(255,255,255,.031);--surface:#181818;--divider:#343434;--fill:#4AA3F0;--on-acc:#0B1A2A;--upload:#F0A35E;--track:#383838;--hl:#2B3A4F;--sel:rgba(255,255,255,.094);--card:rgba(255,255,255,.05);--cardstroke:rgba(255,255,255,.08);--ctl:rgba(255,255,255,.06);--ctl-stroke:rgba(255,255,255,.1);--dlg:#2B2B2B;
+--active:#6DB3F2;--done:#5DC879;--failed:#F58B8B;--wait:#E0A93E;--neutral:#A3A3A3;
+--i-start:#8CCF8C;--i-pause:#E8B36A;--i-danger:#E08A8A;--i-info:#6FA8DC;--i-neutral:#A8A8A8;--i-media:#B49AD6;color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--page);color:var(--text);font:14px/1.5 var(--font);padding-block:20px 40px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+button{font:inherit;color:inherit}
+.wrap{max-width:1480px;margin:0 auto}
+.top{display:flex;gap:16px;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;margin-bottom:18px}
+.top h1{font-size:24px;font-weight:600;margin:0 0 4px;text-wrap:balance}
+.top p{margin:0;color:var(--sec);max-width:64ch}
+.themebtn{height:32px;padding:0 12px;border-radius:4px;border:1px solid var(--ctl-stroke);background:var(--panel);cursor:pointer}
+.layout{display:grid;grid-template-columns:238px minmax(0,1fr);gap:20px;align-items:start}
+@media (max-width:1100px){.layout{grid-template-columns:minmax(0,1fr)}}
+#rail{display:flex;flex-direction:column;gap:2px}
+@media (max-width:1100px){#rail{flex-direction:row;flex-wrap:wrap;gap:6px}}
+.rg{font-size:11px;font-weight:600;letter-spacing:.04em;color:var(--sec);padding:12px 10px 4px}
+@media (max-width:1100px){.rg{width:100%;padding:6px 2px 0}}
+.ri{display:flex;flex-direction:column;align-items:flex-start;gap:0;text-align:left;background:transparent;border:1px solid transparent;border-radius:6px;padding:6px 10px;cursor:pointer;position:relative}
+.ri span{font-size:12px;color:var(--sec)}
+.ri:hover{background:var(--panel)}
+.ri.on{background:var(--hl)}
+.ri.on::before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:3px;border-radius:2px;background:var(--fill)}
+@media (max-width:1100px){.ri{border-color:var(--divider)}.ri span{display:none}}
+.ri:focus-visible,.themebtn:focus-visible{outline:2px solid var(--fill);outline-offset:1px}
+.stage{overflow-x:auto;padding-bottom:4px}
+.notes{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin-top:16px}
+.note{background:var(--panel);border:1px solid var(--divider);border-radius:8px;padding:12px 14px}
+.note h4{margin:0 0 4px;font-size:12px;font-weight:600;color:var(--sec);letter-spacing:.03em}
+.note p{margin:0;font-size:13.5px;line-height:1.5}
+.note.q{border-color:var(--fill)}
+
+/* the mock window */
+.win{min-width:1100px;position:relative;overflow:hidden;background:var(--win);color:var(--text);border:1px solid var(--divider);border-radius:8px;font:12px/1.35 var(--font)}
+.win svg.ic{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.grow{flex:1}
+.title{height:32px;display:flex;align-items:center;gap:8px;padding-left:12px}
+.title .app{color:var(--fill);display:grid}
+.wc{margin-left:auto;display:flex}
+.wc b{width:46px;height:32px;display:grid;place-items:center;font-weight:400}
+.menubar{height:28px;display:flex;align-items:center;gap:2px;padding:0 6px;background:var(--chrome);border-bottom:1px solid var(--divider)}
+.menubar b{font-weight:400;padding:3px 10px;border-radius:4px}
+.toolbar{height:62px;display:flex;align-items:stretch;padding:2px 6px;background:var(--chrome);border-bottom:1px solid var(--divider);overflow:hidden}
+.tb{min-width:72px;padding:0 8px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;white-space:nowrap}
+.tb svg.ic{width:22px;height:22px}
+.tsep{width:1px;background:var(--divider);margin:8px 4px}
+.c-start{color:var(--i-start)}.c-pause{color:var(--i-pause)}.c-danger{color:var(--i-danger)}.c-info{color:var(--i-info)}.c-neutral{color:var(--i-neutral)}.c-media{color:var(--i-media)}
+.body{display:grid;grid-template-columns:190px minmax(0,1fr)}
+.side{background:var(--chrome);border-right:1px solid var(--divider);padding:6px 0 12px;min-height:470px}
+.sh{padding:12px 12px 4px;color:var(--sec);font-weight:600;font-size:11px}
+.si{position:relative;display:flex;align-items:center;gap:8px;height:30px;margin:1px 4px;padding:0 8px;border-radius:4px}
+.si.on{background:var(--sel)}
+.si.on::before{content:"";position:absolute;left:0;top:7px;bottom:7px;width:3px;border-radius:2px;background:var(--fill)}
+.si .n{margin-left:auto;color:var(--sec)}
+.dot{width:8px;height:8px;border-radius:50%;flex:none;border:1.5px solid var(--neutral)}
+.dot.on{background:var(--done);border-color:var(--done)}.dot.busy{background:var(--wait);border-color:var(--wait)}.dot.lost{background:var(--failed);border-color:var(--failed)}
+.main{min-width:0;padding:8px;display:flex;flex-direction:column;gap:8px}
+.card{background:var(--surface);border:1px solid var(--cardstroke);border-radius:8px;overflow:hidden;min-width:0}
+.tile{background:var(--card);border:1px solid var(--cardstroke);border-radius:8px;padding:10px 12px}
+.panes{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.ph{display:flex;align-items:center;gap:8px;padding:7px 10px;background:var(--chrome);border-bottom:1px solid var(--divider)}
+.ph b{font-weight:600}
+.chipn{border:1px solid var(--divider);border-radius:10px;padding:0 8px;color:var(--sec);font-size:11px;line-height:18px}
+.chipn.warn{color:var(--wait);border-color:var(--wait)}.chipn.ok{color:var(--done);border-color:var(--done)}.chipn.bad{color:var(--failed);border-color:var(--failed)}
+.pp{display:flex;align-items:center;gap:6px;padding:6px 8px;border-bottom:1px solid var(--divider)}
+.ib{width:28px;height:26px;display:grid;place-items:center;border-radius:4px;border:1px solid var(--ctl-stroke);background:var(--ctl);cursor:pointer;color:var(--i-neutral)}
+.pathbox{flex:1;min-width:0;height:26px;display:flex;align-items:center;padding:0 8px;border:1px solid var(--ctl-stroke);border-radius:4px;background:var(--ctl);font-family:Consolas,"Cascadia Mono",monospace;font-size:11.5px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.filter{width:120px;height:26px;display:flex;align-items:center;gap:6px;padding:0 8px;border:1px solid var(--ctl-stroke);border-radius:4px;background:var(--ctl);color:var(--sec)}
+.filter.has{color:var(--text);width:150px}
+.lh,.lr{display:grid;grid-template-columns:var(--cols);align-items:center;padding:0 10px;gap:8px}
+.lh{height:26px;background:var(--chrome);border-bottom:1px solid var(--divider);font-weight:600}
+.lr{height:27px;position:relative;white-space:nowrap}
+.lr>*{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.lr .nm{display:flex;align-items:center;gap:7px}
+.lr .nm span{overflow:hidden;text-overflow:ellipsis}
+.lr.sel{background:var(--hl)}
+.lr.sel::before{content:"";position:absolute;left:0;top:7px;bottom:7px;width:3px;border-radius:2px;background:var(--fill)}
+.lr:not(.sel):hover{background:var(--sel)}
+.lr .r{text-align:right}.sec{color:var(--sec)}
+.lr.stale{color:var(--sec)}
+.foot{padding:6px 10px;border-top:1px solid var(--divider);color:var(--sec);background:var(--chrome)}
+.st-active{color:var(--active)}.st-done{color:var(--done)}.st-failed{color:var(--failed)}.st-wait{color:var(--wait)}.st-neutral{color:var(--neutral)}
+.stc{display:flex;flex-direction:column;gap:2px;justify-content:center;min-width:0}
+.stc>span{line-height:13px;overflow:hidden;text-overflow:ellipsis}
+.bar{height:6px;border-radius:3px;background:var(--track);overflow:hidden}
+.bar i{display:block;height:100%;border-radius:3px;background:var(--fill)}
+.bar.up i{background:var(--upload)}.bar.wait i{background:var(--wait)}
+.qt{display:flex;gap:10px;align-items:center;padding:7px 10px;background:var(--chrome);border-bottom:1px solid var(--divider)}
+.qt b{font-weight:600}.qt span{color:var(--sec)}
+.dirI{color:var(--i-pause)}.fileI{color:var(--i-neutral)}.linkI{color:var(--i-info)}
+.down{color:var(--fill)}.upc{color:var(--upload)}
+.state{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:20px;color:var(--sec);min-height:190px}
+.state svg.ic{width:32px;height:32px}
+.state .t{color:var(--text);font-size:14px;font-weight:600}
+.ring{width:28px;height:28px;border-radius:50%;border:3px solid var(--track);border-top-color:var(--fill);animation:sp 1s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.ring{animation:none}}
+.steps{display:flex;flex-direction:column;gap:7px;align-items:flex-start;text-align:left;color:var(--text)}
+.steps div{display:flex;gap:8px;align-items:center}
+.steps .todo{color:var(--sec)}
+.info{display:flex;gap:10px;align-items:center;padding:8px 12px;border-radius:4px;border:1px solid var(--cardstroke);background:var(--card)}
+.info.inf{background:var(--hl)}
+.info .ii{display:grid}
+.info.warn .ii{color:var(--wait)}.info.err .ii{color:var(--failed)}.info.ok .ii{color:var(--done)}.info.inf .ii{color:var(--fill)}
+.info .tx{flex:1;min-width:0}.info .tx b{font-weight:600}
+.b{height:28px;padding:0 12px;border-radius:4px;border:1px solid var(--ctl-stroke);background:var(--ctl);display:inline-flex;align-items:center;gap:6px;cursor:pointer;white-space:nowrap}
+.b.acc{background:var(--fill);color:var(--on-acc);border-color:transparent}
+.b.dng{color:var(--i-danger)}
+.b:focus-visible{outline:2px solid var(--fill);outline-offset:1px}
+.gbar{height:23px;display:flex;align-items:center;gap:14px;padding:0 12px;background:var(--chrome);border-top:1px solid var(--divider);color:var(--sec)}
+.sbar{height:24px;display:flex;align-items:center;gap:12px;padding:0 12px;background:var(--chrome);border-top:1px solid var(--divider)}
+.scrim{position:absolute;inset:32px 0 0 0;background:rgba(0,0,0,.42);display:grid;place-items:center;z-index:5;padding:16px}
+.dlg{width:min(500px,100%);background:var(--dlg);border:1px solid var(--divider);border-radius:8px;overflow:hidden}
+.dh{padding:20px 22px 18px}
+.dh h3{margin:0 0 10px;font-size:18px;font-weight:600;display:flex;gap:10px;align-items:center}
+.dh p{margin:0 0 10px;font-size:13px;line-height:1.45}
+.df{display:flex;gap:8px;justify-content:flex-end;padding:14px 22px;background:var(--chrome);border-top:1px solid var(--divider)}
+.df .b{min-width:96px;justify-content:center}
+.mono{font-family:Consolas,"Cascadia Mono",monospace;font-size:11.5px}
+.fp{background:var(--card);border:1px solid var(--cardstroke);border-radius:4px;padding:7px 10px;word-break:break-all;margin:4px 0 10px}
+.kv{display:grid;grid-template-columns:110px 1fr;gap:4px 12px;font-size:13px;margin-bottom:8px}
+.kv span:nth-child(odd){color:var(--sec)}
+.rd,.cb{display:flex;gap:10px;align-items:flex-start;margin:7px 0;font-size:13px;cursor:pointer}
+.rd i{width:18px;height:18px;border-radius:50%;border:1px solid var(--sec);flex:none;margin-top:1px;position:relative}
+.rd i.on{border-color:var(--fill)}.rd i.on::after{content:"";position:absolute;inset:4px;border-radius:50%;background:var(--fill)}
+.cb i{width:18px;height:18px;border-radius:4px;border:1px solid var(--sec);flex:none;margin-top:1px;display:grid;place-items:center;color:var(--on-acc)}
+.cb i.on{background:var(--fill);border-color:var(--fill)}
+.cb svg.ic{width:13px!important;height:13px!important;stroke-width:2.4}
+.sel2{display:inline-flex;gap:2px;padding:2px;border-radius:6px;background:var(--card);border:1px solid var(--cardstroke);margin-bottom:12px}
+.sel2 b{font-weight:400;padding:3px 12px;border-radius:4px;cursor:pointer}
+.sel2 b.on{background:var(--sel);font-weight:600}
+.fld{display:flex;flex-direction:column;gap:4px;min-width:0}
+.fld>label{color:var(--sec);font-size:12px}
+.in{height:28px;width:100%;border:1px solid var(--ctl-stroke);border-radius:4px;background:var(--ctl);color:var(--text);font:inherit;padding:0 8px}
+select.in{padding-right:4px}
+.in:focus-visible{outline:2px solid var(--fill);outline-offset:0}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:10px 12px}
+.w2{position:absolute;left:50%;top:56px;transform:translateX(-50%);width:700px;max-width:96%;background:var(--win);border:1px solid var(--divider);border-radius:8px;overflow:hidden;box-shadow:0 10px 30px rgba(0,0,0,.35);z-index:6}
+.w2 .title{background:var(--win)}
+.mgr{display:grid;grid-template-columns:200px minmax(0,1fr)}
+.mgr .tree{border-right:1px solid var(--divider);padding:8px 0;background:var(--chrome);min-height:420px}
+.mgr .form{padding:12px 16px;display:flex;flex-direction:column;gap:10px}
+.menu{position:absolute;width:210px;background:var(--dlg);border:1px solid var(--divider);border-radius:8px;padding:4px;z-index:4;box-shadow:0 8px 20px rgba(0,0,0,.3)}
+.menu div{display:flex;gap:10px;align-items:center;padding:6px 10px;border-radius:4px;cursor:pointer}
+.menu div:hover,.menu div.h{background:var(--sel)}
+.menu hr{border:0;border-top:1px solid var(--divider);margin:4px 2px}
+.drop{outline:2px dashed var(--fill);outline-offset:-4px;background:var(--hl)}
+.ghost{position:absolute;z-index:3;background:var(--dlg);border:1px solid var(--fill);border-radius:4px;padding:5px 10px;display:flex;gap:8px;align-items:center}
+.seg{display:flex;height:14px;border-radius:2px;overflow:hidden;gap:2px}
+.seg div{flex:1;background:var(--track);position:relative}.seg div i{position:absolute;inset:0 auto 0 0;background:var(--fill)}
+.tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.tiles .tile small{display:block;color:var(--sec);font-size:12px}.tiles .tile b{font-size:18px;font-weight:600}.tiles .tile b u{text-decoration:none;font-size:12px;font-weight:400;color:var(--sec)}
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div>
+      <h1>Sites in Inbound</h1>
+      <p>FTP, FTPS and SFTP as saved sites you connect to and browse, with every transfer landing in the list you already have. Mockups only; nothing here is built.</p>
+    </div>
+    <button class="themebtn" id="themebtn" type="button">Theme: system</button>
+  </header>
+  <div class="layout">
+    <nav id="rail" aria-label="Situations"></nav>
+    <div>
+      <div class="stage"><div id="win"></div></div>
+      <section class="notes" id="notes" aria-live="polite"></section>
+    </div>
+  </div>
+</div>
+
+<script>
+const P={
+plus:'<path d="M12 5v14M5 12h14"/>',play:'<path d="M7 4v16l13-8z"/>',square:'<rect x="6" y="6" width="12" height="12" rx="2"/>',
+pause:'<path d="M8 5v14M16 5v14"/>',trash:'<path d="M4 7h16M10 11v6M14 11v6M5 7l1 13h12l1-13M9 7V4h6v3"/>',
+sliders:'<path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/>',
+clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+folder:'<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+'folder-plus':'<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 10v5M9.5 12.5h5"/>',
+file:'<path d="M7 3h7l5 5v13H7zM14 3v5h5"/>',
+download:'<path d="M12 4v11M7 11l5 5 5-5M5 20h14"/>',upload:'<path d="M12 16V5M7 9l5-5 5 5M5 20h14"/>',
+refresh:'<path d="M20 11a8 8 0 0 0-14-4L4 9M4 4v5h5M4 13a8 8 0 0 0 14 4l2-2M20 20v-5h-5"/>',
+unplug:'<path d="M9 3v4M15 3v4M6 7h12v3a6 6 0 0 1-12 0zM12 16v5M3 3l18 18"/>',
+plug:'<path d="M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0zM12 17v4"/>',
+server:'<rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/>',
+lock:'<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+unlock:'<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 7.5-2"/>',
+shield:'<path d="M12 3l8 3v6c0 4.5-3.2 8-8 9-4.8-1-8-4.5-8-9V6z"/><path d="M9 12l2 2 4-4"/>',
+alert:'<path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17h.01"/>',
+chevr:'<path d="M9 6l6 6-6 6"/>',chevd:'<path d="M6 9l6 6 6-6"/>',chevu:'<path d="M6 15l6-6 6 6"/>',
+x:'<path d="M6 6l12 12M18 6L6 18"/>',key:'<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16 7l3 3"/>',
+search:'<circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/>',check:'<path d="M5 12l5 5 9-10"/>',
+info:'<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>',
+aup:'<path d="M12 19V5M6 11l6-6 6 6"/>',adown:'<path d="M12 5v14M6 13l6 6 6-6"/>',
+home:'<path d="M4 11l8-7 8 7v9H4z"/>',cornerr:'<path d="M5 18v-6a3 3 0 0 1 3-3h11M15 5l4 4-4 4"/>',
+edit:'<path d="M4 20h4L19 9l-4-4L4 16z"/>',copy:'<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>',
+minus:'<path d="M6 12h12"/>',sq:'<rect x="6" y="6" width="12" height="12"/>',import:'<path d="M12 4v10M8 10l4 4 4-4M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/>'
+};
+const ic=(n,c)=>`<svg class="ic ${c||''}" viewBox="0 0 24 24" aria-hidden="true">${P[n]}</svg>`;
+const bt=(l,o={})=>`<button class="b ${o.acc?'acc':''} ${o.dng?'dng':''}" type="button" ${o.go?`data-go="${o.go}"`:''}>${o.i?ic(o.i):''}${l}</button>`;
+const rd=(l,on,g)=>`<label class="rd" data-grp="${g}"><i class="${on?'on':''}"></i><span>${l}</span></label>`;
+const cb=(l,on)=>`<label class="cb"><i class="${on?'on':''}">${on?ic('check'):''}</i><span>${l}</span></label>`;
+const info=(k,title,msg,acts)=>`<div class="info ${k}"><span class="ii">${ic(k==='ok'?'check':k==='inf'?'info':'alert')}</span><div class="tx"><b>${title}</b> ${msg}</div>${acts||''}</div>`;
+const dlg=(title,body,btns,ico)=>`<div class="scrim"><div class="dlg" role="dialog" aria-label="${title}"><div class="dh"><h3>${ico||''}${title}</h3>${body}</div><div class="df">${btns}</div></div></div>`;
+
+const T=(i,l,c)=>`<div class="tb">${ic(i,'c-'+c)}<span>${l}</span></div>`;
+function side(sel,st){
+  st=st||{};
+  const it=(l,n,k)=>`<div class="si ${sel===l?'on':''}">${k||''}<span>${l}</span>${n!==undefined?`<span class="n">${n}</span>`:''}</div>`;
+  const dot=s=>`<i class="dot ${s||''}"></i>`;
+  return `<div class="side">
+  ${it('All Downloads',7)}${it('Unfinished',5)}${it('Active',st.active===undefined?3:st.active)}${it('Queued',2)}${it('Failed',st.failed===undefined?1:st.failed)}${it('Finished',4)}
+  <div class="sh">Queues</div>${it('Main queue',5)}
+  <div class="sh">Sites</div>
+  ${it('nas.home.lan','',dot(st.nas))}${it('files.example.org','',st.ftp==='plain'?ic('unlock','st-wait'):dot(st.ftp))}${it('box.example.net','',dot(st.box))}
+  </div>`;
+}
+function win(o){
+  const tb=o.site?`<i class="tsep"></i>${T('unplug','Disconnect','neutral')}${T('refresh','Refresh','info')}${T('folder-plus','New folder','info')}`:'';
+  return `<div class="win" role="group" aria-label="Mock of the Inbound window">
+  <div class="title"><span class="app">${ic('download')}</span><span>Inbound Download Manager</span><span class="wc"><b>${ic('minus')}</b><b>${ic('sq')}</b><b>${ic('x')}</b></span></div>
+  <div class="menubar"><b>Tasks</b><b>File</b><b>Downloads</b><b>View</b><b>Help</b></div>
+  <div class="toolbar">${T('plus','Add URL','info')}<i class="tsep"></i>${T('play','Resume','start')}${T('pause','Stop','pause')}${T('square','Stop All','pause')}<i class="tsep"></i>${T('trash','Delete','danger')}${T('trash','Delete Completed','danger')}<i class="tsep"></i>${T('sliders','Options','neutral')}${T('clock','Scheduler','info')}<i class="tsep"></i>${T('play','Start Queue','start')}${T('square','Stop Queue','pause')}${tb}</div>
+  <div class="body">${side(o.sel,o.st)}<div class="main">${o.main}</div></div>
+  <div class="gbar"><span>${ic('adown','down')} ${o.dl||'0 B/s'}</span><span>${ic('aup','upc')} ${o.ul||'0 B/s'}</span><span class="grow"></span><span>Last 1 minute</span>${ic('chevu')}</div>
+  <div class="sbar"><span>${o.status||'Ready'}</span></div>
+  ${o.over||''}</div>`;
+}
+
+/* panes */
+const LOCAL=[['..','dir'],['archive','dir','','Nov 02 09:14'],['debian-13.2-amd64.iso','file','3.4 GB','Oct 28 21:40'],['fedora-43-workstation.iso','file','2.2 GB','Oct 14 18:02'],['notes.txt','file','2 KB','Nov 09 19:19']];
+const REMOTE=[['..','dir'],['backups','dir','','Nov 10 03:00'],['photos-2026','dir','','Nov 08 16:45'],['ubuntu-26.04-desktop-amd64.iso','file','5.8 GB','Nov 05 14:02',1],['ubuntu-26.04-live-server.iso','file','2.1 GB','Nov 05 14:11',1],['latest.iso','link','5.8 GB','Nov 05 14:02'],['notes.txt','file','2 KB','Nov 09 19:19']];
+const FTPROWS=[['..','dir'],['v2.4','dir','','Sep 12 00:00'],['v2.5','dir','','Oct 30 08:00'],['CHECKSUMS.txt','file','1 KB','Oct 30 08:00'],['toolkit-2.5.1-win64.zip','file','184 MB','Oct 30 08:02',1],['toolkit-2.5.1-src.tar.gz','file','12 MB','Oct 30 08:02']];
+function rows(list,stale){
+  return list.map(r=>{
+    const ico=r[1]==='dir'?ic('folder','dirI'):r[1]==='link'?ic('cornerr','linkI'):ic('file','fileI');
+    return `<div class="lr ${r[4]?'sel':''} ${stale?'stale':''}"><div class="nm">${ico}<span>${r[0]}</span></div><div class="r sec">${r[2]||''}</div><div class="sec">${r[3]||''}</div></div>`;
+  }).join('');
+}
+function pane(o){
+  const cols='minmax(120px,1fr) 70px 104px';
+  const head=`<div class="ph">${ic(o.remote?'server':'home')}<b>${o.title}</b>${o.chip||''}</div>
+  <div class="pp"><span class="ib">${ic('chevu')}</span><div class="pathbox">${o.path}</div><span class="ib">${ic('refresh')}</span>${o.filter!==undefined?`<div class="filter ${o.filter?'has':''}">${ic('search')}<span>${o.filter||'Filter'}</span></div>`:''}</div>`;
+  const lh=`<div class="lh" style="--cols:${cols}"><span>${o.remote?'Remote name':'Local name'} ${ic('chevu')}</span><span class="r">Size</span><span>Modified</span></div>`;
+  let content;
+  if(o.state) content=o.state;
+  else content=`<div style="--cols:${cols}">${lh}${rows(o.rows,o.stale)}</div>`;
+  return `<div class="card ${o.drop?'drop':''}" style="position:relative">${head}${content}<div class="foot">${o.foot||''}</div>${o.extra||''}</div>`;
+}
+const LOCALPANE=(x={})=>pane(Object.assign({title:'This PC',path:'D:\\Downloads\\ISOs',rows:LOCAL,foot:'3 files and 1 folder · 5.6 GB'},x));
+const NASPANE=(x={})=>pane(Object.assign({remote:1,title:'nas.home.lan',chip:'<span class="chipn ok">SFTP</span>',path:'/media/isos',rows:REMOTE,foot:'2 of 7 selected · 7.9 GB'},x));
+
+/* queue list */
+function qlist(list,o={}){
+  const cols='minmax(240px,1.7fr) 78px 150px 76px 96px minmax(150px,1.2fr)';
+  const hd=`<div class="lh" style="--cols:${cols}"><span>File Name</span><span class="r">Size</span><span>Status</span><span>Time left</span><span>Transfer rate</span><span>Description</span></div>`;
+  const body=list.map(r=>{
+    const arrow=ic(r.d==='up'?'aup':'adown',r.d==='up'?'upc':'down');
+    const ch=r.pkg?ic(r.pkg==='open'?'chevd':'chevr'):'';
+    const bar=r.pct!==undefined?`<div class="bar ${r.d==='up'?'up':''} ${r.c==='wait'?'wait':''}"><i style="width:${r.pct}%"></i></div>`:'';
+    return `<div class="lr ${r.sel?'sel':''}" style="--cols:${cols}"><div class="nm" style="padding-left:${(r.ind||0)*20}px">${ch}${arrow}<span>${r.n}</span></div><div class="r sec">${r.size||''}</div><div class="stc"><span class="st-${r.c}">${r.st}</span>${bar}</div><div class="sec">${r.left||''}</div><div class="sec">${r.rate||''}</div><div class="sec">${r.desc||''}</div></div>`;
+  }).join('');
+  return `<div class="card">${o.title?`<div class="qt"><b>${o.title}</b><span>${o.sub||''}</span></div>`:''}${hd}${body}</div>`;
+}
+const Q1={n:'ubuntu-26.04-desktop-amd64.iso',d:'down',size:'5.8 GB',st:'Downloading 41.2%',c:'active',pct:41.2,left:'6m 12s',rate:'118.4 MB/s',desc:'nas.home.lan · 4 connections',sel:1};
+const Q2={n:'toolkit-2.5.1-win64.zip',d:'down',size:'184 MB',st:'Downloading 63.0%',c:'active',pct:63,left:'18s',rate:'4.9 MB/s',desc:'files.example.org · FTPS, 1 connection'};
+const Q3={n:'backup-2026-11.tar.zst',d:'down',size:'22.4 GB',st:'Queued',c:'wait',left:'',rate:'',desc:'nas.home.lan · waits for a free slot (3 of 3 in use)'};
+const Q4={n:'debian-13.2-amd64.iso',d:'down',size:'3.4 GB',st:'Completed',c:'done',desc:'nas.home.lan · Nov 09 19:19:28 2026'};
+
+/* scenarios */
+const S={};
+const defStatus='nas.home.lan · SFTP · Connected · ED25519 SHA256:Zk3q…9fT1';
+
+S.empty={g:'Connecting',l:'No sites yet',d:'First visit to Sites',
+ notes:['The Sites entry in the sidebar with one action to add a site, and a way in from FileZilla.','Nothing runs yet. Saved sites live in the Host settings; passwords are protected by Windows.','Should Settings transfer carry the site list? I would include sites and never passwords.'],
+ r:()=>win({sel:'Sites',main:`<div class="card" style="flex:1;display:flex;align-items:center;justify-content:center;min-height:380px"><div class="state">${ic('server')}<div class="t">No sites yet</div><div style="max-width:44ch">Save an FTP, FTPS or SFTP server to browse its folders and download from it.</div><div style="display:flex;gap:8px;margin-top:4px">${bt('Add site',{acc:1,i:'plus',go:'manager'})}${bt('Import from FileZilla',{i:'import'})}</div></div></div>`,status:'No sites'})};
+
+const mgr={proto:'sftp',logon:'Key file',enc:0,tested:false};
+function mgrHtml(){
+  const sf=mgr.proto==='sftp',ftp=mgr.proto==='ftp',impl=mgr.proto==='ftps';
+  const port=sf?22:ftp?21:990;
+  const logons=sf?['Normal','Ask for password','Key file','SSH agent']:['Normal','Ask for password','Anonymous'];
+  if(logons.indexOf(mgr.logon)<0)mgr.logon=sf?'Key file':'Normal';
+  const opt=(arr,v)=>arr.map(a=>`<option ${a===v?'selected':''}>${a}</option>`).join('');
+  const encs=['Use explicit FTP over TLS if available','Require explicit FTP over TLS','Only use plain FTP (insecure)'];
+  const anon=mgr.logon==='Anonymous';
+  const tree=`<div class="tree"><div class="si"><span class="sec">${ic('folder')}</span><span>Home</span></div>
+   <div class="si on" style="margin-left:22px">${ic('server')}<span>nas.home.lan</span></div>
+   <div class="si" style="margin-left:22px">${ic('server')}<span>pi-zero</span></div>
+   <div class="si"><span class="sec">${ic('folder')}</span><span>Work</span></div>
+   <div class="si" style="margin-left:22px">${ic('unlock','st-wait')}<span>files.example.org</span></div>
+   <div class="si" style="margin-left:22px">${ic('server')}<span>box.example.net</span></div>
+   <div style="display:flex;gap:6px;padding:12px 8px">${bt('New site')}${bt('New folder')}</div></div>`;
+  const note=sf?info('inf','Host key.','Checked on the first connection and pinned for this site.'):ftp?info('inf','Encryption.','TLS is used when the server offers it. If it does not, you are asked before anything is sent.'):info('inf','Implicit TLS.','The connection is encrypted from the first byte. The certificate is checked on first use.');
+  const form=`<div class="form">
+  <div class="g2"><div class="fld"><label for="proto">Protocol</label><select class="in" id="proto"><option value="sftp" ${sf?'selected':''}>SFTP, SSH File Transfer</option><option value="ftp" ${ftp?'selected':''}>FTP, File Transfer Protocol</option><option value="ftps" ${impl?'selected':''}>FTPS, FTP over implicit TLS</option></select></div>
+  <div class="g2" style="grid-template-columns:1fr 84px"><div class="fld"><label>Host</label><input class="in" value="${sf?'nas.home.lan':'files.example.org'}" readonly></div><div class="fld"><label>Port</label><input class="in" value="${port}" readonly></div></div></div>
+  ${ftp?`<div class="fld"><label for="enc">Encryption</label><select class="in" id="enc">${opt(encs,encs[mgr.enc])}</select></div>`:''}
+  <div class="g2"><div class="fld"><label for="logon">Logon type</label><select class="in" id="logon">${opt(logons,mgr.logon)}</select></div>
+  <div class="fld"><label>User</label><input class="in" value="${anon?'anonymous':'kaan'}" readonly></div></div>
+  ${mgr.logon==='Key file'?`<div class="fld"><label>Key file</label><div style="display:flex;gap:8px"><input class="in" value="C:\\Users\\kaank\\.ssh\\id_ed25519" readonly>${bt('Browse')}</div></div>`:''}
+  ${mgr.logon==='Normal'?`<div class="fld"><label>Password</label><input class="in" type="password" value="••••••••••" readonly></div>`:''}
+  <div class="g2"><div class="fld"><label>Default remote folder</label><input class="in" value="${sf?'/media/isos':'/pub/releases'}" readonly></div><div class="fld"><label>Default local folder</label><input class="in" value="D:\\Downloads\\ISOs" readonly></div></div>
+  <div class="g2"><div class="fld"><label>Simultaneous transfers</label><input class="in" value="3" readonly></div><div class="fld"><label>Connections per file</label><input class="in" value="${sf?4:1}" readonly></div></div>
+  ${ftp||impl?`<div class="fld"><label>Data connection</label><input class="in" value="Passive (recommended)" readonly></div>`:''}
+  ${mgr.tested?info('ok','Connected.',sf?'OpenSSH 9.6 · ED25519 · 12 ms · /media/isos has 7 items.':'vsFTPd 3.0.5 · TLS 1.3 · 38 ms · /pub/releases has 6 items. Resume is supported.'):note}
+  </div>`;
+  return `<div class="w2" role="dialog" aria-label="Site Manager"><div class="title"><span class="app">${ic('server')}</span><span>Site Manager</span><span class="wc"><b>${ic('x')}</b></span></div>
+  <div class="mgr">${tree}${form}</div>
+  <div class="df">${bt('Test connection',{i:'plug'})}<span class="grow"></span>${bt('Save')}${bt('Connect',{acc:1,go:'trust'})}${bt('Cancel',{go:'browse'})}</div></div>`;
+}
+S.manager={g:'Connecting',l:'Site Manager',d:'Protocol, logon and limits',
+ notes:['One window for all three protocols. The fields change with the protocol, and Test connection checks without downloading anything. Try the Protocol and Logon type boxes.','Test connection runs in the Host. The window never opens a socket itself, so the web UI and CLI can offer the same check.','A flat list with folders, as FileZilla has, or tags? I drew folders two levels deep.'],
+ r:()=>win({sel:'nas.home.lan',st:{nas:'on'},site:1,main:`<div class="panes">${LOCALPANE()}${NASPANE()}</div>${qlist([Q1,Q4],{title:'Transfers',sub:'1 active'})}`,status:defStatus,over:mgrHtml()})};
+
+function trustBody(v){
+  if(v==='cert') return dlg('Trust this certificate?',`<p>files.example.org uses a certificate Windows does not trust. Check that this is the server you meant.</p><div class="kv"><span>Subject</span><span>files.example.org</span><span>Issued by</span><span>files.example.org (self-signed)</span><span>Valid until</span><span>Feb 02 2027</span></div><div class="mono fp">SHA-256 4E:91:0C:A7:3B:D2:58:E1:6F:9A:07:C4:B3:2D:81:5E:F0:19:A6:73:CC:0E:42:BD:95:18:3A:6C:F7:20:D9:84</div>`,`${bt('Cancel',{go:'empty'})}${bt('Trust once')}${bt('Trust and remember',{acc:1,go:'connecting'})}`,ic('shield'));
+  return dlg('Trust this server?',`<p>You have not connected to nas.home.lan before. Check that this fingerprint matches the one on the server.</p><div class="kv"><span>Host</span><span>nas.home.lan:22</span><span>Key type</span><span>ED25519</span></div><div class="mono fp">SHA256:Zk3qV8mT0nYb2hLx5cRjW1uAeP7dQsK4oNf6gH9fT1E</div>`,`${bt('Cancel',{go:'empty'})}${bt('Trust once')}${bt('Trust and remember',{acc:1,go:'connecting'})}`,ic('shield'));
+}
+let trustV='key';
+S.trust={g:'Connecting',l:'First connection',d:'Host key or certificate',
+ notes:['SFTP asks about the server fingerprint. FTPS asks about a certificate Windows does not trust. Use the switch to see both.','The Host pins what you accept and refuses any other key on later visits, before a login is sent.','Keep Trust once? It is drawn, but dropping it makes the pinned-hosts list simpler.'],
+ r:()=>{const w=win({sel:trustV==='key'?'nas.home.lan':'files.example.org',st:{nas:'busy'},site:1,main:`<div class="panes">${LOCALPANE()}${NASPANE({state:`<div class="state"><div class="ring"></div><div>Waiting for you</div></div>`,foot:'Not connected'})}</div>${qlist([Q4],{title:'Transfers'})}`,status:'Connecting to nas.home.lan…',over:trustBody(trustV)});
+  return w.replace('<div class="scrim"><div class="dlg"',`<div class="scrim"><div class="dlg"`).replace('<div class="dh"><h3>',`<div class="dh"><div class="sel2" role="tablist"><b class="${trustV==='key'?'on':''}" data-tv="key">SFTP host key</b><b class="${trustV==='cert'?'on':''}" data-tv="cert">FTPS certificate</b></div><h3>`);}};
+
+S.connecting={g:'Connecting',l:'Connecting',d:'Each step as it happens',
+ notes:['Each step shows as it finishes, so a slow server says where it is stuck.','Resolve, connect, key check, sign in and the first listing all run in the Host. Cancel ends the attempt.','Nothing to decide.'],
+ r:()=>win({sel:'nas.home.lan',st:{nas:'busy'},site:1,main:`<div class="panes">${LOCALPANE()}${NASPANE({state:`<div class="state"><div class="ring"></div><div class="steps"><div>${ic('check','st-done')}Found nas.home.lan (192.168.1.20)</div><div>${ic('check','st-done')}Connected on port 22</div><div>${ic('check','st-done')}Host key matches the pinned one</div><div><span class="ring" style="width:16px;height:16px;border-width:2px"></span>Signing in with your key file…</div><div class="todo">${ic('folder')}Reading /media/isos</div></div>${bt('Cancel',{go:'browse'})}</div>`,foot:'Connecting…'})}</div>${qlist([Q4],{title:'Transfers'})}`,status:'Connecting to nas.home.lan…'})};
+
+S.login={g:'Connecting',l:'Password needed',d:'Ask-for-password sites',
+ notes:['Sites set to Ask for password prompt at connect time. A refused login says so and keeps the dialog open.','The password goes to the Host for this session. It is kept only if Remember is ticked, protected by Windows.','Stop retrying after one refusal? Servers that lock accounts after a few tries make that the safer default.'],
+ r:()=>win({sel:'box.example.net',st:{nas:'on',box:'busy'},site:1,main:`<div class="panes">${LOCALPANE()}${NASPANE({title:'box.example.net',state:`<div class="state"><div class="ring"></div><div>Waiting for sign-in</div></div>`,foot:'Not connected'})}</div>${qlist([Q4],{title:'Transfers'})}`,status:'Signing in to box.example.net…',over:dlg('Sign in to box.example.net',`${info('err','Sign-in refused.','Check the user name and password.')}<div class="fld" style="margin-top:12px"><label>User</label><input class="in" value="backup" readonly></div><div class="fld" style="margin-top:10px"><label>Password</label><input class="in" type="password" value="••••••••" readonly></div><div style="margin-top:10px">${cb('Remember for this site (protected by Windows)',0)}</div>`,`${bt('Cancel',{go:'empty'})}${bt('Sign in',{acc:1,go:'browse'})}`,ic('key'))})};
+
+S.browse={g:'Browsing',l:'Browse a site',d:'Two panes, queue below',
+ notes:['Local pane left, remote pane right, transfers under both. Select, right-click, Download. Click rows to select them.','Listings come from the Host. Download creates ordinary jobs, so limits, queues and the scheduler apply with no new rules.','Double-click on a file: download it at once, or only add it to the queue? FileZilla queues it.'],
+ r:()=>win({sel:'nas.home.lan',st:{nas:'on'},site:1,dl:'118.4 MB/s',main:`<div class="panes">${LOCALPANE()}<div style="position:relative">${NASPANE()}<div class="menu" style="left:150px;top:150px"><div class="h" data-go="queue">${ic('download','down')}Download</div><div>${ic('download')}Download to…</div><div>${ic('plus')}Add to queue</div><hr><div>${ic('file')}Open</div><div>${ic('edit')}Rename</div><div>${ic('trash','c-danger')}Delete…</div><div>${ic('folder-plus')}New folder</div><hr><div>${ic('copy')}Copy sftp:// link</div></div></div></div>${qlist([Q1,Q3,Q4],{title:'Transfers',sub:'1 active · 1 queued'})}`,status:defStatus})};
+
+const BIG=[['IMG_2026-01-02_0001.jpg','file','7.9 MB','Jan 02 10:14'],['IMG_2026-01-02_0002.jpg','file','8.1 MB','Jan 02 10:14'],['IMG_2026-01-02_0003.jpg','file','7.6 MB','Jan 02 10:15',1],['IMG_2026-01-02_0004.jpg','file','8.4 MB','Jan 02 10:15',1],['IMG_2026-01-02_0005.jpg','file','7.7 MB','Jan 02 10:16'],['2026-latest','link','','Nov 08 16:45'],['IMG_2026-01-03_0001.jpg','file','8.0 MB','Jan 03 08:02']];
+S.bigdir={g:'Browsing',l:'Large folder',d:'Streaming list and filter',
+ notes:['A folder with 18,402 entries shows its first page at once and keeps reading. The filter narrows the list as it fills. Links show a corner arrow.','The Host streams the listing in pages and keeps it for this visit. A refresh reads it again.','Hold a limit on entries per pane for the web UI on a phone?'],
+ r:()=>win({sel:'nas.home.lan',st:{nas:'on'},site:1,main:`<div class="panes">${LOCALPANE()}${NASPANE({path:'/photos/camera-roll',filter:'2026',rows:BIG,foot:'Reading folder… 9,310 of about 18,400 · 412 match · 2 selected',extra:`<div style="padding:0 10px 8px"><div class="bar" style="margin-top:8px"><i style="width:50%"></i></div></div>`})}</div>${qlist([Q1],{title:'Transfers',sub:'1 active'})}`,status:defStatus,dl:'118.4 MB/s'})};
+
+S['plain-ftp']={g:'Browsing',l:'Plain FTP warning',d:'Unencrypted connection',
+ notes:['The site, the status bar and the notice all say the connection is not encrypted, and offer FTPS when the server has it.','The Host tries explicit TLS first. Plain FTP is used only when the site allows it.','Allow plain FTP at all? Some NAS boxes and cameras leave no choice, so I drew it as a per-site opt-in.'],
+ r:()=>win({sel:'files.example.org',st:{nas:'on',ftp:'plain'},site:1,main:`${info('warn','This connection is not encrypted.','Your password and the files can be read by anyone on the network. This server also offers FTPS.',`${bt('Use FTPS',{acc:1})}${bt('Keep using FTP')}`)}<div class="panes">${LOCALPANE({path:'D:\\Downloads\\Tools'})}${pane({remote:1,title:'files.example.org',chip:'<span class="chipn warn">FTP · not encrypted</span>',path:'/pub/releases',rows:FTPROWS,foot:'1 of 6 selected · 184 MB'})}</div>${qlist([Q2],{title:'Transfers',sub:'1 active'})}`,status:`<span class="st-wait">files.example.org · FTP · Not encrypted</span>`,dl:'4.9 MB/s'})};
+
+S['delete-remote']={g:'Browsing',l:'Delete on the server',d:'Confirm, no recycle bin',
+ notes:['Deleting on a server asks first and says there is no recycle bin. Delete is the red labelled button.','Runs after the confirm. A failure is reported for that item only; the rest continue.','Remote delete, rename and new folder: in the first version or later? Everything else works without them.'],
+ r:()=>win({sel:'nas.home.lan',st:{nas:'on'},site:1,main:`<div class="panes">${LOCALPANE()}${NASPANE()}</div>${qlist([Q4],{title:'Transfers'})}`,status:defStatus,over:dlg('Delete 2 items from nas.home.lan?',`<p><b>ubuntu-26.04-desktop-amd64.iso</b> and 1 more (7.9 GB) will be deleted on the server.</p><p>The server has no recycle bin, so this can't be undone. Your copies on this PC are not touched.</p>`,`${bt('Delete',{dng:1,i:'trash',go:'browse'})}${bt('Cancel',{acc:1,go:'browse'})}`,ic('alert','st-wait'))})};
+
+function details(){
+  const seg=[70,40,30,25].map(p=>`<div><i style="width:${p}%"></i></div>`).join('');
+  return `<div class="card" style="padding:12px;display:flex;flex-direction:column;gap:10px"><div class="tiles"><div class="tile"><small>Size</small><b>5.8 <u>GB</u></b></div><div class="tile"><small>Downloaded</small><b>2.4 <u>GB · 41.2%</u></b></div><div class="tile"><small>Transfer rate</small><b>118.4 <u>MB/s</u></b></div><div class="tile"><small>Time left</small><b>6m 12<u>s</u></b></div></div>
+  <div class="seg" aria-label="Segment map">${seg}</div>
+  <div class="kv" style="margin:0;grid-template-columns:120px 1fr"><span>Server</span><span>nas.home.lan:22 · SFTP</span><span>Sign-in</span><span>Key file (ED25519)</span><span>Encryption</span><span>chacha20-poly1305</span><span>Resume</span><span>Supported, reads from any offset</span><span>Part file</span><span class="mono">D:\\Downloads\\ISOs\\ubuntu-26.04-desktop-amd64.iso.7f3a.part</span></div></div>`;
+}
+S.queue={g:'Transferring',l:'Active transfers',d:'List and details panel',
+ notes:['The list you already have. A site download shows the server in Description. The panel under it shows connections, sign-in, encryption and the part file.','The per-site limit of simultaneous transfers keeps extra files waiting, with the reason in Description.','Show encryption and key type in the panel, or only in a tooltip?'],
+ r:()=>win({sel:'Active',st:{nas:'on',ftp:'on',active:2},main:`${qlist([Q1,Q2,Q3,{n:'render-final.mov',d:'down',size:'3.1 GB',st:'Retry waiting',c:'wait',desc:'nas.home.lan · connection reset, try 2 of 5'},Q4])}${details()}`,dl:'123.3 MB/s',status:'2 active · 1 queued · 1 waiting to retry'})};
+
+const PK=[['IMG_0001.jpg','8 MB','Completed','done',100],['IMG_0002.jpg','7 MB','Completed','done',100],['IMG_0003.jpg','8 MB','Downloading 70.0%','active',70],['IMG_0004.jpg','9 MB','Queued','wait'],['IMG_0005.jpg','7 MB','Queued','wait']];
+S.folder={g:'Transferring',l:'Download a folder',d:'One package row',
+ notes:['Download on a folder becomes one package row. Its files appear as the folder is listed, and the notice says how many were added.','The Host walks the folder, creates one job per file and keeps the same tree under the chosen destination.','Empty folders and links inside a folder: skip links, create empty folders?'],
+ r:()=>win({sel:'Active',st:{nas:'on',active:4},main:`${info('inf','Added 1,204 files from photos-2026 on nas.home.lan.','',`${bt('Show')}${bt('Back to nas.home.lan',{go:'browse'})}`)}${qlist([{n:'photos-2026 (1,204 files)',d:'down',pkg:'open',size:'9.6 GB',st:'Downloading 3.1%',c:'active',pct:3.1,left:'1h 04m',rate:'41.0 MB/s',desc:'nas.home.lan · D:\\Downloads\\photos-2026',sel:1}].concat(PK.map(p=>({n:p[0],d:'down',ind:1,size:p[1],st:p[2],c:p[3],pct:p[4],rate:p[4]==70?'41.0 MB/s':'',desc:''}))).concat([{n:'1,199 more files',ind:1,d:'down',st:'',c:'neutral'}]))}`,dl:'41.0 MB/s',status:'1,204 files in 1 package · 9.6 GB'})};
+
+S.conflict={g:'Transferring',l:'File already exists',d:'Resume, overwrite, keep both',
+ notes:['Choosing a file that already exists asks once. When a part file from an earlier try is found, resuming is the first choice.','Tick Do this for the rest and the existing duplicate policy (Rename, Overwrite, Fail) answers for you from then on.','Same size and date: skip without asking? I would still ask the first time.'],
+ r:()=>win({sel:'nas.home.lan',st:{nas:'on'},site:1,main:`<div class="panes">${LOCALPANE()}${NASPANE()}</div>${qlist([Q4],{title:'Transfers'})}`,status:defStatus,over:dlg('This file already exists',`<p><b>ubuntu-26.04-desktop-amd64.iso</b> is already in D:\\Downloads\\ISOs.</p><div class="kv"><span>On this PC</span><span>2.4 GB part file from an earlier try (Nov 09 19:19)</span><span>On the server</span><span>5.8 GB · Nov 05 14:02</span></div>${rd('Resume the earlier download <span class="sec">(recommended)</span>',1,'c')}${rd('Replace it and start again',0,'c')}${rd('Keep both, name the new one ubuntu-26.04-desktop-amd64 (2).iso',0,'c')}${rd('Skip this file',0,'c')}<div style="margin-top:8px">${cb('Do this for the other 3 files from this folder',0)}</div>`,`${bt('Cancel',{go:'browse'})}${bt('Continue',{acc:1,go:'queue'})}`,ic('file'))})};
+
+S.upload={g:'Not decided',l:'Uploading',d:'Drag local files to the server',
+ notes:['Dragging local files onto the remote pane. Upload rows use the orange the speed graph already uses for upload.','This would be a new job direction, with its own handling of half-written files on the server.','Do uploads exist at all? Every other situation here works without them. Say no and I remove the orange.'],
+ r:()=>win({sel:'nas.home.lan',st:{nas:'on'},site:1,dl:'0 B/s',ul:'38.2 MB/s',main:`<div class="panes">${LOCALPANE({rows:LOCAL.map((r,i)=>i===2||i===4?r.concat([,1].slice(0,0)).slice(0,4).concat([1]):r),foot:'2 of 5 selected · 3.4 GB'})}<div style="position:relative">${NASPANE({drop:1,rows:REMOTE.map(r=>[r[0],r[1],r[2],r[3]]),foot:'Drop to upload into /media/isos'})}<div class="ghost" style="left:60px;top:120px">${ic('aup','upc')}<span>Upload 2 files to /media/isos</span></div></div></div>${qlist([{n:'debian-13.2-amd64.iso',d:'up',size:'3.4 GB',st:'Uploading 18.0%',c:'active',pct:18,left:'1m 22s',rate:'38.2 MB/s',desc:'nas.home.lan · writes debian-13.2-amd64.iso.part',sel:1},{n:'notes.txt',d:'up',size:'2 KB',st:'Queued',c:'wait',desc:'nas.home.lan'},Q4],{title:'Transfers',sub:'1 uploading · 1 queued'})}`,status:defStatus})};
+
+S['hostkey-changed']={g:'When it goes wrong',l:'Server key changed',d:'Blocked before login',
+ notes:['A different key than the pinned one blocks the connection before any login is sent. Both fingerprints are shown side by side.','Nothing is sent to the server. Queued downloads for that site wait until you decide.','Make replacing the key require typing the host name, so it cannot be done by habit?'],
+ r:()=>win({sel:'nas.home.lan',st:{nas:'lost'},site:1,main:`<div class="panes">${LOCALPANE()}${NASPANE({state:`<div class="state">${ic('shield','st-failed')}<div class="t">Not connected</div><div>The server key changed.</div></div>`,foot:'Not connected'})}</div>${qlist([Q3,{n:'render-final.mov',d:'down',size:'3.1 GB',st:'Server key changed',c:'failed',desc:'nas.home.lan · waiting for your decision'}],{title:'Transfers',sub:'2 waiting'})}`,status:'<span class="st-failed">nas.home.lan · Not connected · Server key changed</span>',over:dlg('Server key changed',`<p>nas.home.lan is presenting a different key than the one you trusted on Oct 02. The download was not started and no login was sent.</p><div class="kv"><span>Trusted</span><span>ED25519</span></div><div class="mono fp">SHA256:Zk3qV8mT0nYb2hLx5cRjW1uAeP7dQsK4oNf6gH9fT1E</div><div class="kv"><span>Now offered</span><span>ED25519</span></div><div class="mono fp st-failed">SHA256:Q9wLm2Xc7bVn4aTzR0eYk8sHdF3jP6uOiG1tB5xN2Mc</div>`,`${bt('Replace trusted key…')}${bt('Close',{acc:1,go:'browse'})}`,ic('alert','st-failed'))})};
+
+S.lost={g:'When it goes wrong',l:'Connection lost',d:'Reconnect and resume',
+ notes:['A notice says what is happening and when it tries next. The last listing stays visible but greyed, and running downloads show Retry waiting.','The Host backs off 2, 4, 8, 16 seconds, then stops. Each file resumes from its saved offset when the site is back.','How many attempts before it gives up? Five is drawn.'],
+ r:()=>win({sel:'nas.home.lan',st:{nas:'lost'},site:1,main:`${info('warn','Lost connection to nas.home.lan.','Trying again in 8 s (attempt 2 of 5).',`${bt('Reconnect now',{acc:1,go:'browse'})}${bt('Stop trying')}`)}<div class="panes">${LOCALPANE()}${NASPANE({stale:1,chip:'<span class="chipn bad">Not connected</span>',foot:'Last listing, 2 min ago'})}</div>${qlist([{n:'ubuntu-26.04-desktop-amd64.iso',d:'down',size:'5.8 GB',st:'Retry waiting 44.8%',c:'wait',pct:44.8,left:'',rate:'',desc:'nas.home.lan · resumes from 2.6 GB',sel:1},{n:'ubuntu-26.04-live-server.iso',d:'down',size:'2.1 GB',st:'Retry waiting 12.0%',c:'wait',pct:12,desc:'nas.home.lan · resumes from 252 MB'},Q4],{title:'Transfers',sub:'2 waiting to retry'})}`,status:'<span class="st-wait">nas.home.lan · Not connected · Retrying</span>'})};
+
+S.errors={g:'When it goes wrong',l:'Failed downloads',d:'Reason first, what to change',
+ notes:['The Failed view with the reason in plain words and the one thing to change. The selected row opens a notice with the reason first.','Messages come from the server reply, shortened. The raw reply goes to the log, never the screen.','Nothing to decide.'],
+ r:()=>win({sel:'Failed',st:{nas:'on',failed:5,active:0},main:`${info('err','Permission denied.','nas.home.lan will not let kaan read render-final.mov. Ask the server owner, or sign in as another user.',`${bt('Edit site')}${bt('Resume')}`)}${qlist([
+  {n:'render-final.mov',d:'down',size:'3.1 GB',st:'Failed',c:'failed',desc:'Permission denied by nas.home.lan',sel:1},
+  {n:'big-archive.7z',d:'down',size:'41.0 GB',st:'Failed',c:'failed',desc:'Not enough space on D:. 41.0 GB needed, 18.4 GB free'},
+  {n:'notes-2025.txt',d:'down',size:'3 KB',st:'Failed',c:'failed',desc:'The file changed on the server (2 KB to 3 KB). Download it again'},
+  {n:'holiday.zip',d:'down',size:'640 MB',st:'Failed',c:'failed',desc:'files.example.org allows 2 connections. Set Connections per file to 1'},
+  {n:'old-report.pdf',d:'down',size:'',st:'Failed',c:'failed',desc:'No such file on nas.home.lan. It was moved or deleted'}])}`,status:'5 failed'})};
+
+/* engine */
+const winEl=document.getElementById('win'),rail=document.getElementById('rail'),notes=document.getElementById('notes');
+let cur='browse';
+function buildRail(){
+  let last='',h='';
+  Object.keys(S).forEach(k=>{
+    const s=S[k];
+    if(s.g!==last){h+=`<div class="rg">${s.g}</div>`;last=s.g}
+    h+=`<button class="ri ${k===cur?'on':''}" type="button" data-go="${k}"><b style="font-weight:600;font-size:14px">${s.l}</b><span>${s.d}</span></button>`;
+  });
+  rail.innerHTML=h;
+}
+function show(id){
+  if(!S[id])id='browse';
+  cur=id;
+  if(id==='manager'){mgr.tested=false}
+  winEl.innerHTML=S[id].r();
+  const n=S[id].notes;
+  notes.innerHTML=`<div class="note"><h4>What you see</h4><p>${n[0]}</p></div><div class="note"><h4>What the Host does</h4><p>${n[1]}</p></div><div class="note q"><h4>To decide</h4><p>${n[2]}</p></div>`;
+  buildRail();
+  try{history.replaceState(null,'','#'+id)}catch(e){}
+}
+document.addEventListener('click',e=>{
+  const g=e.target.closest('[data-go]');
+  if(g){show(g.getAttribute('data-go'));return}
+  const tv=e.target.closest('[data-tv]');
+  if(tv){trustV=tv.getAttribute('data-tv');show('trust');return}
+  const r=e.target.closest('.rd');
+  if(r){const grp=r.getAttribute('data-grp');winEl.querySelectorAll('.rd[data-grp="'+grp+'"] i').forEach(i=>i.classList.remove('on'));r.querySelector('i').classList.add('on');return}
+  const c=e.target.closest('.cb');
+  if(c){const i=c.querySelector('i');const on=!i.classList.contains('on');i.classList.toggle('on',on);i.innerHTML=on?ic('check'):'';return}
+  const row=e.target.closest('.lr');
+  if(row&&row.closest('.panes')){row.classList.toggle('sel');return}
+  const tst=e.target.closest('.w2 .df .b');
+  if(tst&&tst.textContent.trim()==='Test connection'){mgr.tested=true;winEl.innerHTML=S.manager.r();}
+});
+document.addEventListener('change',e=>{
+  if(e.target.id==='proto'){mgr.proto=e.target.value;mgr.tested=false;winEl.innerHTML=S.manager.r()}
+  if(e.target.id==='logon'){mgr.logon=e.target.value;mgr.tested=false;winEl.innerHTML=S.manager.r()}
+  if(e.target.id==='enc'){mgr.enc=e.target.selectedIndex;winEl.innerHTML=S.manager.r()}
+});
+const tbtn=document.getElementById('themebtn');
+let tm='system';
+try{tm=localStorage.getItem('inb-theme')||'system'}catch(e){}
+function applyTheme(){
+  const r=document.documentElement;
+  if(tm==='system')r.removeAttribute('data-theme');else r.setAttribute('data-theme',tm);
+  tbtn.textContent='Theme: '+tm;
+  try{localStorage.setItem('inb-theme',tm)}catch(e){}
+}
+tbtn.addEventListener('click',()=>{tm=tm==='system'?'dark':tm==='dark'?'light':'system';applyTheme()});
+applyTheme();
+window.addEventListener('hashchange',()=>show(location.hash.slice(1)));
+show(location.hash.slice(1)||'browse');
+</script>
+
+</body></html>

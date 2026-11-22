@@ -61,7 +61,7 @@ public sealed class RemoteFilesClientTests
         {
             Reply = request => IpcMessage.Create(SitesMessageTypes.TransferResult, new SiteTransferResultDto
             {
-                Ok = true, Transfer = new SiteTransferDto { Id = "batch", Direction = "copy" }
+                Ok = true, Transfer = new SiteTransferDto { Id = "batch", Direction = "between" }
             }, request.Id)
         };
         var client = new RemoteFilesClient(host);
@@ -72,8 +72,8 @@ public sealed class RemoteFilesClientTests
         var sent = Assert.Single(host.Sent);
         Assert.Equal(SitesMessageTypes.TransferStart, sent.Type);
         var request = sent.GetPayload<SiteTransferStartRequest>();
-        Assert.Equal(("drive", "copy", "/Photos 2025", "nas", "/photos"),
-            (request.SiteId, request.Direction, request.RemoteFolder, request.DestinationSiteId, request.DestinationFolder));
+        Assert.Equal(("drive", "between", "/Photos 2025", "nas", "/photos"),
+            (request.SiteId, request.Direction, request.RemoteFolder, request.TargetSiteId, request.TargetFolder));
         Assert.Equal("Wedding", Assert.Single(request.Names).Name);
         Assert.True(request.Names[0].IsFolder);
         await Assert.ThrowsAsync<ArgumentException>(() => client.StartCopyAsync("drive", "/", [], "nas", "/"));
@@ -256,7 +256,7 @@ public sealed class RemoteFilesClientTests
         {
             Reply = request => IpcMessage.Create(SitesMessageTypes.TransferResult, new SiteTransferResultDto
             {
-                Ok = true, Transfer = new SiteTransferDto { Id = "batch", Direction = "copy" }
+                Ok = true, Transfer = new SiteTransferDto { Id = "batch", Direction = "between" }
             }, request.Id)
         };
         var client = new RemoteFilesClient(host);

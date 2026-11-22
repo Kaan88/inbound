@@ -1,5 +1,14 @@
 # Progress — session handoff
 
+## Merge of main into the Android branch, 2026-11-23
+
+Owner, 2026-11-22: "Merge main into this branch now, then this branch into main?" "yes, then to main." main (desktop
+0.9.0 and after: SITES.13 extras, SITES.14, CONN.1/2, EXT.*, macOS/upkeep workflows) merged in. Where both had built the
+same thing, main's copy between remotes (`between`) and this branch's PuTTY reader (`PuttyKeyFile`, with Argon2) were
+kept; Android 0.1.0 to 0.1.2 copy requests and stored copy batches still work. Details and what to review: the
+[Fable review queue](docs/plans/android-fable-review-queue.md) (open, unreviewed). Desktop history from main follows
+the Android entries below ("Where to pick up (2026-11-18, after the 0.9.0 release)").
+
 ## Owner: no 0.0.11, one major release with the redesign, 2026-11-22
 
 "no publish, finish everything and make a major release. this includes redesign and audits by fable." 0.0.11 is not
@@ -2680,6 +2689,564 @@ NativeAOT, physical-phone, selected-remote-host, Doze/battery, TalkBack, theme a
     (3) targetSdk 35 or 36 for the first release (36 brings Android 16's behaviour rules)? (4) XA1040: Microsoft calls
     NativeAOT on Android experimental; the gate passed, but it is the owner's call to ship on it.
 - **Owner's answers (2026-11-16), to the step 0 questions:** application ID and name: "app.inbound.android / Inbound"; default destination: "Download/ directly"; the Mi 8 Lite: "Test builds min API 30" (release stays at 31); the 2 s cold mark: "S24 FE + Mi 8 Lite, but only within reason."
+### Where to pick up (2026-11-18, after the 0.9.0 release)
+
+- **Released:** app 0.9.0, tag v0.9.0 at 90ba88d7, published on GitHub 2026-11-18. The Windows build filled the
+  draft (six files, public.pem unchanged); publishing started the Linux, macOS and Docker builds. Extension 0.7.0
+  is the same version for Chrome, Edge and Firefox, and all three listings are public (owner, 2026-11-17).
+- **Open for the next release:**
+  - UI.B40: speed graph regressions (collapsed graph labels over the status bar; a zero line jumps when a download starts).
+  - DEP.1: Dependabot PRs #20, #21 and #24, plus the grouped tests-major PR. TypeScript 7 is held back; Uno.Sdk 7 fails CI.
+  - CI.5: Linux and macOS release builds beside Windows.
+  - EXT.R17: the popup row menu should not expand the popup.
+  - CONN.2 minors from Fable's round 3: the Connections tab can show a raised count when the server answers the
+    split probe without a range; a failed one-stream checkpoint save after a refused split leaves a split
+    checkpoint a kill turns into a restart from zero; refused splits are kept in memory only.
+  - Known issues in the release notes: a trusted certificate counts for every remote; a transfer stops after about
+    half a minute without the server.
+  - The owner walked only part of `docs/plans/0.9.0-checklist.md`; most boxes, including the three re-checks, are
+    still unticked and worth checking against the release.
+  - Extension stores: Chrome Web Store and Edge Add-ons 0.7.0 were submitted for review 2026-11-17; confirm they
+    went live.
+  - Not done: a run of the Linux window on Linux (it builds; Linux deferred); a run with the extension installed against the web UI; real SFTP,
+    Trust, browser sign-in and Drive.
+- **Owner's test copy:** `artifacts/app-r9`, started by the launcher `artifacts/r7/Start Inbound test.cmd` (its own
+  Host and data in `artifacts/r7/data`).
+
+### 0.9.0 release (2026-11-17 to 2026-11-18)
+
+- **Contents:** SITES.11 R0 to R7 (Remote files rework, closed); SITES.12 (rename); SITES.13 (the 13 extras:
+  Host `folders.browse` `files: "all"`, PuTTY .ppk, `sites.remember`, per-remote limits, `sites.preview`, copy
+  between remotes, `sites.sync.plan`/`run`, scheduled transfers and sync; desktop and web clients; extension
+  "Finished just now" divider, Clear finished, notification choice); SITES.14 (owner reports and checklist fixes);
+  EXT.B10, EXT.R14, EXT.R15 (one setting "When a download finishes", default Flash the icon), EXT.R16; EXT.S5
+  (listed Firefox channel; the `firefox-listed` branch was lost and the work rebuilt in main); CONN.1 (connections
+  per server in Options and the Downloads menu, desktop and web); CONN.2 (raising a single-stream download's
+  connections splits it while it runs or on resume); all findings of the Fable release review plus the Fable Host
+  review and its fixes; the `no_firefox_xpi` fallback in `windows.yml` (not needed).
+- **Extension 0.7.0:** Firefox AMO listed channel, approved; `extensions/firefox-updates.json` points at the signed
+  listed XPI attached to v0.9.0, so unlisted 0.6.x installs move over. The signed XPI was downloaded from AMO,
+  passed to `sign-extension-firefox.ps1 -SignedXpi` and attached to a hand-made draft before the tag push. Chrome
+  Web Store and Edge Add-ons submitted 2026-11-17; Edge through the new `scripts/publish-extension-edge.ps1`
+  (submission 1152921505702432220), which worked on its first real run.
+- **Checks:** Fable approved the release-review fixes, CONN.1, the Edge script and the fallback over 3 rounds, and
+  CONN.2 after one fix round (d7e3bb71). Full tests passed apart from two timing tests that passed alone (Server
+  `SessionDurabilityTests.AnOpenSocketKeepsItsSavedLastSeenTimeFresh`, Integration
+  `RuntimeServiceTests.AScheduledRunThatEndsWithItsActionsOffLeavesNoneForALaterRunByHand`). Method (owner): Sonnet
+  builds, Opus at low effort checks each major addition, Fable reviews once at the end.
+- **Owner reports (2026-11-17):**
+  - On app-r8: web UI left pane items had no context menu; the desktop window crashed as soon as a remote was
+    chosen in the left pane (0xc000027b). Fixed (d46633a). Cause: RefreshLeftSources rebuilt the left ComboBox
+    (Items.Clear) on the first sites broadcast after a choice, replacing the selected item; the next layout threw
+    E_UNEXPECTED inside a XAML callback. Now updated in place, never while its list is open. The left remote pane
+    has its own menu; web left-pane rows have a context menu.
+  - Checklist notes: Edit remote's Up limit box wider than Down; "Manage remotes in All remotes" leaves Options
+    behind (it should close Options unless there are unsaved changes, and never save them); deleting a file in the
+    panes jumped the list to the top. Fixed (459d73c): SettingsWindow records each page's inputs on first focus and
+    row edits; limit boxes share a two-column grid; both panes keep scroll and select the next row after delete,
+    rename, new folder and F5.
+  - CONN.1: "isn't connections per download mislabeled? it maxes all downloads connections to 8." Cause: the hidden
+    per-server cap MaxConnectionsPerHost (default 8, shared by every download from one server) had no field in
+    desktop Options and clamped connections per download. Fixed in 0.9.0.
+  - CONN.2 (release blocker): a running TorBox download raised from 1 to 4 connections kept one range. Fixed.
+  - Release order: submit Firefox to AMO first; the release went out after approval, with the signed XPI attached.
+  - EXT.R17 requested (popup row menu without expanding the popup). Dependabot: the TypeScript 7 rule made it run at
+    once; test-tool majors came as one PR per package (18); config now groups them (tests-major). None merged
+    before 0.9.0 (none ships in the app).
+- **Owner report, 2026-11-18 (UI.B40, next release):** speed graph regressions in 0.9.0: the collapsed graph draws
+  its labels over the status bar; a new download makes a zero line jump for a few seconds (UI.B26 back).
+- **Incident (2026-11-17, 20:04 to 20:05):** the fixing agent ran one CLI call without DOWNLOADMANAGER_DATA, which
+  started a Host of the new build on the real state folder for about 1.5 minutes (a read-only sites list, then a
+  clean shutdown; the installed Host was not running at the time).
+
+### Sites rework R7: checks, walk fixes, final review (SITES.11, 2026-11-17)
+
+- **Full tests (before the last two fix rounds):** Core 2571, Sites 252 (+32 skipped), Server 202, Tray 3,
+  Integration 2052 (+43 skipped; `CancellingARunningPackage…` and `TheAppsBatchStillOpensItsWindows` failed once
+  under load and passed three reruns each), webui 783, extension 349. After the fixes: Core 2571, Sites 252, webui
+  795, extension 351; solution 0 errors.
+- **Walk fixes (Opus):** the extension hint bar no longer covers the Remote files pages (`SitesHost` in row 1);
+  Add a remote tile text uses the window's theme (was dark grey in light); "Remote only" on both clients (the mockup's
+  "Server only" clashes with SITES.12); phone transfers as cards without tabs; phone delete as a bottom sheet with
+  full-width buttons; the walk's transfers step copes with a finished download.
+- **Fable's final review, fixed (Opus):** Close on an address opened once now asks when it has transfers (the Host
+  cancels them); a refused Trust after Save is shown; leftover "site" words in the web UI and a wider words test;
+  the extension tooltip puts off/paused first; the one-folder delete count was one too many (the Host counts the
+  folder); the store packagers and `sign-extension-firefox.ps1` refuse the popup test build; the finished ring is
+  blue, unlike the green progress; phone transfer cards have a long-press sheet with their actions and an × on
+  finished ones; the speed graph and status bar are hidden on Remote files pages at phone width; "Already on the
+  server" / "Already on this PC" with Yes, Some of it, No on both clients and "Downloads from /x go to D:\…"; opening
+  a ninth address says which one was closed. Fable's ideas went to ROADMAP SITES.13 and EXT.R16.
+- **Pictures:** retaken after the fixes: `compare/phone-*-built.png`, `web-home-built.png`, `web-transfers-built.png`
+  and the `compare/light/` set (desktop and web). An Opus look at a sample found no overlap or unreadable text;
+  left as is: the faint selection of an unfocused list in light (WinUI's standard, same as the main list), the
+  "Download" word before the name on phone transfer cards, and the This PC path cut at its start without a mark.
+- **Not walked:** the desktop delete dialogs in light; the run with the extension installed.
+
+### Sites rework R6b: web transfers, All remotes, Add a remote, sidebar, phone, SITES.11 (2026-11-17)
+
+- Built (Sonnet), checked and phone screens redone to the mockup (Opus, low), accepted by me; Fable reviews the whole
+  run at the end. Walked by the builder against a real Server and `rclone serve webdav` at 1360 and 390 px, no
+  console errors.
+- **Built:** `lib/sitesTransfers.ts` and `lib/sitesHome.ts` (ports of the desktop rules); `TransferList.svelte` (the
+  main list's look, own view model; Stop, Resume, Retry, Show on the remote, Cancel transfer, Remove from list) and
+  `TransfersBar.svelte`; `RemotesHome.svelte` (All remotes, "Open an address once", menu); Add/Edit remote as tiles
+  then the short form with Test through `sites.testDraft` and inline Trust; sidebar "Remote files" entries with
+  ↓n ↑n, waiting count and progress line; folders' "Some of it" (`sites.here`); phone: header with the remote and
+  path, rows with tick boxes and "already on <server>", action bar, bottom sheets, transfer cards with Pause
+  transfers and Retry failed. New words only ("remote"). `screens.mjs` walks it (`INBOUND_SITES_DAV`).
+- **Not as drawn:** the transfer row copies the main list's row rather than sharing it (it lives inside
+  `ListScreen.svelte`); no Open / Open folder on a transfer, no per-file Stop/Start, no files inside a batch; no "Ask
+  each time" or "More…" tiles (no Host support); the switch and rclone options sit under All remotes; the app header
+  stays above the phone screens; Two panes' left side lists server folders only and upload sends a server folder (no
+  `folders.browse` file listing; Host change left out); no Rights column.
+- **Not walked:** the run with the extension installed (R6a's source guard covers "to the server never reaches the
+  browser"); real SFTP, Trust, browser sign-in, Drive; Open an address once with a password.
+- Tests: webui 783 pass (31 new); check 0 errors 0 warnings; build OK.
+
+### Extension: bolder ring and finished count (EXT.R14); test-only open-popup build (EXT.R15) (2026-11-17)
+
+- Built (Sonnet), checked by Opus (low), accepted. **Ring:** 3 px at 16 and 6 px at 32, white halo and grey track so
+  it reads on light and dark toolbars, stronger colours. **Finished:** downloads from this browser that finished since
+  the popup was last opened are counted in the badge (green, up to 99; tooltip "N downloads have finished"); idle with
+  unseen finishes shows a full green ring. No check is drawn into the icon (a first try covered the icon at 16 px and
+  hid the ring). Kept in `chrome.storage.session`; cleared when the popup opens; the popup puts them first.
+- **EXT.R15:** `npm run build:test-popup` -> `extensions/chrome/dist-test-popup` ("… (popup test)", same ID). Options
+  has "Open the popup when a download from this browser finishes" (off); opens only in a focused normal window and
+  never over the ask-where-to-save popup; otherwise the R14 mark. A test checks the store builds don't contain it.
+- **Question for the owner:** the store builds already have Options > "On finish: Flash the icon / Open the popup /
+  Do nothing" (EXT.R12). Should "Open the popup" stay in the store builds, or move to the test build only?
+- Tests: extension 349 pass; typecheck, Chrome, Firefox and test builds pass. **Not tried in a real browser.**
+
+### SITES.12 rename outside the web UI (2026-11-17)
+
+- Window, CLI (`dm remotes` alias), Host/Sites/Tray messages and docs say "remote"/"Remote files"; IPC, `dm sites`,
+  class names, settings keys, logs and "site logins" unchanged. Core 2571, Sites 252, Tray 3, Integration CLI/Sites
+  155 pass. One unfiltered Integration run failed `RuntimeServiceTests.AFailureAClientCanSeeCanBeActedOn…`
+  (unrelated; checked in the full run at R7).
+
+### Sites rework R5: delete, overwrite, permanent delete on This PC, SITES.11 (2026-11-17)
+
+- Built (Sonnet), reviewed by Fable twice (dialogs, then the data-loss paths alone), fixed twice (Opus), walked on the
+  hidden desktop by me, accepted.
+- **Delete on server** (`delete`): warning icon, the bold name with the files inside and size, "Inbound cannot bring
+  them back. Nothing on this PC is touched.", the "I understand that N files will be deleted" tick for folders (off
+  until the count is in), red "Delete on server", Cancel the default. Counts files, so it says "files", not "items".
+- **Delete on This PC:** the same shape, to the Recycle Bin, one shell call on its own STA thread with
+  `FOF_NO_CONNECTED_ELEMENTS` (page.htm no longer takes page_files) and Windows' own "delete permanently?" for what
+  the bin can't take; network folders say so. **Old fault fixed:** the previous VB call deleted such items for good
+  without asking.
+- **Delete permanently on This PC** (owner request): Shift+Delete, "Delete permanently…" in the pane menu, "Delete
+  permanently on This PC…" in the Remote menu; the server dialog's shape with count and tick. Plain .NET deletes:
+  links and junctions removed, never followed; in-use and read-only files left and named; read-only folders cleared.
+- **Guards for both:** full paths only; no `.`/`..` segments, wildcards, drive or share roots; a name ending in a dot
+  or space is left alone (Windows would act on another item); a folder with a transfer writing anywhere inside it is
+  busy (mixed `/` and `\` spellings used to slip through; fixed). Errors are noted and the pane always reloads.
+- **Overwrite, one file at a time** (`overwrite`): both copies with size, date and "(newer)", Skip / Replace / Keep
+  both under the Host's name, "(recommended)" (Replace only when the target is older by more than a day on a remote
+  with precise times, never FTP), "Do this for the other N files"; one batch per choice; used by every download and
+  upload path. Continue sits left of Cancel (ContentDialog order; Esc stays Cancel).
+- **Walk:** permanent delete of a test folder with the tick (gone, pane reloaded), Delete on server dialog (cancelled),
+  overwrite on a download (cancelled); trace on, no exception. Pairs: `delete-built.png`, `overwrite-built.png`, and
+  `delete-permanently-built.png` (no mockup). **Not walked:** Recycle Bin delete and Shift+Delete (they need real
+  keys or a right click, which the hidden desktop refuses), Windows' own question on a share.
+- **Full pass:** the owner looked at R2 to R4 in the running test app ("looks perfect") with no notes, so the pairs
+  were not retaken.
+- Tests: Core 2571 pass; solution and Uno 0 errors, no warning in a changed file.
+
+### Sites rework R6a: web browse view and both web bugs, SITES.11 (2026-11-17)
+
+- Owner: "start r6 on the side". Built (Sonnet) in a worktree, reviewed (Fable), fixed (Opus), walked in Chromium
+  against a real Server and rclone WebDAV (8 checks, no console errors), fast-forwarded into main.
+- **Bug 1 fixed:** Download, double click, Enter and the menu go to the server (`sites.transfer.start`); no row link.
+  "To this device" is the dialog's second choice (one file), through `startDeviceDownload`; a failed device download
+  fails in the browser and the page stays. Walked: zero browser downloads on double click/Enter.
+- **Bug 2, likely cause fixed:** rows were keyed by name (Drive allows two items of one name); now unique keys. The
+  real Drive case is **not confirmed** (no Drive account here).
+- Browse view to `web-site`/`web-two`: pane header and chip, Up, breadcrumbs, star, Filter, On the server column,
+  footer, trouble state with Retry now / Edit remote and auto-retry, context menu (right click, long press, "…",
+  Shift+F10), keys, toolbar, Download and Upload dialogs. One download target rule for every control.
+- **Not as drawn:** Two panes' left pane lists server folders only (files would need `folders.browse` to list files);
+  upload sends a server folder, not chosen files; no Rights column; folders show no "Some of it" yet; the page still
+  sits in the old layout (sidebar entries, Transfers bar, All remotes: R6b). Ctrl+U, Ctrl+Shift+C and Ctrl+Shift+N
+  are not taken from the browser.
+- Tests: webui 752 pass (34 Sites browse rules). Pairs: `web-site`, `web-two`, `web-download`, `web-upload`-built.
+- **R6b next:** transfers list, All remotes and Add a remote tiles, sidebar entries, Transfers bar, phone width,
+  `npm run screens` with the Sites screens, `sites.here` for folders, one run with the extension installed.
+
+### Owner request 2026-11-17: permanent delete on This PC
+
+- "On This PC put a permanent delete option." Added to R5 (sites-rework.md): Shift+Delete and "Delete permanently…",
+  with the server-style dialog (count, tick for folders). Goes into R5's fix round.
+
+### Sites rework R4: All remotes, Add a remote, sidebar, SITES.11 (2026-11-17)
+
+- **Owner:** "start next, look perfect" (R3 accepted by look). Built (Sonnet), reviewed by Fable three times, fixed
+  (Opus), walked twice on the hidden desktop by me (the first walk found a bug), accepted.
+- **Built:** an "All remotes" page (address box "Open an address once", Open, "+ Add a remote"; list of remotes with
+  dot, Kind chip, folder on this PC, Last used, activity; double click or Enter opens; menu Open, Edit remote, Test,
+  Remove, Remember (opened-once), Forget the certificate; F2, Delete, Shift+F10); "Add a remote" as tiles (SFTP, FTP,
+  WebDAV, Google Drive, OneDrive, Dropbox, S3 or B2), then the short form for the kind ("Sign in with" segmented,
+  folder on this PC, Advanced closed, Test with its line, Back and Save); Edit remote opens the same form; Options >
+  Sites keeps the switch, rclone and updates and links to All remotes; sidebar "Remote files" with "All remotes" and
+  entries with dot, ↓n ↑n, an orange clock with the waiting count, the kind when idle, a thin progress line.
+  Flows moved from `SitesOptionsPage` into `SiteFlows` (save, remove, test, host key, certificate, sign-in).
+- **Host (additive): `sites.testDraft`** tests the form without saving: nothing written or broadcast, no reach or
+  last-used change; a stored password, key or token is used only for the same host, port, url, endpoint, user and
+  (FTP) encryption; an SFTP server whose key is not accepted is only probed (fingerprints shown, Trust inline);
+  draft keys never stand in for a remote's own trusted keys; returns the item count ("It works. … listed 6 items").
+  Save also asks for the password again when FTP's encryption changes (a missing value counts as Explicit). Against an
+  older Host, adding still saves first (Back and Cancel remove it) and Test in Edit is off.
+- **Open once:** sent without a password first; asks only on the Host's "password needed" and only for loads the user
+  started; at most the Host's limit is kept (the oldest idle one is closed; never one with running or paused
+  transfers: "Close an opened address first."); Remember keeps one.
+- **Not as drawn:** no "Ask each time" and no "More…" tile (no Host support); Name and port are in Advanced; no
+  per-remote "transfers at once" or "connections per file" (not per remote); Test sits just above the button row;
+  Next and Save are on the left as in every other dialog of the app; the page's "Today 09:14" is redrawn at midnight
+  only while shown.
+- **Walk:** the first walk found Back in Add a remote throwing ("Element is already the child of another element")
+  and leaving the dialog half-switched, the waiting clock as a colour emoji and no progress line; all fixed and walked
+  again (trace on, no exception). Pairs: `home-built.png`, `add-tiles-built.png` (after Back), `add-fields-built.png`.
+- **Also:** `AnHttpsSiteWithItsOwnCertificateIsTrustedOnlyAfterTheUserSaysSo` failed 1 run in 256 (its "wrong"
+  fingerprint forced the first byte to 00); fixed.
+- **Tests:** Core 2553, Sites 264 (+20 Linux-only), Integration Site* 150 (+6), Server 202 pass. Solution and Uno
+  builds 0 errors, no warning in a changed file. **Not checked by hand:** a real save, Test with Trust, browser
+  sign-in from the new form, keys on the page.
+
+### Sites rework R3: the transfers list, SITES.11 (2026-11-17); Fable catch-up review of R2
+
+- **Owner:** "start" (R3), later "resume, fable is available for reviews". Built (Sonnet), reviewed by Opus, then by
+  the Fable reviewer (back from its limit), fixed (Opus) over four rounds, walked on the final build by me, accepted.
+- **Built:** the opened transfers bar is a list in the main list's look (File Name with direction arrow and batch
+  chevron, Size, Status with bar, Time left, Transfer rate, Description); a batch opens in place to its files (moving
+  files with their own bar; first 500, then "Show more"; re-read at most every 2 s, 10 s above 1,000 files); selection,
+  context menu and keys (Stop, Resume, Retry, Stop or Start this file, Open, Open folder, Show on the remote, Cancel
+  transfer, Remove from list; Enter or double click opens a finished row); tabs "Running and waiting (n) / Failed (n) /
+  Done (n)" (running batches first), Clear done (done and canceled only) and Retry all; the closed bar is a card with
+  per-direction speeds ("Transfers ↓ 19.1 MB/s ↑ 6.2 MB/s 3 running · 2 waiting · 1 failed") above the list card; the
+  height is dragged and remembered; the Downloads chip reads "Remote files · 3 running · … · 25.3 MB/s". The Files
+  button and dialog are gone. Rules in `SiteTransferRules.cs` (incl. a tested `Reconcile` that moves only rows that
+  changed place).
+- **Open on a transfer:** a downloaded file goes through the Remote files Open (ZoneId=3, "Run it?" for programs); a
+  skipped file or an upload's source opens plainly; a one-name batch opens the name it was saved under (Keep both).
+- **Host (additive):** a refused upload names the remote and folder ("gdrive did not take the file in /: the folder is
+  gone or can't be written.", "{remote} refused the write to {folder}. …") and is not retried; FTP 4xx after `stor: `
+  gives the server's words and keeps its tries; an unreadable file on this PC says so; a locked file keeps its tries;
+  file names are stripped before matching (`SiteErrorText.UploadFailure`, `SiteTransfers.FileFailure`). Matched
+  phrases include strings captured from rclone 1.76 against read-only SFTP and FTP servers.
+- **Fable catch-up of R2 (Opus had reviewed it while Fable was at its limit), all fixed:** upload from this PC's picker
+  is off while managing another Inbound server (it sent this PC's paths there; older than R2); Open asks when the mark
+  of the web can't be written; more runnable types (.iso, .vhd, .rdp, .msu, .jnlp …); This PC's Open asks before
+  running a program; drag-over null checks; an Open wait survives a stale list; a late Edit remote request is dropped
+  after 5 s; Download to… says why on another server. Also: the opt-in first-chance trace (`ui-trace.log`) carries
+  full local paths; never attach one made with it.
+- **Walk (final build, hidden desktop, trace on: no exception):** pairs `transfers-built.png`, `failed-built.png`,
+  `downloads-built.png`, new `batch-built.png` and `done-built.png` (1600 x 1000, not cropped). Differences left: a
+  batch of small files shows no Time left or rate while between files; the sidebar is R4's; the context menu can't be
+  captured on the hidden desktop. Test data: transfers started with `dm sites get/put` at a 25 MB/s test speed limit.
+- **Tests:** Core 2524, Sites 264 (+20 Linux-only skipped, with `INBOUND_RCLONE` set; without it 12 more skip),
+  Integration Site* 142 (+6), Server 202 pass. Solution and Uno builds 0 errors, no warning in a changed file.
+  **Not checked by anyone:** keys, drag of the height, focus kept across moves, and the context menu, by hand.
+
+### R2 owner walk: crash on opening a remote, fixed (2026-11-17)
+
+- **Owner:** "it crashed when I clicked the first site". Windows logged 0xc000027b in Microsoft.UI.Xaml.dll (a stowed
+  E_POINTER): the window's own crash handlers never ran, so the UI trace had nothing.
+- **Cause:** R2c's `PaneDrag` was given `ItemsList.Parent`, which is null right after `InitializeComponent`; its
+  constructor dereferenced it the first time any remote's pane was created. No automated check builds a real pane
+  (the screenshots predate R2c; the review read the code only).
+- **Fix:** both panes name the grid around the list (`ListHost`) and pass it; `PaneDrag` refuses a null host.
+- **New diagnosis option:** `DOWNLOADMANAGER_TRACE_EXCEPTIONS=1` writes every first-chance exception with its stack
+  to `ui-trace.log` (opt-in, off by default); it found this one at once.
+- **Checked:** on a hidden desktop with the trace on, b2-media, nas.home.lan and files.example.org opened one after
+  another without a crash or an exception; WinUI and Uno build. **Lesson:** each stage's screenshot walk must run on
+  the final build of the stage, after the last fix round.
+
+### Sites rework R2c: drag and drop, SITES.11 (2026-11-17); R2 complete
+
+- **Owner:** "Start R2c". Built (Sonnet), reviewed (Opus, 9 findings), fixed (Opus), accepted by me.
+- **Built:** drag rows from This PC onto the server pane (upload into the folder shown or the folder row dropped on),
+  from the server pane onto This PC (download likewise), and files or folders from Windows Explorer onto the server
+  pane (one batch from one folder). Drops use the same commands as the gutter arrows and Upload/Download: the same
+  conflict question (a drop on a folder row reads that folder first), the same in-flight guard ("A transfer is
+  starting; try again."), the same other-server gating (no-drop, caption "Not while managing another server"). The
+  row under the pointer lights like a selected row; the caption says "Upload to /media/isos" or "Download to …".
+  The source folder and remote are fixed when the drag starts; a drop after the pane moved is refused.
+- **Refused with a reason:** items with no path on this PC (inside a zip, a phone), a drive or share root, a folder
+  that is a link (junction or symlink), items from several folders, an unreadable item.
+- **Not built, by design:** dragging server files out to Explorer (needs virtual files), moving within one pane.
+- **Linux (Uno) window:** no drag and drop at all (`#if !HAS_UNO`); Uno's drag support was not verifiable here.
+- **Tests:** Core 2505 pass (new drop rules: plans, captions, roots, links, stale source, "..", other server);
+  solution and Uno builds 0 errors, no warning in a changed file. **Not checked:** any drag by hand in a running
+  window (cursor, caption, highlight, Explorer drops); no picture (UI Automation can't drag on the hidden desktop).
+- **R2 as a whole:** R2a, R2b and R2c built and reviewed; ready for the owner to try. Next stage: R3 (transfers).
+
+### Sites rework R2b: toolbar, Remote menu, context menus, no-dialog downloads, SITES.11 (2026-11-17)
+
+- **Owner:** "Go on to R2b". Built (Sonnet), reviewed (Opus, 12 findings), fixed (Opus), accepted by me.
+- **Built:** the site toolbar as drawn (Download, Upload | New folder, Rename, Delete on server | Refresh | Pause
+  transfers | Edit remote, Options; Up, Star and Two panes moved into the panes); a "Remote" menu (new name, SITES.12)
+  with every command and its key, shown only with a remote open; context menus in both panes and on empty space
+  (decision 3, capability-gated); double click and Enter on a server file download at once with no dialog, as do the
+  toolbar, the menu and the gutter arrow (decisions 1, 2); "Download to…" asks for a folder; Open downloads to
+  `%TEMP%\Inbound\open\<siteId>\<guid>\` (each file marked ZoneId=3; a program or script asks "Run it?" with Show in
+  folder as the default; folders older than a day are removed); This PC Open, Show in Explorer, Rename, New folder,
+  Recycle Bin; Copy and Paste address (never a password; ports compared as used).
+- **Conflict question:** asked once per batch only when something is already there ("debian-13.2-amd64.iso is already
+  in D:\Downloads\ISOs" / "3 of these are already in …"; "Files inside the folders follow the same choice." when
+  folders are picked; uploads compare without case and ask anyway when the folder is not fully listed). With no
+  linked folder the Host picks the folder by category rules, so the window can't check and sends Keep both; the
+  per-file dialog drawn in `overwrite` is R5.
+- **Not as drawn, my picks:** Upload keeps a small drop-down (a Windows picker can't pick files and folders at once);
+  the question uses radio buttons and Continue (a ContentDialog has three buttons); the ← arrow downloads into the
+  folder This PC shows; Ctrl+Shift+S and Ctrl+T mean Download to… and the view switch while a remote is shown, and
+  keep their old meanings (sort by size, provider drawer) elsewhere; Open and Download to… are off while the window
+  manages another Inbound server.
+- **Review fixes:** see the list in the R2b commit: running programs without a warning, local paths used for another
+  server, one shared Open folder, double click on empty space, uncounted files inside folders, partial upload
+  listing, double starts, bad local names, renaming a file being written, keys acting on the wrong pane, swallowed
+  accelerators, lost errors.
+- **Also:** the Linux (Uno) window links the two Sites files the WinUI project now compiles
+  (`SiteTransferPaths.cs`, `SitePaths.cs`); the Uno build passes. Five `Content.XamlRoot` nullable warnings in Sites
+  files fixed.
+- **Pairs:** `browse-built.png`, `remote-only-built.png` (new toolbar), `remote-menu-built.png`, `conflict-built.png`
+  (before the fix round's wording change). The context menu could not be captured (UI Automation can't open it on
+  the hidden desktop); not seen by anyone yet.
+- **Tests:** Core 2492 pass (new `SitesCommandRulesTests`); solution and Uno builds 0 errors, no warning in a Sites
+  file. **Not checked:** anything by hand in a running window after the fix round (keys, dialogs, Open, double click).
+
+### Owner request: rename "Sites" (2026-11-17)
+
+- Owner: "find a better name than sites btw, it's too similar to site logins." Recorded as ROADMAP SITES.12. Only the
+  words people see change (window, web UI, CLI help, docs); `sites.*` IPC names, code and files stay. Name (owner, 2026-11-17): **Remote files**; one entry is "a remote" (menu "Remote", "Edit remote", "Add a remote", "All remotes"). R2b uses the new words for its new text; the full rename is its own pass after R2.
+
+### Sites rework R2a: the desktop pane area to the mockup, SITES.11 (2026-11-17)
+
+- **Owner:** "Start R2". R2 is split: R2a the panes (this), R2b toolbar, Site menu, context menus, no-dialog
+  download; R2c drag and drop.
+- **Built (Sonnet), reviewed twice (Opus), fixed (Opus), accepted by me:** both panes as the mockup's cards (header
+  with icon, name, kind chip; path row with Up, breadcrumbs, Star, Filter in Server only; sortable Name / Size /
+  Modified / On this PC; ".." row; footer with the selection summary), the "Two panes | Server only" switch with the
+  linked-folders line, the gutter (upload, download, Linked toggle), folder "Some of it" through `sites.here` (batches
+  of 100, kept 2 minutes, cancelled on leaving), the trouble state in the pane (Retry now, Edit site, "Trying again at
+  HH:mm", at most 5 automatic tries or 10 minutes), This PC read off the UI thread, local stars, `.partial` hidden.
+  Files: `SitesPanel`, `LocalPane`, new `PathBar.cs` and `PaneColumnHeader.cs`, `MainWindow.TwoPanes.cs`,
+  `SitesBrowseRules.cs` (rules and `SiteHereCache`), `SitesOptionsPage.cs` (`RequestEdit`).
+- **Host (mine, additive):** `SiteProblems.CantReach`, sent only when no connection was made (`SiteErrorText.DidNotAnswer`:
+  dial tcp failures, TLS handshake timeout), so an automatic retry never sends a password. A folder listing gives up
+  after 60 s ("The server did not answer within 60 seconds.", not cantReach): the screenshot run saw a pane stay on
+  "Loading..." for good after its SFTP server was stopped; the client also ends loading on every path now.
+- **Reviews:** the Fable reviewer hit its usage limit (resets Nov 22), so both R2a reviews were by Opus (CLAUDE.md
+  fallback). First review: 17 findings, all fixed. Second: 9 fixed; not changed: the window, web UI and CLI can each
+  retry the same unreachable server; with cantReach meaning "no connection made" none of those tries signs in.
+- **Pairs:** `docs/plans/sites-mockups/compare/browse-built.png`, `remote-only-built.png`, `trouble-built.png` (taken
+  on the hidden desktop before the second fix round, which changed no layout). Looked at by me. Still different in the
+  pane area: the selected row is the app's own grey highlight, not the mockup's blue bar (rule 4, the main list's
+  style); the trouble state's breadcrumbs show only the site, not the folder asked for; the Filter box has no search
+  icon; no Rights column (decision 5). The toolbar, sidebar, transfers bar and status bar are R2b, R3 and R4.
+- **Tests:** Core 2441, Sites 246 (+20 skipped), Server 202, Integration Sites 141 (+6 skipped, which need other
+  setup) pass. New: `SitesBrowseRulesTests` (footers, dates, filter, sort, ".." never acted on, retry limit and time,
+  connection key, here cache), `SiteErrorTextTests.OnlyAConnectionNeverMadeCountsAsNotAnswering`,
+  `ABrowseOfAServerThatGoesQuietEndsWithinTheLimit`, `CantReach` asserted in the e2e trouble test. Solution build: no
+  warning in a changed file. **Not checked:** focus, timers and loading by sight after the second fix round; light mode
+  (the switch's checked text colour is hard-coded per theme: no token exists).
+
+### Edge extension published (owner, 2026-11-17)
+
+- Owner: "edge extension is also finally published, it can be updated like chrome and firefox now". Recorded in
+  ROADMAP EXT.S1 and CLAUDE.md. A new extension version now goes to the Chrome, Edge and Firefox stores alike.
+
+### Sites rework R1: what the Host adds, SITES.11 (2026-11-16)
+
+- **Owner:** "built is crap, I want mockup" (go-ahead for R1 against the mockup). Each step reviewed by the same Fable
+  agent; its findings were applied (below).
+- **Done (Host, IPC protocol 1, additive), design in `docs/plans/sites-rework.md`, "R1 design":**
+  - Per-file progress: `SiteTransferDto.Moving` (path, size, bytes, speed, time left), matched on the `srcRemote` rclone
+    names a moving file by (checked with rclone 1.76: a copy to another name is reported by its source).
+  - `SecondsLeft` for the batch and each file (one rule, `SiteTransferTime`), leaving out failed and stopped files
+    (`BytesSetAside`).
+  - Row fields: `Picked`/`PickedCount` (title), `FirstFailedPath`/`FirstFailedError`, `RetryAt`/`RetryReason`
+    (trouble countdown), `FilesStopped`.
+  - Stop one file (`sites.transfer.stopFile`, item state `stopped`) and start it again (`sites.transfer.startFile`);
+    Retry stays failed-only. A stop that races a pause or a failure still ends stopped, and is saved at once.
+  - `SiteDto.Reach` (`ok`/`trouble`, memory only, from connection-class failures) and `SiteDto.LastUsedAt` (memory at
+    once, the file at most every 10 minutes, written in the background under the site gate).
+  - "Open an address once": `sites.openOnce`, `sites.close`, `sites.keep`; `SiteAddress` parses sftp, ftp, ftps (990 =
+    implicit) and http(s) WebDAV and refuses passwords, `?`/`#`, control characters and long input. Unsaved sites live
+    in `SiteStore`'s memory (at most 8); edits, key trust and stars stay in memory; only `keep` writes a file. An
+    unsaved SFTP site without a password answers `passwordNeeded` before rclone is asked (rclone would otherwise offer
+    this PC's ssh-agent keys to the typed server).
+  - A download with no folder and no linked folder follows the category rules, one folder per batch
+    (`DownloadManagerService.SiteDownloadFolder`, wired in the Windows Host, the Linux/macOS Host and the server).
+- **Tests:** `SiteTransferProgressTests`, `SitesOpenOnceTests`, `RuntimeServiceTests.SiteFolder`, and
+  `SiteTransfersEndToEndTests.R1` against real rclone 1.76 (`rclone serve sftp`): progress per file for a download and
+  an upload, stop and start one file, a pause racing a stop, reach and last used, the no-folder download.
+  Full local suite after both reviews (`scripts	est.ps1`, rclone 1.76 for the Sites tests): Core 2388, Engine 214,
+  Integration 2073 + 10 skipped, TorBox 323, Archives 401, Containers 188, Torrents 94 + 29 skipped, Server 202, Tray 3;
+  extension typecheck and tests; web UI 718 tests and svelte-check clean.
+- **Owner's answers (2026-11-16), built 2026-11-17 after "resume":** (1) folder "Some of it": "build". (2) the
+  ssh-agent for SFTP sites with no password: "no idea"; my pick, built: a site a web session saves must hold its own
+  password or a key, while sites saved at this PC keep the agent.
+  - Web rule: `SiteSaveRequest.OwnSignInOnly`, forced on by `ScopedSites` for every web session. A web save of an SFTP
+    password site with no password is refused. From the web, a stored key and its passphrase stay with their server, as
+    the password already did. Remembering an address opened once with no password is refused for everyone.
+  - Folder "Some of it": `sites.here` {Id, Path, Names <= 100} answered by `sites.hereResult`, on demand only. Each named
+    folder that is here is read on the server one level at a time (at most 2,000 folders and 20,000 files). The count
+    stops as soon as the answer can only be Some of it. The whole request has 60 s. A connection failure answers
+    Ok = false and marks the site in trouble. One folder that can't be listed keeps the browse's own value.
+  - Fable review 3 applied: keep-after-openOnce hole, the key moving to another server, the recursive listing's
+    unbounded cost (now level by level), no overall limit, rclone dying mid-request, connection failure reported as
+    success. Not changed: `sites.here`, like browse's "On this PC" column, is not scoped to a web session's roots; both
+    say only whether files exist under the site's own linked folder (decide both together if it matters).
+  - Tests: Sites.Tests 239 pass; Integration Sites tests 140 pass, 6 skipped (rclone update and key e2e, which need
+    other setup). New: `AFolderTallySettlesAsSoonAsItIsSomeOfIt`, `AFolderComparesEveryFileUnderIt`,
+    `AFolderIsComparedFileByFileAllTheWayDown` (real rclone), `AStoredKeyStaysWithItsServerWhenTheWebEditsTheSite`,
+    `AnAddressWithoutAPasswordCantBeRemembered`, `ASiteSavedFromTheWebMustHoldItsOwnPasswordOrKey`.
+- **Not done:** no window or web UI uses the new fields yet (R2 onward). Not changed: rclone's connection cache is not
+  cleared when an unsaved site is closed; a batch on a site that vanished at restart fails file by file.
+
+### Sites rework R0: baseline screenshots, SITES.11 (2026-11-16)
+
+- **Owner:** "start" (R0), then "keep the app hidden without taking over my mouse and keyboard", and "after every
+  major change or decision, give the same fable agent a review" (done for each step below).
+- **Done:** all 19 mockup screens (`scripts/shoot-sites-mockups.ps1`; the plan's "21" was wrong, `S.phone` is defined
+  twice) and the app as built in 0.8.0, in `docs/plans/sites-mockups/compare/` with a README of what each pair shows.
+  The test window ran on a separate hidden Windows desktop (`scripts/run-on-hidden-desktop.ps1`), driven only through
+  UI Automation (`scripts/ui-drive-hidden.sh`, `ui-drive.ps1 -NoInput`, new `size:` step); the web UI with Playwright
+  (`webui/scripts/sites-r0.mjs`). Test sites: `rclone serve` SFTP (throttled), WebDAV, FTP, a read-only WebDAV and a
+  closed port, under `artifacts\r0`.
+- **Gap tables:** confirmed, with corrections in `docs/plans/sites-rework.md`, "R0 check by screenshot": the desktop has
+  no overwrite question at all (an older file over a newer one is skipped without asking, shown as "1 skipped (already there)"), a failed
+  transfer shows no reason, trouble has no Edit site. New faults: a running download's `.partial` file shows in the
+  This PC pane; at phone width the web status text overlaps the download icon; a page error "Cannot read properties
+  of null (reading 'folder')" (not yet reproduced alone); a server with a relative `DOWNLOADMANAGER_ROOTS` refuses to
+  save any site.
+- **Full local suite on main (after #13 and #18):** all .NET suites pass (Core 2388, Engine 214, Integration 2009 + 32
+  skipped, TorBox 323, Archives 401, Containers 188, Torrents 94 + 29 skipped, Server 202, Tray 3); extension typecheck
+  and 339 tests; web UI 718 tests and svelte-check clean. `scripts\test.ps1` first stopped at the extension typecheck:
+  this checkout's `node_modules` still held `@types/chrome` 0.0.300 against the lockfile's 0.3.7; `npm ci` fixed it.
+  `test.ps1` installs only when `node_modules` is missing, so a stale install fails the same way elsewhere.
+- **Not done:** Drive listing not reproduced (no Drive account in the test); the `ext` screen; light mode (R7); a
+  picture of a waiting row, a folder transfer, the sidebar's activity mark, the overwrite "skipped" row, and web
+  transfers, trouble and delete. The test machine's folder is repainted as `D:\Downloads\ISOs` in the built PNGs.
+
+### Popup row menu cut off in a short popup, EXT.B10 (2026-11-15)
+
+- **Owner report (screenshot, macOS):** the popup's right-click menu doesn't fit when the popup is small (one download
+  in the list): "not sure if it happens only on mac". It doesn't: any popup shorter than the menu cut it off.
+- **Cause:** `ui/menu.ts` keeps the menu inside the window, but a `position: fixed` menu adds nothing to the page's
+  height, so the browser never grew the popup for it; a menu taller than the popup was clipped.
+- **Fix:** while a menu is open the page's minimum height is the menu's, so the browser grows the popup (to its own
+  limit); the menu is placed again on resize, is never taller than the window (it scrolls instead), and the height
+  is given back on close.
+- **Checked:** `npx tsc --noEmit`, the 339 extension tests, and headless Chromium on a 120 px page with the six-entry
+  menu: 194 px asked for, the menu fully visible once the viewport had grown, height restored on close. **Not
+  checked:** the real popup in Chrome or Edge.
+
+### Keeping dependencies current, CI.4 (2026-11-15, branch `deps-upkeep`)
+
+- **Owner request:** "what can be done to keep the project up to date in the future?", then "yep, bi weekly though".
+  Found while building for macOS: Uno.Sdk was pinned at 6.7.45 since the D7 prototype (2026-11-09), one day before
+  Uno 7.0.5; nothing watched NuGet or npm, only Docker and Actions.
+- **Done:** `.github/dependabot.yml` covers NuGet (every project; Uno.Sdk now in `global.json` `msbuild-sdks`, so the
+  csproj says `Sdk="Uno.Sdk"`), npm (web UI, extension), Docker (root Dockerfile and the torrent worker's build) and
+  Actions, on the 1st and 15th of the month (cron; Dependabot has no two-week interval). Minor and patch updates come
+  grouped; majors come as their own pull requests. The four placeholder packages that keep Uno's dev tools out are
+  ignored. `scripts/check-pins.py` and `.github/workflows/upkeep.yml` check the pins Dependabot can't see (libtorrent,
+  vcpkg baseline, rclone, 7-Zip, appimagetool, nfpm) on the same days and keep one issue, "Pinned tools behind upstream".
+- **Checked:** the checker's pin reading, locally with GitHub's answers stubbed. **Not checked:** the GitHub API calls
+  (blocked in this session), Dependabot itself (it runs only from main, on its schedule), and whether Dependabot
+  finds Uno.Sdk in `global.json`. A Uno.Sdk update also needs THIRD-PARTY-NOTICES.md changed by hand.
+
+### macOS app, MAC.1 (2026-11-15, branch `macos-0.8.0`)
+
+- **Owner request:** "what does it take to get a macos version quickly? use github builds and work on a branch. build
+  should be based on last release." Built on 0.7.7 first (`macos-build`), then the same commits on 0.8.0. Owner,
+  after running it: "macos version matured in a very short time, let's go all in for a pull request."
+- **How:** the Linux Host and the Uno window run on macOS. Unix-socket IPC on macOS too (getpeereid and lstat in place
+  of SO_PEERCRED and statx; sockets in `/tmp/inbound-<uid>`, as a socket path is at most 104 bytes); `DetachedProcess`
+  where Linux used setsid(1); `open`, `open -R` and AppleScript's folder dialog; browsers' manifests under
+  `~/Library/Application Support`; the Host counts a Mac as a desktop (EXT.B9). `scripts/package-macos.sh` and
+  `.github/workflows/macos.yml` build Inbound.app (ad hoc signed) with the torrent worker (osx triplets).
+- **Fixed on the way, from the owner's runs:** trails under transparent windows (macOS windows are solid; Mica is MAC.2);
+  icons missing when started from Finder (Uno reads its files from `Resources/` beside the program); windows opening at
+  half size and resizing past the screen (no screen lookup on macOS, and Uno hands NSWindow.minSize pixels where it
+  takes points); Options coming back tiny from a saved size; a freeze closing Progress Details (a socket disposed
+  under a blocked Accept doesn't wake it on macOS); no way to reopen the window (menu-bar icon, `native/macos-menu`);
+  the reopened window being another app (the Host opens Inbound.app). Uno.Sdk 6.7.49. The Extractions glyph on Uno.
+- **Then, before the pull request (owner: "let's [do] everything we can before the pr", "self update is not done.
+  macos specific changelog entries", "tag a fake version so we can test auto update without a release"):** the
+  macOS updater and release files (MAC.4 above), a `macos` changelog tag with the 0.8.1 entry's Mac lines, `dm sites
+  rclone`, sign-in start as a LaunchAgent, MAC.3, windows kept clear of the Dock, a scrolling sidebar on Uno (owner:
+  "sidebar becomes too long and items on the bottom remain inaccessible"; Windows' ListBox scrolls by itself, so the
+  Windows window is unchanged), and every CI check for the Intel build too (under Rosetta).
+- **Checked:** on GitHub's Mac (CI): the Host and CLI answer; Sites downloads the macOS rclone and runs it; the window
+  is driven by `DOWNLOADMANAGER_UNO_SELFTEST` (real clicks with cliclick on About's OK and Progress Details' close,
+  Options, closing the main window, which ends its process, and opening it again), with screenshots. By the owner on a
+  Mac: the window, downloads, the extension and the menu-bar icon. **Not checked:** a Retina screen in CI (the runner's
+  scale is 1); the last sizing and reopening fixes on the owner's Mac. The Intel build runs every check under
+  Rosetta, and MAC.3 (a newer copy replaces the running Host) passes on both builds; Rosetta's rclone is the arm64 one,
+  as .NET reports the machine's arm64 there.
+- **MAC.5, parity with the Windows Host (owner: "is that all for parity with windows?"):** sleep prevention, the
+  completion power actions, notifications, the Keychain for the secret key, event sounds and copied links, each of which
+  the Linux Host does over D-Bus and so did nothing on a Mac. Left: .torrent and magnet opening; Developer ID and
+  notarization; Mica (Uno 7); a Retina screen and a real Intel Mac.
+- **MAC.6, better on a Mac (owner: "implement fable suggestions except number 10"):** quarantine and "Where from" on
+  finished files, the scheduler woken after sleep and clock changes, ⌘ shortcuts, a menu-bar icon that shows activity
+  and the running downloads, drops on it and a Services entry, Inbound's own notifications with Open / Show in Finder /
+  Retry, the Mac app and Window menus, the Dock badge and progress bar, and an Options choice to pause on a phone
+  hotspot, Low Data Mode or Low Power Mode. **Checked:** unit tests; in the macOS workflow, the marks on a real HTTPS
+  download and the helper's Services entry. **Not checked:** the menus, Dock, drops, Services and notifications on a
+  real Mac. **Self-update:** the owner updated from the `macos-update-test` pre-release on their Mac and it worked
+  (2026-11-15).
+- **The test suites on a Mac (owner, 2026-11-15, run on the owner's Apple silicon Mac):** Engine passed 214 of 214.
+  The full Integration suite had 182 failures. 170 are tests already tagged `Platform=Windows` (they start the Windows
+  Host, PowerShell or cmd.exe, or read the registry or pipe ACLs). Of the other 12:
+  - One real bug, fixed: a rename that only changes the case (`report.pdf` to `Report.pdf`) was refused on APFS, which
+    is case-insensitive by default, as "The target file already exists." The fix is `PathNames.SameFileOtherCase`.
+  - Two menu-bar speed tests expected "1.5", but the Mac's number format gives "1,5". The tests now pin the culture.
+  - Six tests used Windows paths as test data; they now use Unix paths elsewhere.
+  - The adopted-file mark test now checks the quarantine mark on macOS.
+  - Junction, native-host and torrent kill-switch tests are now tagged Windows.
+  The suites were taken off the macOS workflow again because it took too long (owner: "end ci, it takes forever. it's
+  redundant too"). A second run with the fixes on the owner's Mac (`--filter "Platform!=Windows"`, 2026-11-15) passed: 1704 passed,
+  0 failed, 70 skipped. The skipped tests need tools a source checkout doesn't bundle: 7-Zip for 60 archive tests, rclone
+  for 6 Sites tests and the torrent worker for 4.
+  The final build of the PR branch (2026-11-15) failed one Windows test: the golden IPC frames lacked the new MAC.6
+  setting. With that fixed (`d1b5cb1`), it passed: macOS packages on both architectures (run 43769913069) and CI on
+  Windows and Linux (run 43771417513). ⌘Q stays File > Exit
+  (owner: "leave as is").
+- **Fable re-audit (2026-11-15, owner asked; verified before acting):** fixed: saving pauses were refilled by the queue
+  and left downloads user-paused across a restart (now a service-level hold that requeues, `SavingHold.cs`, with an
+  integration test); magnet torrents weren't quarantined; the menu-bar menu was rebuilt under the pointer each second
+  (now after it closes); notifications the user turned off came back through osascript, and other notices weren't
+  Inbound's (one route now); Services registers its port explicitly and hands off to the CLI off the main thread; the
+  helper's first network/power lines could be lost (the Host asks again); a helper that ends releases the hold; an Edit
+  menu for the file panels; the Dock view is made once; the helper is only used from its bundle. Open: ⌘Q ends the Host
+  and its downloads (owner's call); an update zip's architecture isn't checked against the Mac; a notification clicked
+  with no Host running is lost; a Services link is on the CLI's argv while it runs; plus the earlier audit's items
+  below.
+- **Fable audit of the pull request (2026-11-15, owner asked; findings verified before acting):** fixed: the Mac
+  window couldn't save a server's token once the key moved to the Keychain (it now reads the Keychain too); a Host
+  started at sign-in would lose the update restarter when launchd cleans up its process group (`AbandonProcessGroup`);
+  a release or test update could ship without the torrent worker (now fails); macOS 15 has no right-click > Open for
+  unnotarized apps (texts say Open Anyway); shut down and restart used loginwindow's dialog events (now `shut`/`rest`,
+  unverified on a Mac); the LaunchAgent is rewritten only when it changes; a Host run from a terminal keeps its session;
+  the Mac Host's log says macOS. Open from the audit, after merge: swap the bundle atomically (`renamex_np`
+  `RENAME_SWAP`) and in the restarter after the Host exits; App Translocation (run from Downloads or the DMG) turns the
+  updater and sign-in start off with a "move to Applications" note; a locked Keychain fails the Host's start; the
+  signing key in a protected environment and a sign-only job (the repository is public), with a separate test key for
+  test updates; `LSMinimumSystemVersion` 12.0 while .NET 10's supported list starts at macOS 15; `/tmp/inbound-<uid>`
+  can be taken first by another local user; `open -n -a` drops `DOWNLOADMANAGER_DATA`; a CI step that runs a real
+  update end to end.
+- **Review (independent, Haiku; findings verified before acting):** fixed: extraction was refused on every Mac (no
+  hard-link count there; now lstat's `st_nlink`); the updater removed the old bundle while the Host and window still
+  loaded from it (now the restarter removes it after the Host is gone); the window check matched a process name macOS
+  cuts to 16 characters (now `pgrep -f` on the bundle path, with plain launcher paths); the web bridge said "windows" on
+  a Mac; the activation wake-up connection now runs on macOS only. Not a fault: "the launcher stops when no Host runs"
+  (it is `/bin/sh` without `set -e`). Left, named: the update signing key is usable by any branch's manual run (one
+  owner; a protected environment would close it); a Host started from the native host is in the browser's process
+  group until its own `setsid` at start.
 
 ### Android app design in Figma (2026-11-15)
 
@@ -3053,7 +3620,7 @@ NativeAOT, physical-phone, selected-remote-host, Doze/battery, TalkBack, theme a
   and the Integration site, dispatcher and golden-frame tests pass. **Not checked:** a sign-in with a real Google,
   Microsoft or Dropbox account, a renewal by the real provider, OneDrive's drive lookup, a real B2 bucket, anything
   visual, light mode, Linux. **Question for the owner:** may a live check use your own Google, Microsoft, Dropbox or
-  Backblaze account (a test folder, removed afterwards)? Until then 6c is unverified against the services.
+  Backblaze account (a test folder, removed afterwards)? Until then 6c is unverified against the services. **Answered 2026-11-15 (yes); Drive, OneDrive and Dropbox checked live (AK), B2 later.**
 - **Q. SITES.7: Sites in the web UI and on the server, "this device" streams** (2026-11-15, main; commits `dad04f5`,
   `ec80948` and the web UI commit after them). **Who may:** a web session signed in with the password is the admin, so
   it is answered for `sites.*` (my reading of the owner's "admin only", 2026-11-15: there is no role system, and the
@@ -3108,6 +3675,126 @@ NativeAOT, physical-phone, selected-remote-host, Doze/battery, TalkBack, theme a
   fingerprint at redirected input and with a wrong one, trusted by the right one, test, mkdir, ls, mv, rm asking for
   `--yes` and then deleting, remove, off; passes. **Not checked:** `sign-in` against a real provider, `trust` of a
   certificate (the same requests as the web UI, which the Host tests cover), Linux.
+- **AV. The open pull request work finished** (2026-11-16, owner: "deal with the unfinished pr work"). The Mac builds of
+  main (run 43789706027, `1de6d90`; the zips' hashes equal the workflow's) were signed here with the release key and
+  uploaded to v0.8.0 for arm64 and x64: `.dmg`, `.zip`, `manifest-macos-<arch>.json`, `SHA256SUMS-macos-<arch>`. The
+  release notes have the Mac lines of the changelog and the notarization note. Merged: #18 test packages `ca1dc79`
+  (all four CI jobs passed), #13 npm group `72954f6` after a types-only fix on its branch (five errors from
+  `@types/chrome` 0.3.7 in `background.ts`; type check, both builds, 339 extension tests, web UI check, 718 tests and
+  build passed here). Closed: #19, a copy of #18. Still open, blocked: #14 and #16 (ROADMAP CI.6). CI on main at
+  `1de6d90`: Linux and macOS passed, Windows failed on one known flaky test (CI.5). The merged branches
+  `macos-0.8.0`, `deps-upkeep` and `extension-open-files` were deleted on GitHub on the owner's word ("Yes, delete them"). This closes AU.
+- **AU. Open for the next session** (2026-11-16, owner: "keep these open for tomorrow"). The Mac files are not on the
+  v0.8.0 release yet: download the two artifacts of run 43789035309, sign, upload, add the Mac lines to the release
+  notes; then check main's latest CI and macOS runs; then ask whether the three merged branches may be deleted. Also
+  merged after AT: #15 jsdom 31 `1de6d90` (local npm checks passed). Left open with a comment: #13, #14, #16 (each
+  fails a local check). The Sites rework is accepted and not started. Handoff: `docs/plans/sites-rework-handoff.md`.
+- **AT. Open pull requests merged into main** (2026-11-16, owner's list; merge commits, no squash). #9 macOS `4633baf`,
+  #11 dependency upkeep `1ceaebe`, #10 extension popup menu `3c6a760`, #5 `ef82afb`, #7 `cf75467`, #8 `2ba7b6c` (Docker
+  image digests), #17 `b6d52ce` (Dependabot: no Ubuntu version updates). Closed, not merged: #6 and #12 (Ubuntu 22.04 to
+  22.10; 22.10's support ended in 2023).
+  - Conflicts: #11 in the Uno project file (kept `Sdk="Uno.Sdk"`; a first resolution took the branch's whole file and
+    dropped a line #9 added, which failed the Uno build and was corrected before the merge) and PROGRESS.md (both
+    kept); #10 in PROGRESS.md (both kept).
+  - Dependabot could not rebase #5, #7, #8 ("The dependabot.yml entry that created this PR has been deleted"), so main
+    was merged into each branch; each merged after its Linux and macOS jobs passed.
+  - GitHub's Windows job failed on a different test each run (ROADMAP CI.5). Owner: "do the tests locally instead",
+    "windows is windows. deal with ci later." #10 merged on a local pass of `build.ps1` and `test.ps1`.
+  - **macOS goes into 0.8.0, not a 0.8.1** (owner's choice, 2026-11-16): the macOS lines of the changelog moved from
+    0.8.1 to 0.8.0; the Mac files are built from main (still 0.8.0) and attached to the v0.8.0 release.
+- **AS. Firefox add-on approved** (2026-11-16, owner: "finally firefox got approved"). The listed add-on, version 0.6.5 (owner),
+  passed review at addons.mozilla.org (ROADMAP EXT.S5). Not checked here: the public page.
+- **AR. Owner on Sites in 0.8.0: the UI is not finished** (2026-11-16). "current implementation is TERRIBLE ... a tacked
+  on feature that is borderline unusable"; "backend seems sound and it seems to work but ui is not finished"; "I agreed
+  on mockups for the design USE THEM"; "don't start the work yet, create a proper bulletproof plan first". Reported:
+  - Web UI: a download goes to the browser (where the extension catches it) instead of to the server.
+  - Web UI: Google Drive files are not listed.
+  - Desktop: no context menu over files, and a double click on a file does nothing.
+  - Desktop: the transfers list looks unlike the rest of the app, nothing can be done with a downloaded file, and its
+    Files button is of no use.
+  - Desktop: "sites page leaves a lot to be desired".
+  The four mockup pages were never in the repo; they are now in `docs/plans/sites-mockups/` (page 4 is the agreed one).
+  The earlier "walked" notes for SITES.3 to SITES.7 were function checks through UI Automation and never a comparison
+  with the mockup, which those rows say ("Not checked: visuals"). Plan: `docs/plans/sites-rework.md`, ROADMAP SITES.11.
+  Nothing is built yet. The owner accepted the plan and all nine picks the same day ("I accept all picks but don't start
+  yet"); work starts on their word.
+- **AQ. 0.8.0 published** (2026-11-15, owner: "make a full release"). `v0.8.0` at `7fa8a8c` (the audited commit): the
+  Windows build made the draft, which was published as the latest release with a summary, the extension line (0.6.4,
+  unchanged) and two known issues (a trusted certificate counts for every site; a transfer stops after about half a
+  minute of an unreachable server). Publishing built the Linux packages (AppImage, .deb, .rpm, pacman, tar.gz) and the
+  Docker image; both succeeded. CI on `main` after the tag: a ranged stall case added in PERF.9 was wrong about the test
+  server (it sends 64 KB before throttling, so a range keeps its tries by UI.B15) and was dropped (`dd0a797`, test only);
+  then Linux passed and Windows failed once on `IpcOperationLifetimeTests.DisconnectCancelsTheRunningOperation`, a
+  2-second wait on a busy runner in a test this release doesn't touch, which passes locally in milliseconds.
+  **Next, open:** ROADMAP SITES.10 (audit follow-ups), S3 on a real service and B2 file transfers (owner: later), the
+  window's default view measured on a quiet machine, ANDROID.2.
+- **AP. Fable audit of v0.7.7..HEAD before 0.8.0** (2026-11-15, owner's request; one Fable agent, read-only). No
+  high-severity finding. Fixed after checking each against the code:
+  - **Outage counted per file** (`SiteTransfers.RunItemAsync`): every file in flight added one to the batch's failed
+    connections, so one drop with 3 at once stopped a batch after about 10 s. Now only the first failure of an outage
+    counts and sets the wait; files failing while the batch already waits are the same outage.
+  - **Stop and wait rules only knew SFTP**: a wrong FTP/WebDAV/S3 password, a revoked sign-in or an untrusted
+    certificate tried every file 5 times (a lockout risk), and an unreachable FTP/WebDAV/S3/cloud server failed files
+    instead of waiting. New `SiteErrorText.RefusesTheSite` and `CantReach` read the same fixed phrases as the friendly
+    texts, for every kind; 12 new cases in `SiteErrorTextTests`.
+  - **A saved password could be sent to another server**: saving a site with a new host, port, URL or endpoint kept its
+    sealed password, which a test would then send there. Such a save is now refused until the password is typed again
+    ("a saved password is only sent to the server it was saved for"); a key is kept (key sign-in gives the server
+    nothing of it). `SitesCommandsTests` checks the refusal leaves the site as it was.
+  - **The antivirus check's thread could end the Host** on an exception it didn't list: it now catches everything.
+  - **The year-long cache header went on misses too** (`StaticAssetCompression`): now only on a 200.
+  **Fable checked the fixes** (same agent): 1, 5 and 9 right and complete. Fix 4 had a two-step bypass (save the moved
+  site with key sign-in, which carried the password over, then switch back to password sign-in); a saved password is
+  now never carried to another server whatever the sign-in method, and `SitesCommandsTests` covers the two steps. Fix 2
+  missed Windows' "unreachable network/host" and a TLS handshake timeout; added, with cases. Its other notes (a stopped
+  batch carries no problem code for Sign in again or Trust; five waits come to about 30 s; a matched phrase anywhere in
+  the text) go to SITES.10.
+  **Left as follow-ups** (ROADMAP SITES.10): a trusted self-signed certificate that can sign others (`openssl req -x509`
+  makes them so by default, as many NAS do) also vouches for other sites' names, since rclone takes one CA file for
+  all sites; a user's own OAuth client secret is on `rclone authorize`'s command line for up to 10 minutes; "Keep both"
+  can make a duplicate when the Host is killed within 2 s of a file finishing; a hung `operations/copyfile` answer
+  fails the file for good; a web edit of a site whose linked folder is outside the server's folders is refused.
+- **AO. Owner on the remaining live checks** (2026-11-15): S3 against a real service is left for later and does not
+  block the release; B2 file transfers stay noted as unchecked (AN); WebDAV tested against local servers is enough.
+- **AN. B2 live, and the app's own rclone download** (2026-11-15). The owner added a B2 site in a fresh test instance's
+  window with a key limited to one bucket. **rclone download:** Options › Sites, Download rclone, fetched, checked and
+  installed rclone 1.76.0 in 3 seconds (the first live run of SITES.1's download). **B2:** test, listing the buckets,
+  making a folder and deleting it all worked; the upload failed with "failed to HEAD for download ... server gave HTTP
+  response to HTTPS client" on `f003.backblazeb2.com`. On this network that name resolves to 45.11.36.16, not a
+  Backblaze address (`api.backblazeb2.com` resolves to Backblaze's 104.153.233.180), and HTTPS to it fails
+  (`curl`: SEC_E_INVALID_TOKEN): a DNS-level block of B2's file host on this connection, outside Inbound. A file
+  transfer to or from B2 is therefore unchecked here; it needs another network or DNS. The bucket was left empty, the
+  site and the test instance removed. (A test-setup quirk on the way: `INBOUND_RCLONE` pointing at a file that is gone
+  wins over a downloaded rclone and reports it missing; it is a developer override, so left as it is.)
+- **AM. PERF.9 fix: bytes before a reset were lost** (2026-11-15, main). CI on Linux failed
+  `EngineRecoveryTests.ASegmentThatGetsBytesOnItsLastAllowedAttemptStillRetries` after the 0.8.0 tag: the reader now
+  gathers up to 64 KB before a write, and when a read failed (a server resetting the connection) the bytes already
+  gathered were dropped, so a segment that only ever got a little before each reset made no progress and ran out of
+  attempts. `TransferReader.FillAsync` now hands over what it has and gives the failure with the next call. New
+  `TransferReaderTests` (4) force the case; engine tests 214 pass on Windows. The unpublished 0.8.0 draft is to be made
+  again from this commit once CI passes on Linux.
+- **AL. Release 0.8.0 tagged** (2026-11-15). `main` and `v0.8.0` at `aac4b82`, pushed with the owner's go-ahead; the
+  Windows workflow makes the draft release for the owner to finish and publish (Firefox add-on from the earlier
+  release, as before). Setup built locally first: 68.2 MB, the install folder 253 MB with the notices, the Native AOT
+  native host (9.5 MB, no native symbol file) and the compressed web UI files. **A slip, fixed:** the Android session
+  (deleted by the owner) had made a branch `android-trial` in this same checkout and switched to it, so the live-check
+  and release commits landed there on top of its Android note (`dc082eb`), `main` was pushed only to `cb07f7b`, and the
+  first `v0.8.0` tag pointed at a commit with the Android note in it. The tag was deleted within a minute and its
+  Windows build cancelled before it made a draft release; the two commits were cherry-picked onto `main`
+  (`0b4ece0`, `aac4b82`), `android-trial` was put back to `dc082eb`, and the tag made again on `main`. The untracked
+  `tools/AndroidTrial/` and `tools/AndroidTrialServer/` from that session are left for the owner. **Left:** Backblaze B2
+  live (owner: later); the window's default view measured again on a quiet machine.
+- **AK. SITES.6c live: Drive, OneDrive and Dropbox with the owner's accounts** (2026-11-15, main at `cb07f7b`). An
+  isolated test instance (own name and data folder) and the real `dm`, rclone 1.76.0. Each service: added, signed in in
+  the owner's browser through the printed `127.0.0.1:53682` address (`dm sites sign-in`, rclone's own app), tested, a
+  folder `/inbound-live-check` made, a 2,000,000-byte file uploaded (`dm sites put`), listed, downloaded
+  (`dm sites get`) with the same SHA-256 as the original, the folder deleted (`dm sites rm --yes`) and gone from the
+  listing; then the site removed. All three pass. One slip in the test script, not in Inbound: Git Bash rewrote
+  `/inbound-live-check` into `C:/Program Files/Git/inbound-live-check` for the first Drive run, so a folder `/C:` was made
+  on the owner's Drive with only the test file in it; it was listed, found to hold nothing else, and deleted; the script
+  then ran with `MSYS_NO_PATHCONV=1`. The test instance and its data (the sealed tokens) were deleted afterwards; the
+  grants stay with the providers until the owner revokes them. **Not checked:** Backblaze B2 (owner, 2026-11-15:
+  "continue without b2 for now, later"); a renewal after the token runs out.
 - **AJ. Release 0.8.0 in preparation** (2026-11-15, main). Version 0.8.0 in `Directory.Build.props`, Setup, the
   scripts and the Firefox update link; `changelog.json` has the 0.8.0 lines (date empty until release; no test status).
   **Owner's answers (2026-11-15):** question Q, "every signed-in browser is the admin", is right as built; question P,

@@ -14,9 +14,9 @@
 
   <ItemGroup>
     <PackageReference Include="coverlet.collector" Version="6.0.4" />
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.2" />
     <PackageReference Include="xunit" Version="2.9.3" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" />
   </ItemGroup>
 
   <ItemGroup>
@@ -28,6 +28,11 @@
     <Compile Include="..\..\src\DownloadManager.Host.Linux\LinuxTorrentHandler.cs" Link="LinuxTorrentHandler.cs" />
     <Compile Include="..\..\src\DownloadManager.Host.Linux\LinuxOpenRule.cs" Link="LinuxOpenRule.cs" />
     <Compile Include="..\..\src\DownloadManager.Host.Linux\LinuxMenuEntry.cs" Link="LinuxMenuEntry.cs" />
+    <Compile Include="..\..\src\DownloadManager.Host.Linux\MacLoginItem.cs" Link="MacLoginItem.cs" />
+    <Compile Include="..\..\src\DownloadManager.Host.Linux\MacDesktop.cs" Link="MacDesktop.cs" />
+    <Compile Include="..\..\src\DownloadManager.Host.Linux\MacKeychainKeyStore.cs" Link="MacKeychainKeyStore.cs" />
+    <Compile Include="..\..\src\DownloadManager.Host.Linux\MacMenuBar.cs" Link="MacMenuBar.cs" />
+    <Compile Include="..\..\src\DownloadManager.Host.Linux\LinuxTrayActions.cs" Link="LinuxTrayActions.cs" />
     <Compile Include="..\..\src\DownloadManager.Host\UpdatePostponement.cs" Link="UpdatePostponement.cs" />
     <Compile Include="..\..\src\DownloadManager.Host\HostPostDownloadHook.cs" Link="HostPostDownloadHook.cs" />
     <Compile Include="..\..\src\DownloadManager.Host\ClipboardRetrySchedule.cs" Link="ClipboardRetrySchedule.cs" />
@@ -79,6 +84,7 @@
     <!-- The phone app's in-process Host connection: no Android types in it, so it is linked and tested here. -->
     <Compile Include="..\..\src\DownloadManager.Android\Host\InProcessHostConnection.cs" Link="Android\InProcessHostConnection.cs" />
     <ProjectReference Include="..\..\src\DownloadManager.Mobile\DownloadManager.Mobile.csproj" />
+    <Compile Include="..\Shared\PpkWriter.cs" Link="Shared\PpkWriter.cs" />
   </ItemGroup>
 
 </Project>

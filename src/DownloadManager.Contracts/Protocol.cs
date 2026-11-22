@@ -419,7 +419,7 @@ public sealed class IpcClient : IIpcConnection
     /// <summary>A named pipe on Windows; on Linux, the Host's Unix socket of that name (<see cref="UnixSockets"/>).</summary>
     private static async Task<Stream> OpenAsync(string name, TimeSpan? timeout, CancellationToken cancellationToken)
     {
-        if (OperatingSystem.IsLinux())
+        if ((OperatingSystem.IsLinux() || OperatingSystem.IsMacOS()))
             return await UnixSockets.ConnectAsync(name, timeout ?? TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false);
 
         var pipe = new NamedPipeClientStream(

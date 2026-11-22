@@ -293,6 +293,8 @@ public sealed class SettingsDto
     public bool DownloadOnlyOnUnmeteredNetwork { get; set; }
     public bool AllowLocalNetwork { get; set; } = true;
     public bool PreventSleepWhileDownloading { get; set; } = true;
+    /// <summary>MAC.6: pause downloads on a costly network (a phone hotspot, Low Data Mode) and in Low Power Mode, and resume them after. The Mac Host only.</summary>
+    public bool PauseOnCostlyNetworkOrLowPower { get; set; }
     public bool TorrentsEnabled { get; set; }
     public string TorrentRoute { get; set; } = "ask";
     public bool TorrentChooseFiles { get; set; } = true;

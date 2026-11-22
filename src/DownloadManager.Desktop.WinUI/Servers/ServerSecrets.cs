@@ -30,7 +30,11 @@ internal sealed class ServerSecrets(string dataFolder) : ISecretProtector
         var keyFile = Path.Combine(dataFolder, AesGcmSecretProtector.DefaultFileName);
         if (File.Exists(keyFile)) return _opened = AesGcmSecretProtector.OpenOrCreate(keyFile);
 #if HAS_UNO
-        using var keyring = DownloadManager.Host.SecretServiceKeyStore.TryOpen(dataFolder, UiTrace.Write);
+        // MAC.5: on a Mac the Host keeps the key in the login Keychain.
+        if (OperatingSystem.IsMacOS() && DownloadManager.Host.MacKeychainKeyStore.TryOpen(dataFolder, UiTrace.Write) is { } keychain &&
+            AesGcmSecretProtector.OpenExisting(keychain, UiTrace.Write) is { } fromKeychain)
+            return _opened = fromKeychain;
+        using var keyring = OperatingSystem.IsMacOS() ? null : DownloadManager.Host.SecretServiceKeyStore.TryOpen(dataFolder, UiTrace.Write);
         if (keyring is not null && AesGcmSecretProtector.OpenExisting(keyring, UiTrace.Write) is { } fromKeyring)
             return _opened = fromKeyring;
 #endif

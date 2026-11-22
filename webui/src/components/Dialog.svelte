@@ -23,9 +23,10 @@
     title,
     onclose,
     wide = false,
+    sheet = false,
     children,
     footer,
-  }: { title: string; onclose: () => void; wide?: boolean; children: Snippet; footer?: Snippet } = $props();
+  }: { title: string; onclose: () => void; wide?: boolean; sheet?: boolean; children: Snippet; footer?: Snippet } = $props();
 
   let panel: HTMLDivElement | undefined = $state();
   let body: HTMLDivElement | undefined = $state();
@@ -152,10 +153,10 @@
 
 <svelte:window onkeydown={pageKey} />
 
-<div class="fixed inset-0 z-40 flex items-stretch justify-center bg-black/45 sm:items-center sm:p-6" transition:fade={{ duration: 120 }} role="presentation" onkeydown={keydown} onmousedown={backdrop}>
+<div class="fixed inset-0 z-40 flex justify-center bg-black/45 sm:items-center sm:p-6 {sheet ? 'items-end' : 'items-stretch'}" transition:fade={{ duration: 120 }} role="presentation" onkeydown={keydown} onmousedown={backdrop}>
   <div
     bind:this={panel}
-    class="flex max-h-dvh w-full flex-col bg-surface shadow-2xl outline-none sm:max-h-[88vh] sm:rounded-lg sm:border sm:border-divider {wide ? 'sm:max-w-3xl' : 'sm:max-w-lg'}"
+    class="flex w-full flex-col bg-surface shadow-2xl outline-none sm:max-h-[88vh] sm:rounded-lg sm:border sm:border-divider {sheet ? 'max-h-[85dvh] rounded-t-2xl border-t border-divider' : 'max-h-dvh'} {wide ? 'sm:max-w-3xl' : 'sm:max-w-lg'}"
     role="dialog"
     aria-modal="true"
     aria-label={title}
@@ -163,6 +164,7 @@
     onfocusin={focusin}
     transition:scale={{ start: 0.97, duration: 140 }}
   >
+    {#if sheet}<span class="mx-auto mt-2 h-1 w-9 rounded-full bg-control-stroke sm:hidden" aria-hidden="true"></span>{/if}
     <header class="flex items-center gap-2 border-b border-divider bg-chrome px-4 py-2.5 sm:rounded-t-lg">
       <h2 class="flex-1 truncate text-[14px] font-semibold">{title}</h2>
       <button class="dialog-close rounded p-1 text-muted hover:bg-hover" data-close onclick={onclose} aria-label="Close"><Icon name="close" size={16} /></button>

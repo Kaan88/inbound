@@ -58,7 +58,7 @@ internal static partial class Program
     {
         "doctor", "add-batch", "add", "list", "status", "profile", "update", "export", "import", "open", "reveal",
         "describe", "priority", "package", "pause", "resume", "retry", "refresh", "cancel", "remove", "pause-all",
-        "resume-all", "queue", "schedule", "site", "sites", "settings", "folders", "host", "torrent",
+        "resume-all", "queue", "schedule", "site", "sites", "remotes", "settings", "folders", "host", "torrent",
     };
 
     private static async Task<int> RunAsync(string[] args)
@@ -606,6 +606,7 @@ internal static partial class Program
             case "site":
                 return await SiteAsync(client, args, json).ConfigureAwait(false);
             case "sites":
+            case "remotes":
                 return await SitesAsync(client, args, json).ConfigureAwait(false);
             case "settings":
                 return await SettingsAsync(client, args, json).ConfigureAwait(false);
@@ -1876,6 +1877,9 @@ internal static partial class Program
                     case "preventsleep":
                         settings.PreventSleepWhileDownloading = ParseBool(value);
                         break;
+                    case "pausewhensaving":
+                        settings.PauseOnCostlyNetworkOrLowPower = ParseBool(value);
+                        break;
                     case "postdownload":
                         settings.PostDownloadCommand =
                             string.IsNullOrWhiteSpace(value) || value is "none" or "-" ? null : value;
@@ -1934,7 +1938,7 @@ internal static partial class Program
         "defaultdir, maxconcurrent, defaultconnections, launchatstartup, clipboard, usecategoryfolders, " +
         "usetorrentcategoryfolders, torrentdir, " +
         "closewindowcompletely, browserintegration, speedlimit, proxymode, proxyaddress, proxyuser, proxypass, " +
-        "allowsystemcompletionactions, preventsleep, postdownload, updatemanifest, updatekey, updatekeyfile, " +
+        "allowsystemcompletionactions, preventsleep, pausewhensaving, postdownload, updatemanifest, updatekey, updatekeyfile, " +
         "updatechannel, autocheckupdates, compresseddir, documentsdir, musicdir, programsdir, videodir";
 
     /// <summary>
@@ -2124,6 +2128,7 @@ internal static partial class Program
         Console.WriteLine($"auto-resume:       {settings.AutoResumeUnfinishedOnStartup}");
         Console.WriteLine($"computer actions:  {settings.AllowSystemCompletionActions}");
         Console.WriteLine($"prevent sleep:     {settings.PreventSleepWhileDownloading}");
+        Console.WriteLine($"pause when saving: {settings.PauseOnCostlyNetworkOrLowPower}");
         Console.WriteLine($"post-download:     {settings.PostDownloadCommand ?? "none"}");
         Console.WriteLine($"queues:            {string.Join(", ", settings.Queues.Select(q => $"{q.Id}:{q.Name}"))}");
     }
@@ -2221,11 +2226,11 @@ internal static partial class Program
               dm schedule list|add|remove|enable|disable
                           [--open] [--exit] [--site-transfers]
                           [--shutdown shutdown|restart|logoff] [--force]
-              dm sites list | transfers | get <site> <path>... --to <folder> | put <site> <folder> <path>...
+              dm sites list | transfers | get <remote> <path>... --to <folder> | put <remote> <folder> <path>...
                           | pause|resume|cancel|retry <transfer-id> | clear [<transfer-id>]
-                          | on|off|status | add <name> --kind K ... | remove|test|trust|sign-in <site>
-                          | ls <site> [<path>] | mkdir <site> <path> | mv <site> <path> <name> | rm <site> <path>... --yes
-                          (saved sites, SITES.4 and SITES.8; 'dm sites help' lists the options)
+                          | on|off|status | add <name> --kind K ... | remove|test|trust|sign-in <remote>
+                          | ls <remote> [<path>] | mkdir <remote> <path> | mv <remote> <path> <name> | rm <remote> <path>... --yes
+                          (Remote files: saved remotes; 'remotes' works as 'sites'; 'dm sites help' lists the options)
               dm site list | add <site> <username> [--password-env VAR] | remove <login-id>
                           (the password is read from standard input unless --password-env names it)
               dm settings [get] | settings set <key> <value> [<key> <value>...]
@@ -2233,7 +2238,7 @@ internal static partial class Program
               | settings export <file.json> | settings import <file.json>
                           keys: defaultdir, maxconcurrent, defaultconnections, launchatstartup, clipboard,
                           usecategoryfolders, closewindowcompletely, browserintegration, speedlimit, proxymode,
-                          proxyaddress, proxyuser, allowsystemcompletionactions, preventsleep,
+                          proxyaddress, proxyuser, allowsystemcompletionactions, preventsleep, pausewhensaving (Mac),
                           postdownload, updatemanifest, updatekey, updatekeyfile, updatechannel,
                           autocheckupdates, compresseddir, documentsdir, musicdir, programsdir, videodir,
                           usetorrentcategoryfolders, torrentdir (none: the same folders as other downloads)
@@ -2315,15 +2320,11 @@ internal sealed class CliClient : IAsyncDisposable
                    ?? throw new HostUnavailableException($"Could not find {HostLocator.HostFileName}. Build or install the host first.");
         try
         {
-            if (OperatingSystem.IsLinux())
+            if ((OperatingSystem.IsLinux() || OperatingSystem.IsMacOS()))
             {
                 // In a session of its own, so the Host outlives this command, and with no standard handles of ours,
                 // or `dm list | jq` would never end. The shell only redirects them; setsid starts the Host.
-                var start = new ProcessStartInfo("sh") { UseShellExecute = false };
-                start.ArgumentList.Add("-c");
-                start.ArgumentList.Add("exec setsid -f \"$0\" --background >/dev/null 2>&1 </dev/null");
-                start.ArgumentList.Add(host);
-                Process.Start(start)?.Dispose();
+                DetachedProcess.Start(host, "--background");
             }
             else
             {
@@ -2518,12 +2519,12 @@ internal sealed class CliClient : IAsyncDisposable
 internal static class HostLocator
 {
     /// <summary>The file name of the Host program on this system.</summary>
-    public static string HostFileName => HostFileNameFor(OperatingSystem.IsLinux());
+    public static string HostFileName => HostFileNameFor((OperatingSystem.IsLinux() || OperatingSystem.IsMacOS()));
 
     public static string HostFileNameFor(bool linux) => linux ? "inbound-host" : "DownloadManager.Host.exe";
 
     public static string? FindHostExecutable()
-        => Candidates(OperatingSystem.IsLinux(), AppContext.BaseDirectory, Environment.GetEnvironmentVariable("DOWNLOADMANAGER_HOST"))
+        => Candidates((OperatingSystem.IsLinux() || OperatingSystem.IsMacOS()), AppContext.BaseDirectory, Environment.GetEnvironmentVariable("DOWNLOADMANAGER_HOST"))
             .Select(Path.GetFullPath).FirstOrDefault(File.Exists);
 
     /// <summary>The places tried, first to last. Linux: beside this program (the AppImage keeps everything in one folder) and the build folders.</summary>

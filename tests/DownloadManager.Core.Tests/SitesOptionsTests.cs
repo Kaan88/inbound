@@ -89,7 +89,7 @@ public sealed class SitesOptionsTests
     {
         var view = SitesRules.Rclone(Status(s => { NoRclone(s); s.Enabled = false; s.Error = "Sites is off."; }), Now);
         Assert.False(view.LineIsProblem);
-        Assert.Equal("rclone is looked for when Sites is on.", view.Line);
+        Assert.Equal("rclone is looked for when Remote files is on.", view.Line);
         Assert.False(view.EnableAutoUpdate);
     }
 
@@ -188,7 +188,7 @@ public sealed class SitesOptionsTests
     public void ANameIsRequired()
     {
         Assert.Null(SitesRules.Request(Form(v => v with { Name = " " }), null, out var problem));
-        Assert.Equal("Give the site a name.", problem);
+        Assert.Equal("Give the remote a name.", problem);
     }
 
     [Theory]
@@ -230,8 +230,11 @@ public sealed class SitesOptionsTests
         // The window says what the Host would: a .pub or .ppk text gets its own words (one rule, SiteKeyRules).
         Assert.Null(SitesRules.Request(Form(v => v with { AuthMethod = "key", PrivateKey = "ssh-ed25519 AAAAC3Nza me@pc" }), null, out problem));
         Assert.Contains("public key", problem);
+        // SITES.11/14: a whole .ppk is sent on; the Host converts it, or says why it can't. One cut short is refused here.
+        Assert.NotNull(SitesRules.Request(Form(v => v with { AuthMethod = "key",
+            PrivateKey = "PuTTY-User-Key-File-3: ssh-ed25519\nEncryption: none\nPrivate-Lines: 1\nAAAA\nPrivate-MAC: 00" }), null, out problem));
         Assert.Null(SitesRules.Request(Form(v => v with { AuthMethod = "key", PrivateKey = "PuTTY-User-Key-File-3: ssh-ed25519" }), null, out problem));
-        Assert.Contains("PuTTY", problem);
+        Assert.Contains("cut short", problem);
     }
 
     [Fact]
@@ -335,7 +338,7 @@ public sealed class SitesOptionsTests
         Assert.Null(SitesRules.TrustedCertificateLine(new SiteDto()));
         Assert.StartsWith("Trusts its server's own certificate", SitesRules.TrustedCertificateLine(new SiteDto { TrustedCertificates = [new SiteTrustedCertificateDto()] }));
         Assert.True(SitesBrowseRules.PointsToOptions(SiteProblems.CertificateNotTrusted));
-        Assert.Contains("Test the site", SitesBrowseRules.ProblemText(SiteProblems.CertificateNotTrusted, null, null, null));
+        Assert.Contains("Check the certificate", SitesBrowseRules.ProblemText(SiteProblems.CertificateNotTrusted, null, null, null));
     }
 
     [Fact]

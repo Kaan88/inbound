@@ -25,6 +25,8 @@ public static class LocalListing
             foreach (var entry in info.EnumerateFileSystemInfos("*", options))
             {
                 var isFolder = entry is DirectoryInfo;
+                // A running site download's temporary file is not a file of the folder yet.
+                if (!isFolder && IsTransferPartial(entry.Name)) continue;
                 entries.Add(new LocalEntry(entry.Name, isFolder, isFolder ? -1 : ((FileInfo)entry).Length,
                     new DateTimeOffset(entry.LastWriteTimeUtc, TimeSpan.Zero)));
                 if (entries.Count > MaxEntries) return ([], $"The folder holds more than {MaxEntries:N0} items, more than this view shows.");
@@ -84,4 +86,63 @@ public static class LocalListing
 
     /// <summary>The folder's own name, to select it after going up.</summary>
     public static string Leaf(string folder) => Path.GetFileName(Path.TrimEndingDirectorySeparator(folder));
+
+    /// <summary>Stars kept for the This PC pane at most.</summary>
+    public const int MaxStars = 20;
+
+    /// <summary>
+    /// rclone's temporary name for a file a site download is writing: <c>name.&lt;8 hex digits&gt;.partial</c> next to the
+    /// target (the same narrow shape as <c>SiteTransferPaths</c>, so a user's own <c>report.old.partial</c> stays visible).
+    /// </summary>
+    public static bool IsTransferPartial(string name)
+    {
+        const string tail = ".partial";
+        if (!name.EndsWith(tail, StringComparison.Ordinal) || name.Length < tail.Length + 9) return false;
+        var token = name.AsSpan(name.Length - tail.Length - 9, 9);
+        if (token[0] != '.') return false;
+        for (var i = 1; i < token.Length; i++)
+        {
+            if (!(token[i] is >= '0' and <= '9' or >= 'a' and <= 'f')) return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>The path as clickable parts: "D:" › "Downloads" › "ISOs", each with the folder it opens.</summary>
+    public static IReadOnlyList<(string Name, string Path)> Crumbs(string folder)
+    {
+        var root = Path.GetPathRoot(folder);
+        if (string.IsNullOrEmpty(root)) return [(folder, folder)];
+        var crumbs = new List<(string, string)>();
+        var first = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        crumbs.Add((first.Length == 0 ? root : first, root));
+        var at = root;
+        foreach (var part in folder[root.Length..].Split(['\\', '/'],StringSplitOptions.RemoveEmptyEntries))
+        {
+            at = Path.Combine(at, part);
+            crumbs.Add((part, at));
+        }
+
+        return crumbs;
+    }
+
+    private static StringComparison PathComparison => OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+
+    public static bool IsStarred(IEnumerable<string> stars, string folder)
+        => stars.Any(star => string.Equals(Path.TrimEndingDirectorySeparator(star), Path.TrimEndingDirectorySeparator(folder), PathComparison));
+
+    /// <summary>The list after the Star button: the folder leaves it when it is there, else it goes first; at most <see cref="MaxStars"/>.</summary>
+    public static List<string> ToggleStar(IEnumerable<string> stars, string folder, int max = MaxStars)
+    {
+        var list = stars.ToList();
+        var removed = list.RemoveAll(star => string.Equals(Path.TrimEndingDirectorySeparator(star), Path.TrimEndingDirectorySeparator(folder), PathComparison));
+        if (removed > 0) return list;
+        list.Insert(0, folder);
+        if (list.Count > max) list.RemoveRange(max, list.Count - max);
+        return list;
+    }
+
+    /// <summary>The order of a column; folders first whatever the direction.</summary>
+    public static int Compare(LocalEntry a, LocalEntry b, string key, bool ascending)
+        => SitesBrowseRules.CompareItems(new(a.Name, a.IsFolder, a.Size, a.Modified, null), new(b.Name, b.IsFolder, b.Size, b.Modified, null), key, ascending);
 }

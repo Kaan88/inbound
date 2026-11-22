@@ -130,14 +130,14 @@ public sealed class RemotePanesTests
     {
         var request = RemoteTransfers.Copy("drive", "Photos 2025/", [new SiteItemDto { Name = "Wedding", IsFolder = true }, File("IMG_2041.jpg")],
             "nas", "/photos");
-        Assert.Equal(("drive", "copy", "/Photos 2025"), (request.SiteId, request.Direction, request.RemoteFolder));
-        Assert.Equal(("nas", "/photos", "skip"), (request.DestinationSiteId, request.DestinationFolder, request.Conflict));
+        Assert.Equal(("drive", "between", "/Photos 2025"), (request.SiteId, request.Direction, request.RemoteFolder));
+        Assert.Equal(("nas", "/photos", "skip"), (request.TargetSiteId, request.TargetFolder, request.Conflict));
         Assert.Equal(["Wedding", "IMG_2041.jpg"], request.Names.Select(n => n.Name));
         Assert.Equal([true, false], request.Names.Select(n => n.IsFolder));
         Assert.Equal("", request.LocalFolder);
         Assert.False(request.SafeSingleDownload);
         // r6's caption under the selection.
-        Assert.Equal("To Home NAS/photos", "To " + RemoteFileList.Destination("Home NAS", RemoteCrumbs.Normalize(request.DestinationFolder)));
+        Assert.Equal("To Home NAS/photos", "To " + RemoteFileList.Destination("Home NAS", RemoteCrumbs.Normalize(request.TargetFolder)));
         Assert.Equal("sitesRemoteCopy", SiteTransferStartRequest.RemoteCopyCapability);
     }
 
@@ -145,7 +145,7 @@ public sealed class RemotePanesTests
     public void ATransferRowNamesBothLocationsOfACopy()
     {
         Assert.Equal("copy · Google Drive → Home NAS",
-            RemoteTransfers.Title(new SiteTransferDto { Direction = "copy", SiteName = "Google Drive", DestinationSiteName = "Home NAS" }));
+            RemoteTransfers.Title(new SiteTransferDto { Direction = "between", SiteName = "Google Drive", TargetSiteName = "Home NAS" }));
         Assert.Equal("download · Home NAS", RemoteTransfers.Title(new SiteTransferDto { Direction = "download", SiteName = "Home NAS" }));
     }
 

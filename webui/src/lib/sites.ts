@@ -50,6 +50,52 @@ export interface Site {
   hasClientSecret: boolean;
   signingIn: boolean;
   trustedCertificates: { fingerprint: string; subject: string; notAfter: string }[];
+  /** SITES.11: how the Host last found the server ('trouble' when it could not be reached); absent before it was tried. */
+  reach?: string | null;
+  lastUsedAt?: string | null;
+  /** An address opened once: held in memory by the Host, not saved. */
+  unsaved?: boolean;
+  /** SITES.13: the last folder and the sort order, kept by the Host with the remote (sites.remember). */
+  lastFolder?: string | null;
+  sort?: string | null;
+  sortDescending?: boolean;
+  /** Speed limits in KB/s, 0 for none. */
+  downLimit?: number;
+  upLimit?: number;
+  scheduledSync?: SiteSyncRequest | null;
+}
+
+export interface SiteSyncRequest {
+  siteId: string;
+  direction: 'download' | 'upload';
+  remoteFolder: string;
+  localFolder?: string | null;
+}
+
+export interface SiteSyncPlan {
+  ok: boolean;
+  message?: string | null;
+  problem?: string | null;
+  direction: string;
+  remoteFolder: string;
+  localFolder: string;
+  files: { path: string; size: number; reason: 'new' | 'changed' }[];
+  count: number;
+  bytes: number;
+  same: number;
+  newerThere: number;
+}
+
+export interface SitePreview {
+  ok: boolean;
+  message?: string | null;
+  problem?: string | null;
+  name: string;
+  kind: 'text' | 'image' | 'none';
+  mimeType?: string | null;
+  data?: string | null;
+  size: number;
+  truncated: boolean;
 }
 
 export interface SiteKind {
@@ -72,6 +118,10 @@ export interface SiteResult {
   problem?: string | null;
   offeredFingerprint?: string | null;
   acceptedFingerprints?: string[];
+  /** sites.testDraft: the items listed, and what a refused test offers to trust. */
+  itemCount?: number | null;
+  offeredKeys?: SiteHostKey[] | null;
+  certificate?: SiteCertificate | null;
   site?: Site | null;
 }
 
@@ -126,6 +176,21 @@ export interface SiteTransfer {
   speed: number;
   createdAt: string;
   finishedAt?: string | null;
+  /** SITES.11: the names picked and how many, files the user stopped, and the rest the transfers list reads. */
+  picked?: string[];
+  pickedCount?: number;
+  filesStopped?: number;
+  bytesSetAside?: number;
+  secondsLeft?: number | null;
+  retryAt?: string | null;
+  retryReason?: string | null;
+  firstFailedPath?: string | null;
+  firstFailedError?: string | null;
+  /** SITES.13: a copy between two remotes names its target; a batch may wait for a schedule. */
+  targetSiteId?: string | null;
+  targetSiteName?: string | null;
+  targetFolder?: string | null;
+  waitsForSchedule?: boolean;
 }
 
 /** What the Add a site form holds; secrets are blank unless typed (a blank one keeps the saved one). */
@@ -150,6 +215,9 @@ export interface SiteForm {
   region: string;
   clientId: string;
   clientSecret: string;
+  /** Speed limits in KB/s as typed; blank is no limit. */
+  downLimit: string;
+  upLimit: string;
 }
 
 export const problems = {
@@ -160,6 +228,7 @@ export const problems = {
   exists: 'exists',
   off: 'off',
   listingChanged: 'listingChanged',
+  passwordNeeded: 'passwordNeeded',
 } as const;
 
 export function newForm(kind: SiteKind | undefined, existing?: Site): SiteForm {
@@ -186,6 +255,8 @@ export function newForm(kind: SiteKind | undefined, existing?: Site): SiteForm {
       region: existing.region ?? '',
       clientId: existing.clientId ?? '',
       clientSecret: '',
+      downLimit: existing.downLimit ? String(existing.downLimit) : '',
+      upLimit: existing.upLimit ? String(existing.upLimit) : '',
     };
   }
   return {
@@ -208,7 +279,25 @@ export function newForm(kind: SiteKind | undefined, existing?: Site): SiteForm {
     region: '',
     clientId: '',
     clientSecret: '',
+    downLimit: '',
+    upLimit: '',
   };
+}
+
+export const maxLimitKb = 10_000_000;
+
+/** A speed limit box: blank is none (0); otherwise whole KB/s up to 10,000,000. Null when the Host would not take it. */
+export function limitValue(text: string): number | null {
+  const trimmed = text.trim();
+  if (trimmed === '') return 0;
+  if (!/^\d+$/.test(trimmed)) return null;
+  const value = Number(trimmed);
+  return value <= maxLimitKb ? value : null;
+}
+
+export function limitProblem(form: Pick<SiteForm, 'downLimit' | 'upLimit'>): string | null {
+  return limitValue(form.downLimit) === null || limitValue(form.upLimit) === null
+    ? `A speed limit is a whole number of KB/s up to ${maxLimitKb.toLocaleString('en-US')}; leave it empty for no limit.` : null;
 }
 
 /** The sites.save request for a form: only the kind's own fields, and a secret only when one was typed. */
@@ -223,6 +312,8 @@ export function saveRequest(form: SiteForm, kind: SiteKind | undefined): Record<
     remoteFolder: text(form.remoteFolder),
     localFolder: text(form.localFolder) || undefined,
     authMethod: form.authMethod,
+    downLimit: limitValue(form.downLimit) ?? undefined,
+    upLimit: limitValue(form.upLimit) ?? undefined,
   };
   if (fields.has('host')) request.host = text(form.host);
   if (fields.has('port')) request.port = Number(form.port) || kind?.defaultPort || 0;
@@ -394,10 +485,10 @@ export function rcloneLine(status: SitesStatus): string {
     case 'failed':
       return status.error ? `rclone stopped: ${status.error}` : 'rclone stopped.';
     case 'waiting':
-      return 'rclone starts when a site is opened.';
+      return 'rclone starts when a remote is opened.';
     default:
-      // On, not started yet: it starts with the first site used.
-      return status.enabled ? 'rclone starts when a site is used.' : '';
+      // On, not started yet: it starts with the first remote used.
+      return status.enabled ? 'rclone starts when a remote is used.' : '';
   }
 }
 
@@ -429,15 +520,18 @@ export function rcloneOffer(status: SitesStatus): { line: string; version: strin
   return { line, version: update.state === 'ready' || update.state === 'needsAsk' ? version : null, lastCheck };
 }
 
-/** The "On this PC" words for an item's here value, as the desktop's column says them; empty when not compared. */
+/** The column heading for the here values: "Already on the server" ("Already on this PC" on the desktop). */
+export const hereHeading = (hostName: string) => `Already on ${hostName}`;
+
+/** The "Already on …" words for an item's here value, as the desktop's column says them; empty when not compared. */
 export function hereText(here: string | null | undefined): string {
   switch (here) {
-    case 'same': return 'Same';
-    case 'olderHere': return 'Older here';
-    case 'someOfIt': return 'Partly here';
-    case 'notHere': return 'Not here';
-    case 'different': return 'Different here';
-    case 'folderHere': return 'Folder here';
+    case 'same': return 'Yes';
+    case 'olderHere': return 'Older copy';
+    case 'someOfIt': return 'Some of it';
+    case 'notHere': return 'No';
+    case 'different': return 'Different copy';
+    // A folder still to be compared shows nothing until the Host answers (sites.here), as on the desktop.
     default: return '';
   }
 }

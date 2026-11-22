@@ -548,8 +548,8 @@ export interface FolderBrowseResult {
   parent?: string;
   roots: string[];
   folders: { name: string; path: string }[];
-  /** Only with `files: 'archives'` in the request: the archive files in the folder. */
-  files?: { name: string; path: string; size: number }[];
+  /** Only with `files: 'archives'` or `'all'` in the request: those files in the folder ('all' adds the modified time). */
+  files?: { name: string; path: string; size: number; modified?: string | null }[];
   truncated: boolean;
   freeBytes?: number;
   totalBytes?: number;

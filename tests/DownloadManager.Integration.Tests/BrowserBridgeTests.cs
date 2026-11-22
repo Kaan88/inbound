@@ -107,6 +107,14 @@ public sealed class BrowserBridgeTests
     public void Every_place_that_names_the_Firefox_id_agrees(params string[] path) =>
         Assert.Contains($"\"{BrowserBridge.FirefoxExtensionId}\"", RepoFile(path));
 
+    // Setup built without the XPI (-NoFirefoxXpi), install.ps1 and the README send Firefox users to the listed add-on.
+    [Theory]
+    [InlineData("installer", "DownloadManager.iss")]
+    [InlineData("scripts", "install.ps1")]
+    [InlineData("README.md")]
+    public void Firefox_add_on_links_go_to_the_AMO_listing(params string[] path) =>
+        Assert.Contains(BrowserBridge.FirefoxAddonsUrl, RepoFile(path));
+
     [Fact]
     public void The_Firefox_id_is_trusted_for_handoffs_exactly() // EXT.E1
     {

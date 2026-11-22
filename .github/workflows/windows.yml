@@ -2,7 +2,7 @@
 #
 # - When a version tag (v*) is pushed, or by hand with a tag: a release build from that tag. Setup carries the signed
 #   Firefox add-on, the update file (manifest.json) is signed with the UPDATE_SIGNING_KEY repository secret, and the
-#   six files (Setup, zip, manifest.json, public.pem, the Firefox add-on, SHA256SUMS) are put in a DRAFT release with
+#   six files (five with no_firefox_xpi; Setup, zip, manifest.json, public.pem, the Firefox add-on, SHA256SUMS) are put in a DRAFT release with
 #   notes drafted from changelog.json. Nothing is public until the owner reads the draft, finishes the notes and
 #   publishes it; publishing then starts the Linux packages and the Docker image (their workflows).
 # - By hand without a tag: a test build of the chosen branch, kept as run artifacts for 14 days. Setup then has no
@@ -30,6 +30,11 @@ on:
         description: "Existing version tag for a release build into a draft release (for example v0.7.5). Empty: test build of this branch."
         required: false
         default: ""
+      no_firefox_xpi:
+        description: "Release build without the signed Firefox add-on (the listed version is not approved by addons.mozilla.org yet). Setup then only links the AMO listing, and the release gets five files."
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -52,6 +57,8 @@ jobs:
     env:
       # Empty for a test build of a branch.
       TAG: ${{ inputs.tag || (github.ref_type == 'tag' && github.ref_name) || '' }}
+      # "true" only for a by-hand run with no_firefox_xpi ticked; a pushed tag always has the add-on.
+      NO_FIREFOX_XPI: ${{ inputs.no_firefox_xpi && 'true' || '' }}
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -116,7 +123,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup was not installed." }
 
       - name: Signed Firefox add-on (release build)
-        if: env.TAG != ''
+        if: env.TAG != '' && env.NO_FIREFOX_XPI == ''
         shell: powershell
         env:
           GH_TOKEN: ${{ github.token }}
@@ -125,7 +132,7 @@ jobs:
           $name = "inbound-bridge-$extensionVersion-firefox.xpi"
           $updates = [IO.File]::ReadAllText("extensions\firefox-updates.json") | ConvertFrom-Json
           $entry = @($updates.addons.'inbound-bridge@kaan88'.updates | Where-Object { $_.version -eq $extensionVersion })
-          if ($entry.Count -ne 1) { throw "extensions\firefox-updates.json has no entry for extension $extensionVersion." }
+          if ($entry.Count -ne 1) { throw "extensions\firefox-updates.json has no entry for extension $extensionVersion. If AMO hasn't approved it yet, run Windows build by hand with this tag and no_firefox_xpi ticked (docs\release-builds.md, CI.2 step 2)." }
           $wanted = $entry[0].update_hash
           $folder = "artifacts\firefox-addon"
           New-Item -ItemType Directory -Path $folder -Force | Out-Null
@@ -147,7 +154,7 @@ jobs:
       - name: Setup
         shell: powershell
         run: |
-          if ($env:TAG) { .\scripts\build-installer.ps1 -Version $env:VERSION }
+          if ($env:TAG -and -not $env:NO_FIREFOX_XPI) { .\scripts\build-installer.ps1 -Version $env:VERSION }
           else { .\scripts\build-installer.ps1 -Version $env:VERSION -NoFirefoxXpi }
 
       - name: Zip
@@ -177,7 +184,8 @@ jobs:
           $key = Join-Path $env:RUNNER_TEMP "update-signing.pem"
           try {
               [IO.File]::WriteAllText($key, ($env:UPDATE_SIGNING_KEY.Trim() + "`n"), [Text.UTF8Encoding]::new($false))
-              .\scripts\prepare-release.ps1 -Version $env:VERSION -PrivateKeyPath $key
+              if ($env:NO_FIREFOX_XPI) { .\scripts\prepare-release.ps1 -Version $env:VERSION -PrivateKeyPath $key -NoFirefoxXpi }
+              else { .\scripts\prepare-release.ps1 -Version $env:VERSION -PrivateKeyPath $key }
           }
           finally {
               if (Test-Path -LiteralPath $key) { Remove-Item -LiteralPath $key -Force }
@@ -201,7 +209,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $files = @(Get-ChildItem -LiteralPath $env:RELEASE_DIR -File | ForEach-Object { $_.FullName })
-          if ($files.Count -ne 6) { throw "Expected six release files, found $($files.Count)." }
+          $expected = if ($env:NO_FIREFOX_XPI) { 5 } else { 6 }
+          if ($files.Count -ne $expected) { throw "Expected $expected release files, found $($files.Count)." }
           $ErrorActionPreference = 'Continue'
           $state = gh release view $env:TAG -R $env:GITHUB_REPOSITORY --json isDraft --jq '.isDraft' 2>$null
           $found = $LASTEXITCODE -eq 0
@@ -210,12 +219,12 @@ jobs:
               if ($state -ne 'true') { throw "A published release $env:TAG already exists; its files are not replaced. Delete or re-draft it by hand if that is meant." }
               gh release upload $env:TAG @files -R $env:GITHUB_REPOSITORY --clobber
               if ($LASTEXITCODE -ne 0) { throw "Upload to the draft release failed." }
-              Write-Host "Added the six files to the existing draft release $env:TAG. Its notes were left as they are."
+              Write-Host "Added the release files to the existing draft release $env:TAG. Its notes were left as they are."
           } else {
               $notes = Join-Path $env:RUNNER_TEMP "release-notes.md"
               .\scripts\release-notes.ps1 -Version $env:VERSION -OutFile $notes
               gh release create $env:TAG @files -R $env:GITHUB_REPOSITORY --draft --verify-tag `
                   --title "Inbound Download Manager $env:VERSION" --notes-file $notes
               if ($LASTEXITCODE -ne 0) { throw "The draft release was not created." }
-              Write-Host "Made the draft release $env:TAG with six files. Finish its notes and publish it; that starts the Linux packages and the Docker image."
+              Write-Host "Made the draft release $env:TAG with $($files.Count) files. Finish its notes and publish it; that starts the Linux packages and the Docker image."
           }

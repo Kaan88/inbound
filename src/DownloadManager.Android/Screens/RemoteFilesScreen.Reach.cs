@@ -16,7 +16,7 @@ internal sealed partial class RemoteFilesScreen
     {
         "download" => _phoneHost,
         "upload" => _sites.Any(site => site.Id == t.SiteId),
-        "copy" => _sites.Any(site => site.Id == t.DestinationSiteId),
+        "between" => _sites.Any(site => site.Id == t.TargetSiteId),
         _ => false,
     };
 
@@ -48,8 +48,8 @@ internal sealed partial class RemoteFilesScreen
             case "upload" when _sites.FirstOrDefault(site => site.Id == t.SiteId) is { } uploadSite:
                 OpenFolderAt(uploadSite, Join(t.RemoteFolder), mark);
                 break;
-            case "copy" when _sites.FirstOrDefault(site => site.Id == t.DestinationSiteId) is { } copySite:
-                OpenFolderAt(copySite, Join(t.DestinationFolder ?? "/"), mark);
+            case "between" when _sites.FirstOrDefault(site => site.Id == t.TargetSiteId) is { } copySite:
+                OpenFolderAt(copySite, Join(t.TargetFolder ?? "/"), mark);
                 break;
         }
     }

@@ -64,8 +64,8 @@ public sealed class ExtensionPromoRulesTests
         Assert.Equal(["Chrome", "Edge", "Firefox"], links.Select(link => link.Name));
         Assert.Equal("https://chromewebstore.google.com/detail/olhbcdbjdnfoiinllnlpandggadfabfm", links[0].Url);
         Assert.Equal("https://microsoftedge.microsoft.com/addons/detail/ifoagddcenmjpbklkhghbdmgplldcdci", links[1].Url);
-        // Not listed on Firefox Add-ons (EXT.S4): the signed .xpi is on each GitHub release.
-        Assert.Equal("https://github.com/Kaan88/inbound/releases/latest", links[2].Url);
+        // Listed on Firefox Add-ons (owner, 2026-11-17).
+        Assert.Equal("https://addons.mozilla.org/firefox/addon/inbound-download-manager/", links[2].Url);
         Assert.All(links, link => Assert.StartsWith("https://", link.Url, StringComparison.Ordinal));
     }
 

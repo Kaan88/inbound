@@ -25,7 +25,9 @@ public sealed partial class MainWindow
         if (_transfersBarWired) return;
         _transfersBarWired = true;
         TransfersBar.Act = (type, id) => _remote.SiteTransferActionAsync(type, id);
+        TransfersBar.ActFile = (type, id, path) => _remote.SiteTransferFileActionAsync(type, id, path);
         TransfersBar.Details = id => _remote.GetSiteTransferAsync(id);
+        TransfersBar.LocalCommandRequested += (command, row) => OnTransferLocalCommand(command, row);
     }
 
     /// <summary>Asks for the batches once per connection; later changes are pushed.</summary>
@@ -51,8 +53,17 @@ public sealed partial class MainWindow
             && (SiteTransferRules.UploadLanded(before, transfers, shown.Id, panel.Path)
                 || SitesBrowseRules.ShowsHere(shown) && SiteTransferRules.DownloadLandedFrom(before, transfers, shown.Id)))
         {
-            panel.Reload();
+            // What is on this PC changed: the "On this PC" answers are asked for again, not reused.
+            panel.Refresh();
         }
+
+        // A copy between two remotes landed in the folder a remote pane shows (either side): list it again.
+        if (_sitesPanel is { Site: { } rightSite } right && right.Visibility == Visibility.Visible
+            && SiteTransferRules.CopyLanded(before, transfers, rightSite.Id, right.Path))
+            right.Refresh();
+        if (_leftRemote is { Site: { } leftSite } leftPanel && leftPanel.Visibility == Visibility.Visible && TwoPanesShown && _sitesShown
+            && SiteTransferRules.CopyLanded(before, transfers, leftSite.Id, leftPanel.Path))
+            leftPanel.Refresh();
 
         // A download into the folder the This PC pane shows finished: read it again.
         if (_localPane is { } local && TwoPanesShown && _sitesShown && local.Path.Length > 0
@@ -61,6 +72,7 @@ public sealed partial class MainWindow
             local.Reload();
         }
 
+        ResolveOpenWaits(transfers);
         TransfersBar.Show(transfers);
         UpdateSitesChip();
         SyncSiteMarks();
@@ -73,6 +85,8 @@ public sealed partial class MainWindow
         var bulk = SiteTransferRules.BulkPause(_siteTransfers);
         var label = bulk?.Label ?? "Pause transfers";
         SitesPauseAllButton.IsEnabled = bulk is not null;
+        SiteMenuPause.IsEnabled = bulk is not null;
+        SiteMenuPause.Text = label;
         if (SitesPauseAllLabel.Text == label) return;
         SitesPauseAllLabel.Text = label;
         SitesPauseAllIcon.Glyph = bulk?.Type == SitesMessageTypes.TransferResume ? "\uE768" : "\uE769";
@@ -100,10 +114,10 @@ public sealed partial class MainWindow
         }
     }
 
-    /// <summary>The status chip: shown while a batch runs, waits, is paused or failed, and Sites is offered here.</summary>
+    /// <summary>The status chip ("Remote files · 2 running · 156 MB/s"): shown while a batch runs, waits, is paused or failed, and remote files are offered here.</summary>
     private void UpdateSitesChip()
     {
-        var text = SitesOffered ? SiteTransferRules.Summary(_siteTransfers) : null;
+        var text = SitesOffered ? SiteTransferRules.ChipText(_siteTransfers) : null;
         var visibility = text is null ? Visibility.Collapsed : Visibility.Visible;
         if (SitesChip.Visibility != visibility) SitesChip.Visibility = visibility;
         if (text is null || SitesChipText.Text == text) return;
@@ -111,68 +125,32 @@ public sealed partial class MainWindow
         AutomationProperties.SetName(SitesChip, text);
     }
 
-    /// <summary>Each sidebar site shows arrows with counts while files move there, and a clock while a batch waits.</summary>
+    /// <summary>Each remote's sidebar entry follows its state and what runs on it (arrows, clock, progress line); so does the All remotes page.</summary>
     private void SyncSiteMarks()
     {
         foreach (var item in CategoryList.Items.OfType<ListBoxItem>())
         {
-            if (item.Tag is not string tag || !tag.StartsWith(SiteTagPrefix, StringComparison.Ordinal) || item.Content is not StackPanel content) continue;
-            var siteId = tag[SiteTagPrefix.Length..];
-            var site = _sites.FirstOrDefault(s => s.Id == siteId);
-            var mark = SiteTransferRules.SiteMark(_siteTransfers, siteId);
-            var markBlock = content.Children.OfType<TextBlock>().FirstOrDefault(block => block.Tag as string == "mark");
-            if (markBlock is null)
-            {
-                markBlock = new TextBlock { Tag = "mark", FontSize = 11, Opacity = 0.8, VerticalAlignment = VerticalAlignment.Center };
-                content.Children.Add(markBlock);
-            }
-
-            if (markBlock.Text != (mark ?? "")) markBlock.Text = mark ?? "";
-            var progress = SiteTransferRules.SiteProgress(_siteTransfers, siteId);
-            var line = content.Children.OfType<ProgressBar>().FirstOrDefault(bar => bar.Tag as string == "progress");
-            if (line is null && progress is not null)
-            {
-                line = new ProgressBar
-                {
-                    Tag = "progress", Width = 36, MinHeight = 0, Height = 3, Maximum = 100, VerticalAlignment = VerticalAlignment.Center,
-                    Margin = new Thickness(4, 0, 0, 0), IsTabStop = false,
-                };
-                AutomationProperties.SetAccessibilityView(line, Microsoft.UI.Xaml.Automation.Peers.AccessibilityView.Raw);
-                content.Children.Add(line);
-            }
-
-            if (line is not null)
-            {
-                var visibility = progress is null ? Visibility.Collapsed : Visibility.Visible;
-                if (line.Visibility != visibility) line.Visibility = visibility;
-                if (progress is { } value) line.Value = value;
-            }
-            var words = SiteTransferRules.SiteMarkName(_siteTransfers, siteId);
-            AutomationProperties.SetName(item, words is null ? $"Site {site?.Name}" : $"Site {site?.Name}, {words}");
+            if (item.Tag is not string tag || !tag.StartsWith(SiteTagPrefix, StringComparison.Ordinal)) continue;
+            if (_sites.FirstOrDefault(s => s.Id == tag[SiteTagPrefix.Length..]) is { } site) UpdateSiteEntry(item, site);
         }
+
+        RefreshHome();
     }
 
     // ---- Download and Upload ----------------------------------------------------------------------------
 
-    private async void SitesDownloadButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (_sitesPanel is not { Site: { } site } panel) return;
-        var names = panel.SelectedNames;
-        if (names.Count == 0) return;
-        var folder = site.LocalFolder is { Length: > 0 } linked ? linked : LocalSettings?.DefaultDownloadDirectory ?? "";
-        var choice = await AskTransferAsync($"Download {SiteTransferRules.WhatText(names)} from {site.Name}", folder, folderEditable: true,
-            $"From {panel.Path}");
-        if (choice is not { } chosen) return;
-        await StartSiteTransferAsync(new SiteTransferStartRequest
-        {
-            SiteId = site.Id, Direction = "download", RemoteFolder = panel.Path, LocalFolder = chosen.Folder, Names = names,
-            Conflict = chosen.Conflict,
-        });
-    }
+    // SITES.11 R2b: no dialog; to the linked folder, or by the Host's category rules (SiteDownloadAsync).
+    private void SitesDownloadButton_Click(object sender, RoutedEventArgs e) => _ = SiteDownloadAsync(askFolder: false);
 
     private async void SitesUploadFiles_Click(object sender, RoutedEventArgs e)
     {
         if (_sitesPanel is not { Site: { } site } panel) return;
+        if (_connection.IsRemote)
+        {
+            SetSitesStatus($"{SitesCommandRules.Label(SiteCommand.Upload).TrimEnd('…')} works for this PC's own remotes only.");
+            return;
+        }
+
         IReadOnlyList<string> files;
         try
         {
@@ -219,22 +197,97 @@ public sealed partial class MainWindow
             return;
         }
 
-        await UploadAsync(site, panel.Path, parent, [new SiteTransferNameDto { Name = name, IsFolder = true }]);
+        // Managing another server, the folder was picked in that server's folder browser: its own path.
+        await UploadAsync(site, panel.Path, parent, [new SiteTransferNameDto { Name = name, IsFolder = true }], serverPaths: _connection.IsRemote);
     }
 
-    private async Task UploadAsync(SiteDto site, string remoteFolder, string localFolder, List<SiteTransferNameDto> names)
+    /// <summary>
+    /// Uploads <paramref name="names"/> into <paramref name="remoteFolder"/>. The names are checked against the server listing
+    /// shown (what is loaded so far); when some are there the batch is asked about once.
+    /// </summary>
+    private Task UploadAsync(SiteDto site, string remoteFolder, string localFolder, List<SiteTransferNameDto> names, bool serverPaths = false) =>
+        OnceAsync(() => UploadCoreAsync(site, remoteFolder, localFolder, names, serverPaths));
+
+    private async Task UploadCoreAsync(SiteDto site, string remoteFolder, string localFolder, List<SiteTransferNameDto> names, bool serverPaths)
     {
-        var choice = await AskTransferAsync($"Upload {SiteTransferRules.WhatText(names)} to {site.Name}", remoteFolder, folderEditable: false,
-            $"From {localFolder}", primary: "Upload");
-        if (choice is not { } chosen) return;
-        await StartSiteTransferAsync(new SiteTransferStartRequest
+        // Paths picked on this PC (a picker, a pane, a drop) mean nothing to another server: it would read its own disks.
+        if (_connection.IsRemote && !serverPaths)
         {
-            SiteId = site.Id, Direction = "upload", RemoteFolder = remoteFolder, LocalFolder = localFolder, Names = names,
-            Conflict = chosen.Conflict,
+            SetSitesStatus("Uploading files from this PC works for this PC's own remotes only.");
+            return;
+        }
+
+        // Compared without case (a server may not tell "A.iso" from "a.iso"); a folder whose pages are not all loaded is
+        // asked about anyway, since what isn't listed may be there.
+        var target = SitesBrowseRules.Normalize(remoteFolder);
+        var shown = _sitesPanel is { } panel && panel.SiteId == site.Id && SitesBrowseRules.Normalize(panel.Path) == target;
+        List<SiteItemDto>? existing;
+        bool complete;
+        if (shown)
+        {
+            existing = [.. _sitesPanel!.ShownItems];
+            complete = _sitesPanel.ListingComplete;
+        }
+        else
+        {
+            // Another folder (a drop on a folder row): its first page, as the pane asks for it, is read to look.
+            (existing, complete) = await ReadServerItemsAsync(site, target);
+        }
+
+        // SITES.11 R5: each name already there is asked about on its own, with both copies' size and date; the choices go
+        // out as one batch each (the Host takes one choice per batch).
+        var choices = new Dictionary<string, string>(StringComparer.Ordinal);
+        var other = SitesCommandRules.Skip;
+        string? unread = null;
+        if (existing is null)
+        {
+            // Not readable: nothing to ask about; Skip keeps what is there.
+            unread = SitesCommandRules.UnreadTargetText(target);
+        }
+        else
+        {
+            List<KeyValuePair<string, SitesCommandRules.ConflictSide>> targets =
+                [.. existing.Select(item => new KeyValuePair<string, SitesCommandRules.ConflictSide>(item.Name, new SitesCommandRules.ConflictSide(item.Size, item.Modified)))];
+            // The other server's disks are not this PC's: nothing to look at there.
+            var sources = _connection.IsRemote ? [] : await Task.Run(() => LocalSides(localFolder, names));
+            var pairs = SitesCommandRules.ConflictPairs(names, sources, targets, ignoreCase: true);
+            if (await AskConflictsAsync(pairs, upload: true, $"{target} on {site.Name}", names.Any(name => name.IsFolder), complete,
+                    [.. targets.Select(t => t.Key)], SitesCommandRules.TimesArePrecise(site.Kind)) is not { } answer) return;
+            choices = answer.Choices;
+            other = answer.Other;
+        }
+
+        var started = await StartConflictBatchesAsync(names, choices, other, (conflict, batch) => new SiteTransferStartRequest
+        {
+            SiteId = site.Id, Direction = "upload", RemoteFolder = remoteFolder, LocalFolder = localFolder, Names = batch, Conflict = conflict,
         });
+        if (started is not null && unread is not null) SetSitesStatus(unread);
     }
 
-    private async Task StartSiteTransferAsync(SiteTransferStartRequest request)
+    /// <summary>
+    /// The names in a server folder that is not the one shown: one sites.browse of its first page (the request the pane
+    /// makes). Complete when that page holds the whole folder; null names when it could not be read.
+    /// </summary>
+    private async Task<(List<SiteItemDto>? Items, bool Complete)> ReadServerItemsAsync(SiteDto site, string folder)
+    {
+        try
+        {
+            using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+            var result = await _remote.BrowseSiteAsync(new SiteBrowseRequest
+            {
+                Id = site.Id, Path = folder, Offset = 0, Limit = SitesBrowseRules.PageSize,
+            }, limit.Token);
+            if (!result.Ok) return (null, false);
+            return ([.. result.Items], result.Items.Count >= result.Total);
+        }
+        catch (Exception ex) when (ex is OperationCanceledException or InvalidOperationException or IOException or TimeoutException)
+        {
+            return (null, false);
+        }
+    }
+
+    /// <summary>Starts a batch; the batch as the Host reports it, or null when it did not start (the reason is shown).</summary>
+    private async Task<SiteTransferDto?> StartSiteTransferAsync(SiteTransferStartRequest request)
     {
         SitesDownloadButton.IsEnabled = false;
         SitesUploadButton.IsEnabled = false;
@@ -243,15 +296,23 @@ public sealed partial class MainWindow
             var reply = await _remote.StartSiteTransferAsync(request);
             if (!reply.Ok)
             {
-                await ShowSitesMessageAsync(request.Direction == "download" ? "Download" : "Upload",
-                    SitesBrowseRules.PointsToOptions(reply.Problem)
-                        ? (reply.Message ?? "The site needs attention.") + " Check it in Options > Sites."
-                        : reply.Message ?? "The transfer could not start.");
-                return;
+                // SITES.11 R4: a key, certificate, sign-in or password to see to is asked here, by testing the remote, rather
+                // than sending the user to Options; the transfer is started again by the user once it works.
+                if (SitesBrowseRules.PointsToOptions(reply.Problem) && reply.Problem != SiteProblems.Off && FindSite(request.SiteId) is { } site)
+                {
+                    SetSitesStatus($"{site.Name} needs attention before the {(request.Direction == "download" ? "download" : "upload")} can start. {reply.Message}".TrimEnd());
+                    await FixSiteAsync(site, reply.Problem);
+                    return null;
+                }
+
+                await ShowSitesMessageAsync(request.Direction == "download" ? "Download" : "Upload", reply.Message ?? "The transfer could not start.");
+                return null;
             }
 
             if (reply.Transfer is { } added && _siteTransfers.All(t => t.Id != added.Id)) ApplySiteTransfers([.. _siteTransfers, added]);
-            TransfersBar.OpenAtBest();
+            // Just started: it is on Running, whatever failed before.
+            TransfersBar.OpenOnRunning();
+            return reply.Transfer;
         }
         finally
         {
@@ -259,76 +320,127 @@ public sealed partial class MainWindow
         }
     }
 
-    /// <summary>The target folder (editable for a download) and "If a file is already there"; null when cancelled.</summary>
-    private async Task<(string Folder, string Conflict)?> AskTransferAsync(string title, string folder, bool folderEditable, string from,
-        string primary = "Download", string? header = null)
+
+    // ---- Open, Open folder, Show on the remote (R3, decision 4) -----------------------------------------
+
+    private void OnTransferLocalCommand(SiteTransferRules.TransferCommand command, SiteTransferRules.TransferRef row)
     {
-        var panel = new StackPanel { Spacing = 10, MinWidth = 420 };
-        panel.Children.Add(new TextBlock { Text = from, TextWrapping = TextWrapping.Wrap, Opacity = 0.8 });
-        var folderBox = new TextBox
+        switch (command)
         {
-            Header = header ?? (folderEditable ? "Save in this folder on this PC" : "Into this folder on the site"),
-            Text = folder, IsReadOnly = !folderEditable,
-        };
-        if (folderEditable)
+            case SiteTransferRules.TransferCommand.Open:
+                _ = OpenTransferAsync(row, reveal: false);
+                break;
+            case SiteTransferRules.TransferCommand.OpenFolder:
+                _ = OpenTransferAsync(row, reveal: true);
+                break;
+            case SiteTransferRules.TransferCommand.ShowOnRemote:
+                _ = ShowTransferOnRemoteAsync(row);
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Open and Open folder act on this PC: a download's file, an upload's source. A folder opens in Explorer. A downloaded
+    /// file opens as an opened remote file does (<see cref="OpenDownloadedAsync"/>: marked as from the internet, a program
+    /// asked about first); an upload's source is the user's own file and just opens.
+    /// </summary>
+    private async Task OpenTransferAsync(SiteTransferRules.TransferRef row, bool reveal)
+    {
+        // The bar lists this PC's Host's batches; a window managing another server never opens them here.
+        if (_connection.IsRemote || !SitesOffered) return;
+        var path = SiteTransferRules.LocalTarget(row);
+        var batch = row.Batch;
+        if (row.Item is null && SiteTransferRules.IsDownload(batch) && batch.PickedCount == 1 && batch.Picked.Count == 1)
         {
-            var row = new Grid { ColumnSpacing = 8 };
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            var browse = new Button { Content = "Browse…", VerticalAlignment = VerticalAlignment.Bottom };
-            browse.Click += async (_, _) =>
+            // One picked name: what landed may have another name (Keep both). Its files as read by the bar, or read now; when
+            // neither tells, the batch's folder opens.
+            var items = TransfersBar.FilesOf(batch.Id);
+            if (items is null)
             {
                 try
                 {
-                    if (await Pickers.PickFolderAsync(WinRT.Interop.WindowNative.GetWindowHandle(this), start: folderBox.Text) is { } picked) folderBox.Text = picked;
+                    var reply = await _remote.GetSiteTransferAsync(batch.Id);
+                    items = reply.Ok ? reply.Items : null;
                 }
-                catch (Exception ex) when (ex is InvalidOperationException or System.Runtime.InteropServices.COMException)
+                catch (Exception ex)
                 {
-                    // The box still takes a typed folder.
-                    folderBox.Header = "Folder on this PC (the folder picker could not open; type the folder)";
+                    // The batch's folder opens instead; the status line says why.
+                    UiTrace.Write($"Reading a transfer's files for Open failed: {ex.GetType().Name}");
+                    SetSitesStatus($"The files of that transfer could not be read ({ex.Message}); its folder opens instead.");
                 }
-            };
-            Grid.SetColumn(browse, 1);
-            row.Children.Add(folderBox);
-            row.Children.Add(browse);
-            panel.Children.Add(row);
-        }
-        else
-        {
-            panel.Children.Add(folderBox);
+            }
+
+            var (landed, file) = items is null ? (null, null) : SiteTransferRules.PickedLocal(batch, items);
+            path = landed ?? batch.LocalFolder;
+            if (file is not null) row = new SiteTransferRules.TransferRef(batch, file);
         }
 
-        var conflict = new ComboBox { Header = "If a file is already there", HorizontalAlignment = HorizontalAlignment.Stretch };
-        foreach (var (_, label) in SiteTransferRules.Conflicts) conflict.Items.Add(label);
-        conflict.SelectedIndex = 0;
-        panel.Children.Add(conflict);
-        panel.Children.Add(new TextBlock
+        var name = Path.GetFileName(path.TrimEnd('\\', '/'));
+        if (name.Length == 0) name = path;
+        var folder = batch.LocalFolder;
+        // The checks touch the disk (a slow or sleeping drive): off the UI thread.
+        var (isFolder, isFile, folderThere) = await Task.Run(() =>
+            (Directory.Exists(path), File.Exists(path), folder.Length > 0 && Directory.Exists(folder)));
+        if (isFolder)
         {
-            Text = "A file that was stopped part way starts again from the beginning.",
-            TextWrapping = TextWrapping.Wrap, FontSize = 12, Opacity = 0.8,
-        });
+            StartShell(ShellActions.OpenFolder(path), name);
+            return;
+        }
 
-        var dialog = new ContentDialog
+        if (!isFile)
         {
-            XamlRoot = Content.XamlRoot,
-            Title = title,
-            Content = panel,
-            PrimaryButtonText = primary,
-            CloseButtonText = "Cancel",
-            DefaultButton = ContentDialogButton.Primary,
-        };
-        folderBox.TextChanged += (_, _) => dialog.IsPrimaryButtonEnabled = !folderEditable || System.IO.Path.IsPathFullyQualified(folderBox.Text.Trim());
-        dialog.IsPrimaryButtonEnabled = !folderEditable || System.IO.Path.IsPathFullyQualified(folderBox.Text.Trim());
-        if (await DialogGuard.ShowAsync(dialog) != ContentDialogResult.Primary) return null;
-        var index = Math.Max(0, conflict.SelectedIndex);
-        return (folderEditable ? folderBox.Text.Trim() : folder, SiteTransferRules.Conflicts[index].Value);
+            // The file was moved or deleted: its folder is still worth showing.
+            if (reveal && folderThere)
+            {
+                StartShell(ShellActions.OpenFolder(folder), name);
+                return;
+            }
+
+            await ShowSitesMessageAsync(reveal ? "Open folder" : "Open", $"{name} is no longer on this PC at {path}.");
+            return;
+        }
+
+        if (reveal)
+        {
+            StartShell(ShellActions.RevealFile(path), name);
+            return;
+        }
+
+        // A copied download opens as an opened remote file does; a skipped one (already the user's) and an upload's source plainly.
+        if (SiteTransferRules.OpensAsDownloaded(row))
+        {
+            await OpenDownloadedAsync(new OpenWait(path, batch.Id, batch.SiteName));
+            return;
+        }
+
+        StartShell(ShellActions.OpenFile(path, WindowHandle), name);
+    }
+
+    /// <summary>Goes to the remote's folder of this transfer in the Remote files view and selects the file or folder there.</summary>
+    private async Task ShowTransferOnRemoteAsync(SiteTransferRules.TransferRef row)
+    {
+        if (_connection.IsRemote) return;
+        if (_sites.FirstOrDefault(site => site.Id == row.Batch.SiteId) is not { } site || !SitesOffered)
+        {
+            await ShowSitesMessageAsync("Show on the remote", $"{row.Batch.SiteName} is not among your remotes any more.");
+            return;
+        }
+
+        var (folder, select) = SiteTransferRules.RemoteTarget(row);
+        if (!_sitesShown || _shownSiteId != site.Id)
+        {
+            ShowSite(site.Id);
+            SyncSiteEntryPoints();
+        }
+
+        _sitesPanel?.Open(site, folder, select, sayIfMissing: true);
     }
 
     private async Task ShowSitesMessageAsync(string title, string message)
     {
         var dialog = new ContentDialog
         {
-            XamlRoot = Content.XamlRoot,
+            XamlRoot = Content?.XamlRoot,
             Title = title,
             Content = new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap },
             CloseButtonText = "OK",

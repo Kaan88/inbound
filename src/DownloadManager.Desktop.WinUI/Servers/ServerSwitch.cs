@@ -8,7 +8,7 @@ internal sealed record ServerChoice(string? Id, string Name, bool IsCurrent, int
     public bool IsLocal => Id is null;
 
     /// <summary>"Ctrl+0" for This PC, "Ctrl+1" to "Ctrl+9" for the first nine saved servers; null after those.</summary>
-    public string? ShortcutText => Number is { } number ? $"Ctrl+{number}" : null;
+    public string? ShortcutText => Number is { } number ? CommandKey.Text($"Ctrl+{number}") : null;
 }
 
 /// <summary>

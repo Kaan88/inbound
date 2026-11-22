@@ -171,7 +171,13 @@ public sealed partial class MainWindow
             }
 
             const string Text = "Extractions";
-            var added = new ListBoxItem { Tag = ArchiveSetsTag, Padding = new Thickness(14, 2, 8, 2), Content = SidebarContent(Text, "&#xF012;") };
+#if HAS_UNO
+            // Uno's Fluent icon font has no zip folder (U+F012); its package glyph instead.
+            const string Glyph = "&#xE7B8;";
+#else
+            const string Glyph = "&#xF012;";
+#endif
+            var added = new ListBoxItem { Tag = ArchiveSetsTag, Padding = new Thickness(14, 2, 8, 2), Content = SidebarContent(Text, Glyph) };
             AutomationProperties.SetName(added, Text);
             var at = CategoryList.Items.OfType<ListBoxItem>().ToList().FindIndex(existing => existing.Tag is "queues");
             CategoryList.Items.Insert(Math.Max(at, 0), added);

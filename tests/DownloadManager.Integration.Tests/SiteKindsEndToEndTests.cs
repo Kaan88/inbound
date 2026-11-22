@@ -189,6 +189,46 @@ public sealed partial class SiteTransfersEndToEndTests
         Assert.False(changed.Ok);
     }
 
+    [SiteTransfersFact]
+    public async Task ABrowseOfAServerThatGoesQuietEndsWithinTheLimit()
+    {
+        // SITES.11 R2: a listener that accepts and never says a word (no FTP greeting) must not leave the browse waiting.
+        using var silent = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        silent.Start();
+        var held = new List<System.Net.Sockets.TcpClient>();
+        _ = Task.Run(async () =>
+        {
+            try { while (true) held.Add(await silent.AcceptTcpClientAsync()); }
+            catch (Exception e) when (e is ObjectDisposedException or System.Net.Sockets.SocketException) { }
+        });
+        var commands = Open(null);
+        Assert.True((await Call<SitesStatusDto>(commands, SitesMessageTypes.SetEnabled, new SitesSetEnabledRequest { Enabled = true, OwnRclonePath = Rclone })).Enabled);
+        var saved = await Call<SiteResultDto>(commands, SitesMessageTypes.Save, new SiteSaveRequest
+        {
+            Name = "Quiet", Kind = SiteKinds.Ftp, Host = "127.0.0.1", Port = ((System.Net.IPEndPoint)silent.LocalEndpoint).Port,
+            Tls = SiteTlsModes.None, User = User, Password = Password,
+        });
+        Assert.True(saved.Ok, saved.Message);
+
+        var before = SitesCommands.ListTimeout;
+        SitesCommands.ListTimeout = TimeSpan.FromSeconds(3);
+        try
+        {
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            var browse = await Call<SiteBrowseResultDto>(commands, SitesMessageTypes.Browse, new SiteBrowseRequest { Id = saved.Site!.Id, Path = "/" });
+            Assert.False(browse.Ok);
+            // Connected, so maybe signed in: not a "can't reach" a client would retry on its own.
+            Assert.NotEqual(SiteProblems.CantReach, browse.Problem);
+            Assert.True(watch.Elapsed < TimeSpan.FromSeconds(30), watch.Elapsed.ToString());
+        }
+        finally
+        {
+            SitesCommands.ListTimeout = before;
+            silent.Stop();
+            foreach (var client in held) client.Dispose();
+        }
+    }
+
     private async Task<(SitesCommands Commands, SiteDto Site)> SaveKindAsync(SiteSaveRequest request, bool uploadProbe = false)
     {
         var commands = Open(uploadProbe: uploadProbe);

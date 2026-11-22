@@ -12,18 +12,19 @@ internal static partial class Program
 {
     internal const string SitesManageUsage = """
                sites on|off|status
+               sites rclone [<version>]   (downloads, checks and installs rclone, as Options › Remote files › Download rclone)
                sites add <name> --kind sftp|ftp|webdav|s3|drive|onedrive|dropbox|b2 [--host H] [--port N] [--user U]
                          [--key-file F] [--url U] [--vendor V] [--provider P] [--endpoint E] [--region R] [--tls T]
                          [--client-id ID] [--folder /start] [--local-folder D] [--password-env VAR]
                          [--key-passphrase-env VAR] [--client-secret-env VAR]   (otherwise a password is read from standard input)
-               sites remove <site>
-               sites test <site>
-               sites trust <site> [--fingerprint SHA256:...]   (a server key or certificate; asks at a console)
-               sites sign-in <site> [--token-stdin]   (Drive, OneDrive, Dropbox: prints the address, waits)
-               sites ls <site> [<path>]
-               sites mkdir <site> <path>
-               sites mv <site> <path> <new name>
-               sites rm <site> <path>... --yes   (deletes on the server; folders with everything in them)
+               sites remove <remote>
+               sites test <remote>
+               sites trust <remote> [--fingerprint SHA256:...]   (a server key or certificate; asks at a console)
+               sites sign-in <remote> [--token-stdin]   (Drive, OneDrive, Dropbox: prints the address, waits)
+               sites ls <remote> [<path>]
+               sites mkdir <remote> <path>
+               sites mv <remote> <path> <new name>
+               sites rm <remote> <path>... --yes   (deletes on the server; folders with everything in them)
         """;
 
     /// <summary>One of the commands here, or null when <paramref name="sub"/> is not one of them.</summary>
@@ -39,6 +40,14 @@ internal static partial class Program
             }
             case "status":
                 return PrintSitesStatus(await client.AskAsync<SitesStatusDto>(SitesMessageTypes.Get, new EmptyPayload()).ConfigureAwait(false), json);
+            case "rclone":
+            {
+                // MAC.1: a headless install (and the macOS workflow) has no Options window to press Download rclone in.
+                var status = await client.AskAsync<SitesStatusDto>(SitesMessageTypes.RcloneInstall,
+                    new SitesRcloneInstallRequest { Version = positional.ElementAtOrDefault(1) }).ConfigureAwait(false);
+                PrintSitesStatus(status, json);
+                return status.Error is { Length: > 0 } ? 1 : 0;
+            }
             case "add":
                 return await AddSiteAsync(client, args, positional, json).ConfigureAwait(false);
             case "remove":
@@ -69,7 +78,7 @@ internal static partial class Program
     private static int PrintSitesStatus(SitesStatusDto status, bool json)
     {
         if (json) { PrintJson(status); return 0; }
-        Console.WriteLine($"Sites: {(status.Enabled ? "on" : "off")}");
+        Console.WriteLine($"Remote files: {(status.Enabled ? "on" : "off")}");
         var rclone = status.Rclone + (status.RcloneVersion is { Length: > 0 } version ? $" ({version})" : "");
         if (status.RcloneInstalling) rclone = "downloading";
         Console.WriteLine($"rclone: {rclone}");
@@ -94,9 +103,9 @@ internal static partial class Program
     private static string? SiteProblemHint(string? problem) => problem switch
     {
         SiteProblems.HostKeyNotAccepted or SiteProblems.HostKeyChanged or SiteProblems.CertificateNotTrusted =>
-            "Check the server's key or certificate with 'sites trust <site>'.",
-        SiteProblems.SignInNeeded => "Sign in with 'sites sign-in <site>'.",
-        SiteProblems.Off => "Turn Sites on with 'sites on'.",
+            "Check the server's key or certificate with 'sites trust <remote>'.",
+        SiteProblems.SignInNeeded => "Sign in with 'sites sign-in <remote>'.",
+        SiteProblems.Off => "Turn Remote files on with 'sites on'.",
         _ => null,
     };
 
@@ -105,7 +114,7 @@ internal static partial class Program
     {
         if (string.IsNullOrWhiteSpace(wanted))
         {
-            Console.Error.WriteLine("Name a saved site; see 'sites list'.");
+            Console.Error.WriteLine("Name a saved remote; see 'sites list'.");
             return null;
         }
 
@@ -113,7 +122,7 @@ internal static partial class Program
         var found = sites.Sites.Where(s => string.Equals(s.Name, wanted, StringComparison.OrdinalIgnoreCase)).ToList();
         if (found.Count == 0) found = [.. sites.Sites.Where(s => s.Id.StartsWith(wanted, StringComparison.OrdinalIgnoreCase))];
         if (found.Count == 1) return found[0];
-        Console.Error.WriteLine($"'{wanted}' did not match exactly one saved site; see 'sites list'.");
+        Console.Error.WriteLine($"'{wanted}' did not match exactly one saved remote; see 'sites list'.");
         return null;
     }
 
@@ -187,7 +196,7 @@ internal static partial class Program
         {
             if (!has.Contains(SiteFields.Key))
             {
-                Console.Error.WriteLine($"A {kind.Title} site doesn't sign in with a key file.");
+                Console.Error.WriteLine($"A {kind.Title} remote doesn't sign in with a key file.");
                 return 2;
             }
 
@@ -311,7 +320,7 @@ internal static partial class Program
             return 1;
         }
 
-        if (wanted is null && !Confirm("Trust this certificate for this site? [y/N] "))
+        if (wanted is null && !Confirm("Trust this certificate for this remote? [y/N] "))
         {
             Console.Error.WriteLine("Nothing was trusted. To trust without a question, give --fingerprint.");
             return 1;
@@ -367,7 +376,7 @@ internal static partial class Program
             await Task.Delay(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
             var now = (await client.AskAsync<SitesListDto>(SitesMessageTypes.ListRequest, new EmptyPayload()).ConfigureAwait(false))
                 .Sites.FirstOrDefault(s => s.Id == site.Id);
-            if (now is null) { Console.Error.WriteLine("The site was removed."); return 1; }
+            if (now is null) { Console.Error.WriteLine("The remote was removed."); return 1; }
             if (now.SigningIn) continue;
             if (now.SignedIn) { if (!json) Console.WriteLine($"Signed in; {site.Name} can be used."); return 0; }
             Console.Error.WriteLine("The sign-in ended without access.");
@@ -452,7 +461,7 @@ internal static partial class Program
                 var folders = paths.Select(p => SplitSitePath(p).Folder).Distinct(StringComparer.Ordinal).ToList();
                 if (folders.Count != 1 || paths.Contains("/"))
                 {
-                    Console.Error.WriteLine("The paths of one 'sites rm' must be in one folder on the site.");
+                    Console.Error.WriteLine("The paths of one 'sites rm' must be in one folder on the remote.");
                     return 2;
                 }
 

@@ -15,6 +15,27 @@ export interface PopupListView {
   serverName: string;
   /** Whether each place answered the last jobs query. */
   groupsOk: Partial<Record<"local" | "server", boolean>>;
+  /** EXT.R14: downloads that finished since the popup was last opened, newest first: they come first in the list. */
+  finishedFirst?: readonly string[];
+  /** EXT.R16: finished downloads the user cleared from this list ("Clear finished"); they are not drawn or counted. */
+  hiddenIds?: ReadonlySet<string>;
+}
+
+/** The words of the divider above the downloads that finished since the popup was last opened (EXT.R16). */
+export const FINISHED_DIVIDER = "Finished just now";
+
+/** EXT.R16: the jobs without the cleared finished ones. */
+export function withoutCleared(jobs: readonly JobSummary[], hiddenIds: ReadonlySet<string> | undefined): JobSummary[] {
+  if (!hiddenIds || hiddenIds.size === 0) return [...jobs];
+  return jobs.filter((job) => !(job.state === "completed" && hiddenIds.has(job.id)));
+}
+
+/** The rows with the just-finished downloads first (newest finish first); the rest keep their order. */
+export function finishedOnTop(jobs: readonly JobSummary[], finishedFirst: readonly string[] | undefined): JobSummary[] {
+  if (!finishedFirst || finishedFirst.length === 0) return [...jobs];
+  const rank = new Map(finishedFirst.map((id, index) => [id, index] as const));
+  const first = jobs.filter((job) => rank.has(job.id)).sort((a, b) => rank.get(a.id)! - rank.get(b.id)!);
+  return [...first, ...jobs.filter((job) => !rank.has(job.id))];
 }
 
 export interface PopupListHandlers {
@@ -288,7 +309,13 @@ export function renderPopupRows(list: HTMLElement, jobs: readonly JobSummary[], 
   const wanted: HTMLLIElement[] = [];
   let shown = 0;
   const addJobs = (group: readonly JobSummary[]) => {
-    for (const job of latestJobs(group, POPUP_JOB_LIMIT)) {
+    const ordered = finishedOnTop(latestJobs(withoutCleared(group, view.hiddenIds), POPUP_JOB_LIMIT), view.finishedFirst);
+    const recent = new Set(view.finishedFirst ?? []);
+    const recentCount = ordered.filter((job) => recent.has(job.id)).length;
+    const place = group[0]?.target ?? "local";
+    if (recentCount > 0) wanted.push(groupRow(rows!, `finished:${place}`, FINISHED_DIVIDER, "group-row finished-divider"));
+    ordered.forEach((job, index) => {
+      if (recentCount > 0 && index === recentCount) wanted.push(groupRow(rows!, `after:${place}`, "Earlier", "group-row finished-divider"));
       const key = keyOf(job);
       let parts = rows!.get(key) as RowParts | undefined;
       if (!parts || !(parts as RowParts).item) {
@@ -298,7 +325,7 @@ export function renderPopupRows(list: HTMLElement, jobs: readonly JobSummary[], 
       updateRow(parts, job, handlers);
       wanted.push(parts.item);
       shown++;
-    }
+    });
   };
 
   if (view.paired) {

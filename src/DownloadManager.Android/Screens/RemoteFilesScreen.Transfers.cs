@@ -433,7 +433,7 @@ internal sealed partial class RemoteFilesScreen
     private static int DirectionGlyph(SiteTransferDto t) => t.Direction switch
     {
         "upload" => Resource.Drawable.ic_remote_up,
-        "copy" => Resource.Drawable.ic_remote_arrow,
+        "between" => Resource.Drawable.ic_remote_arrow,
         _ => Resource.Drawable.ic_remote_download,
     };
 
@@ -669,7 +669,7 @@ internal sealed partial class RemoteFilesScreen
     {
         if (!SameHost() || _confirm is not null) return;
         string from = transfer.Direction == "upload" ? (_phoneHost ? "this phone" : _hostName) : transfer.SiteName;
-        string to = transfer.Direction == "download" ? (_phoneHost ? "this phone" : _hostName) : transfer.Direction == "upload" ? transfer.SiteName : transfer.DestinationSiteName ?? "";
+        string to = transfer.Direction == "download" ? (_phoneHost ? "this phone" : _hostName) : transfer.Direction == "upload" ? transfer.SiteName : transfer.TargetSiteName ?? "";
         _confirm = new MaterialAlertDialogBuilder(_activity)
             .SetTitle("Cancel this transfer?")!
             .SetMessage(TransferTitle(transfer) + " · " + from + " to " + to + "\n\nA canceled transfer can't be resumed.")!
@@ -780,7 +780,7 @@ internal sealed partial class RemoteFilesScreen
         if (t.State == "running") pills.AddView(SheetPill("Pause", Resource.Drawable.ic_pause, () => _ = TransferActionAsync(t.Id, "pause")), new LinearLayout.LayoutParams(-2, Dp(40)) { RightMargin = Dp(8) });
         if (CanShowTransferFolder(t) && t.State != "paused") // x2b draws Resume alone
         {
-            string place = t.Direction == "download" ? "folder" : t.Direction == "upload" ? t.SiteName : t.DestinationSiteName ?? "location";
+            string place = t.Direction == "download" ? "folder" : t.Direction == "upload" ? t.SiteName : t.TargetSiteName ?? "location";
             pills.AddView(SheetPill("Show in " + place, Resource.Drawable.ic_remote_folder, () => ShowTransferFolder(t, null)), new LinearLayout.LayoutParams(-2, Dp(40)));
         }
         if (pills.ChildCount > 0) content.AddView(pills);

@@ -64,14 +64,14 @@ The WinUI window is the reference (`CLAUDE.md`, "UI structure"). The web UI revi
 - **Queues and Scheduler:** queues, priority, schedules, quotas, completion actions, sleep prevention.
 - **Options:** the settings pages, saved with one OK/Cancel/Apply, with unsaved edits on other pages kept.
 - **Shell:** open file, open folder, reveal; tray and notifications, completion dialog and sound, updater.
-- **Browser extension:** Get it links per browser (`BrowserBridge.ChromeStoreUrl`, `EdgeStoreUrl`, `FirefoxReleaseUrl`),
+- **Browser extension:** Get it links per browser (`BrowserBridge.ChromeStoreUrl`, `EdgeStoreUrl`, `FirefoxAddonsUrl`),
   the status from `extensionsSeen` where the Host gives it, and the one-time hint until an extension connects
   (`extensions.seen` ends it live; see "Browser extensions seen" in `docs/ipc-protocol.md`).
 - **Providers:** TorBox and the containers/archives flows, if the Host reports `remote` and `archives`.
-- **Sites,** if the Host offers `sites` in its hello (`docs/ipc-protocol.md`, "Sites"): the switch and rclone's
-  state (with Download rclone), the site list with add, edit, test and remove, the questions a site asks before first
-  use (a server's SSH key, a certificate, a browser sign-in), a site's files (browse in pages, new folder, rename,
-  delete after counting), transfers between a site and the computer Inbound runs on (`sites.transfer.*`, with pause,
+- **Remote files** (the feature's name in every window; one item is "a remote", not "a site", which would be confused with site logins), if the Host offers `sites` in its hello (`docs/ipc-protocol.md`, "Sites"): the switch and rclone's
+  state (with Download rclone), the list of remotes with add, edit, test and remove, the questions a remote asks before first
+  use (a server's SSH key, a certificate, a browser sign-in), a remote's files (browse in pages, new folder, rename,
+  delete after counting), transfers between a remote and the computer Inbound runs on (`sites.transfer.*`, with pause,
   resume, cancel, retry, clear), and, for a frontend that runs somewhere else, files to and from its own device
   (`sites.device.*`, or the server's `/api/sites/device`). The kinds and their fields come from `sites.kinds`; don't
   hard-code them. The WinUI window and the web UI are the two references.

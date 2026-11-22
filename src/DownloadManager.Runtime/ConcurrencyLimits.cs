@@ -141,7 +141,7 @@ public sealed partial class DownloadManagerService
             requeued.Add(runtime);
             running.Remove(runtime);
         }
-        var overall = running.Count - _settings.MaxConcurrentDownloads;
+        var overall = running.Count - (_savingHold ? 0 : _settings.MaxConcurrentDownloads);
         var perQueue = running.GroupBy(QueueKey).ToDictionary(group => group.Key, group => group.Count());
         var fileOrder = FileOrderLocked();
         foreach (var runtime in running

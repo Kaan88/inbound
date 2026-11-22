@@ -54,17 +54,21 @@ public static class UpdateNotes
     /// the desktop tag (0.7.7 or older) would take it for a provider's id and hide the line. Both windows show a line
     /// tagged that way, so nothing is lost. ROADMAP UPD.N3: drop this once no 0.7.7-or-older install updates directly.
     /// </summary>
-    public static List<ChangelogItem> From(ChangelogVersion version)
+    /// <param name="spellOutDesktop">
+    /// False for Inbound.app's manifests (MAC.1): only apps that know <c>desktop</c> read them, and spelt out as
+    /// windows and linux a desktop line would not be the macOS window's.
+    /// </param>
+    public static List<ChangelogItem> From(ChangelogVersion version, bool spellOutDesktop = true)
         => version.Sections.SelectMany(section => section.Items)
-            .Select(item => new ChangelogItem { Text = item.Text, Tags = ForManifest(item.Tags) })
+            .Select(item => new ChangelogItem { Text = item.Text, Tags = ForManifest(item.Tags, spellOutDesktop) })
             .ToList();
 
-    private static List<string> ForManifest(IEnumerable<string> tags)
+    private static List<string> ForManifest(IEnumerable<string> tags, bool spellOutDesktop)
     {
         var written = new List<string>();
         foreach (var tag in tags)
         {
-            foreach (var one in tag == ChangelogTags.Desktop ? new[] { ChangelogTags.Windows, ChangelogTags.Linux } : [tag])
+            foreach (var one in tag == ChangelogTags.Desktop && spellOutDesktop ? new[] { ChangelogTags.Windows, ChangelogTags.Linux } : [tag])
             {
                 if (!written.Contains(one)) written.Add(one);
             }

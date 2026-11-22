@@ -46,7 +46,7 @@ public sealed class SitesConfigStore(string stateDirectory)
         }
         catch (Exception e) when (e is JsonException or IOException or UnauthorizedAccessException)
         {
-            problem = $"Sites settings could not be read ({e.GetType().Name}); Sites stays off until it is turned on again.";
+            problem = $"Remote files settings could not be read ({e.GetType().Name}); Remote files stay off until it is turned on again.";
             return new SitesConfig();
         }
     }

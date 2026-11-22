@@ -16,7 +16,7 @@ public sealed partial class SitesCommands
 
     private async Task<SiteResultDto> MakeFolderAsync(SiteMakeFolderRequest request, CancellationToken cancellationToken)
     {
-        if (await SiteOfAsync(request.Id, cancellationToken).ConfigureAwait(false) is not { } site) return Fail("That site no longer exists.");
+        if (await SiteOfAsync(request.Id, cancellationToken).ConfigureAwait(false) is not { } site) return Fail("That remote no longer exists.");
         if (SitePaths.Normalize(request.Path) is not { } folder) return Fail("That is not a folder path on the server.");
         if (SitePaths.NameProblem(request.Name) is { } problem) return Fail(problem);
         var target = SiteTransferPaths.Remote(folder, request.Name);
@@ -34,7 +34,7 @@ public sealed partial class SitesCommands
 
     private async Task<SiteResultDto> RenameAsync(SiteRenameRequest request, CancellationToken cancellationToken)
     {
-        if (await SiteOfAsync(request.Id, cancellationToken).ConfigureAwait(false) is not { } site) return Fail("That site no longer exists.");
+        if (await SiteOfAsync(request.Id, cancellationToken).ConfigureAwait(false) is not { } site) return Fail("That remote no longer exists.");
         if (SitePaths.Normalize(request.Path) is not { } folder) return Fail("That is not a folder path on the server.");
         if (SitePaths.NameProblem(request.Name) is not null) return Fail("That item can't be renamed.");
         if (SitePaths.NameProblem(request.NewName) is { } problem) return Fail(problem);
@@ -83,7 +83,7 @@ public sealed partial class SitesCommands
     /// <summary>What a delete would remove: the files inside the chosen folders as well, and their size.</summary>
     private async Task<SiteCountResultDto> CountAsync(SiteChangeRequest request, CancellationToken cancellationToken)
     {
-        if (await SiteOfAsync(request.Id, cancellationToken).ConfigureAwait(false) is not { } site) return CountFail("That site no longer exists.");
+        if (await SiteOfAsync(request.Id, cancellationToken).ConfigureAwait(false) is not { } site) return CountFail("That remote no longer exists.");
         if (SitePaths.Normalize(request.Path) is not { } folder) return CountFail("That is not a folder path on the server.");
         if (ItemsProblem(request.Items) is { } problem) return CountFail(problem);
         var (count, failure) = await OnServerAsync(site, async (client, fs) =>
@@ -126,7 +126,7 @@ public sealed partial class SitesCommands
     /// <summary>Deletes on the server: a file with <c>deletefile</c>, a folder and all inside it with <c>purge</c>. One result per item.</summary>
     private async Task<SiteChangeResultDto> DeleteAsync(SiteChangeRequest request, CancellationToken cancellationToken, bool filesOnly)
     {
-        if (await SiteOfAsync(request.Id, cancellationToken).ConfigureAwait(false) is not { } site) return ChangeFail("That site no longer exists.");
+        if (await SiteOfAsync(request.Id, cancellationToken).ConfigureAwait(false) is not { } site) return ChangeFail("That remote no longer exists.");
         if (SitePaths.Normalize(request.Path) is not { } folder) return ChangeFail("That is not a folder path on the server.");
         if (ItemsProblem(request.Items) is { } problem) return ChangeFail(problem);
         if (filesOnly && (CachedListing(site.Id, folder, request.Listing) is not { } listing

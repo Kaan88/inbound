@@ -409,6 +409,7 @@ public static partial class ExtractionSafety
     {
         // Android is Linux with bionic, whose arm64 struct stat is the generic layout too; .NET doesn't count it as Linux (ANDROID.9).
         if (OperatingSystem.IsLinux() || OperatingSystem.IsAndroid()) return UnixHardLinkCount(path);
+        if (OperatingSystem.IsMacOS()) return MacHardLinkCount(path);
         if (!OperatingSystem.IsWindows()) return null;
         using SafeFileHandle handle = File.OpenHandle(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
         return GetFileInformationByHandle(handle, out var information) ? information.NumberOfLinks : 1;
@@ -459,6 +460,32 @@ public static partial class ExtractionSafety
         Architecture.Arm64 => BitConverter.ToUInt32(stat, 20),
         _ => null,
     };
+
+    /// <summary>
+    /// macOS: <c>lstat</c> (arm64) or <c>lstat$INODE64</c> (x86_64), both the 64-bit-inode <c>struct stat</c>, whose
+    /// <c>st_nlink</c> is the u16 at offset 6 (after the i32 <c>st_dev</c> and u16 <c>st_mode</c>). Null when the call fails.
+    /// </summary>
+    internal static uint? MacHardLinkCount(string path)
+    {
+        var buffer = new byte[256];
+        try
+        {
+            var result = RuntimeInformation.ProcessArchitecture == Architecture.X64 ? MacLStatInode64(path, buffer) : MacLStat(path, buffer);
+            return result == 0 ? MacLinkCountIn(buffer) : null;
+        }
+        catch (Exception exception) when (exception is DllNotFoundException or EntryPointNotFoundException)
+        {
+            return null;
+        }
+    }
+
+    internal static uint MacLinkCountIn(byte[] stat) => BitConverter.ToUInt16(stat, 6);
+
+    [DllImport("libc", EntryPoint = "lstat", SetLastError = true)]
+    private static extern int MacLStat([MarshalAs(UnmanagedType.LPUTF8Str)] string path, byte[] buffer);
+
+    [DllImport("libc", EntryPoint = "lstat$INODE64", SetLastError = true)]
+    private static extern int MacLStatInode64([MarshalAs(UnmanagedType.LPUTF8Str)] string path, byte[] buffer);
 
     // Big enough for struct stat on every Linux architecture (x64 144 bytes, arm64 128).
     [DllImport("libc", SetLastError = true)]

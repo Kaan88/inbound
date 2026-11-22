@@ -1,24 +1,44 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import AskDialog from '../components/AskDialog.svelte';
   import Icon from '../components/Icon.svelte';
-  import { bytes, speed } from '../lib/format';
   import { store } from '../lib/store.svelte';
   import {
-    problems, rcloneLine, rcloneOffer, siteSummary, transferFraction, transferLine,
+    problems, rcloneLine, rcloneOffer,
     type Site, type SiteKind, type SiteResult, type SitesStatus,
   } from '../lib/sites';
+  import { allRemotes, busyRemotes, closeQuestion, phoneRemotesLine, unfinishedOn } from '../lib/sitesHome';
+  import { tabOf, type TransferTab } from '../lib/sitesTransfers';
+  import RemotesHome from './sites/RemotesHome.svelte';
   import SiteBrowser from './sites/SiteBrowser.svelte';
   import SiteDialog from './sites/SiteDialog.svelte';
   import SiteFix from './sites/SiteFix.svelte';
+  import TransferList from './sites/TransferList.svelte';
+  import TransfersBar from './sites/TransfersBar.svelte';
 
-  // Sites (SITES.7): the servers and cloud storage Inbound reaches through rclone, as on the desktop. A list of sites,
-  // one site's files (#/sites/<id>), and the transfers between sites and the computer Inbound runs on.
+  // Remote files (SITES.7, SITES.11 R6b): the servers and cloud storage Inbound reaches through rclone, as on the desktop.
+  // All remotes (#/sites), one remote's files (#/sites/<id>), and the Transfers bar under both, which opens the list of
+  // transfers between remotes and the computer Inbound runs on.
   let { siteId = undefined }: { siteId?: string } = $props();
+
+  let transfersOpen = $state(false);
+  let transfersTab = $state<TransferTab>('active');
+  // A toast's Show (a transfer finished or began): the list opens on its tab with that row picked.
+  let reveal = $state<string | null>(null);
+  $effect(() => {
+    const id = store.showTransfer;
+    if (!id) return;
+    const found = untrack(() => store.model.siteTransfers.find((item) => item.id === id));
+    transfersOpen = true;
+    if (found) transfersTab = tabOf(found);
+    reveal = id;
+    store.showTransfer = null;
+  });
 
   let kinds = $state<SiteKind[]>([]);
   let editing = $state<Site | null | undefined>(undefined); // undefined: closed; null: a new site
   let removing = $state<Site | null>(null);
+  let closing = $state<{ site: Site; title: string; text: string } | null>(null);
   let fixing = $state<{ site: Site; problem: string } | null>(null);
   let testing = $state<string | null>(null);
   let switching = $state(false);
@@ -26,8 +46,32 @@
   const status = $derived(store.model.sitesStatus);
   const sites = $derived(store.model.sites);
   const site = $derived(siteId ? sites.find((item) => item.id === siteId) : undefined);
-  const transfers = $derived([...store.model.siteTransfers].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)));
-  const finished = $derived(transfers.some((transfer) => ['done', 'failed', 'canceled'].includes(transfer.state)));
+  const transfers = $derived(store.model.siteTransfers);
+
+  function open(item: Site | string) {
+    location.hash = `#/sites/${encodeURIComponent(typeof item === 'string' ? item : item.id)}`;
+  }
+
+  /** An address opened once is forgotten: its unfinished batches are cancelled by the Host. */
+  async function close(item: Site) {
+    const result = await store.attempt<SiteResult>('sites.close', { id: item.id });
+    if (result && !result.ok) store.toast(result.message ?? 'It was not closed.', 'error');
+    if (siteId === item.id) location.hash = '#/sites';
+  }
+
+  /** Close (or Delete) on an address opened once: asked first when it has transfers that would be cancelled. */
+  function askClose(item: Site) {
+    const question = closeQuestion(item.name, unfinishedOn(transfers, item.id));
+    if (question) closing = { site: item, ...question };
+    else void close(item);
+  }
+
+  /** "Remember": an address opened once becomes a saved remote. */
+  async function keep(item: Site) {
+    const result = await store.attempt<SiteResult>('sites.keep', { id: item.id });
+    if (result && !result.ok) store.toast(result.message ?? 'It was not remembered.', 'error');
+    else if (result) store.toast(`${result.site?.name ?? item.name} was saved.`);
+  }
 
   let kindsProblem = $state('');
 
@@ -38,7 +82,7 @@
       kinds = (await store.ask<{ kinds: SiteKind[] }>('sites.kinds', {})).kinds ?? [];
       kindsProblem = '';
     } catch (error) {
-      kindsProblem = `The kinds of site could not be read: ${error instanceof Error ? error.message : String(error)}`;
+      kindsProblem = `The kinds of remote could not be read: ${error instanceof Error ? error.message : String(error)}`;
     }
     return kinds.length > 0;
   }
@@ -92,7 +136,7 @@
 
   async function remove(item: Site) {
     const result = await store.attempt<SiteResult>('sites.remove', { id: item.id });
-    if (result && !result.ok) store.toast(result.message ?? 'The site was not removed.', 'error');
+    if (result && !result.ok) store.toast(result.message ?? 'The remote was not removed.', 'error');
     removing = null;
   }
 
@@ -122,146 +166,91 @@
     if (result.error?.trim()) store.toast(result.error.trim(), 'error');
     else store.toast(result.rcloneVersion ? `rclone ${result.rcloneVersion} is installed.` : 'rclone is installed.');
   }
-
-  async function transfer(type: string, id: string) {
-    const result = await store.attempt<{ ok: boolean; message?: string }>(type, { id });
-    if (result && !result.ok) store.toast(result.message ?? 'That did not work.', 'error');
-  }
 </script>
 
-<div class="mx-auto max-w-4xl px-4 py-5">
-  {#if siteId}
-    <div class="mb-3 flex items-center gap-2">
-      <a class="btn-icon" href="#/sites" title="All sites" aria-label="All sites"><Icon name="chevron-left" size={18} /></a>
-      <h1 class="min-w-0 flex-1 truncate text-[22px] font-semibold">{site?.name ?? 'Site'}</h1>
-    </div>
-    {#if !status?.enabled}
-      <p class="text-[13px] text-muted">Sites are off. <a class="link" href="#/sites">Turn them on</a> first.</p>
-    {:else if site}
-      {#key site.id}<SiteBrowser {site} />{/key}
-    {:else}
-      <p class="text-[13px] text-muted">That site no longer exists. <a class="link" href="#/sites">All sites</a></p>
-    {/if}
-  {:else}
-    <h1 class="text-[22px] font-semibold">Sites</h1>
-    <p class="mt-1 text-[12.5px] text-muted">Servers and cloud storage you reach through {store.texts.hostName}: SFTP, FTP, WebDAV, S3, Drive, OneDrive, Dropbox and B2.</p>
-
-    {#if !status}
-      <p class="mt-4 text-[13px] text-muted">Reading…</p>
-    {:else}
-      <section class="card mt-4 space-y-2 px-3 py-3 text-[13px]">
-        <label class="flex items-center gap-2">
-          <input type="checkbox" checked={status.enabled} disabled={switching} onchange={(event) => setEnabled(event.currentTarget.checked, event.currentTarget)} />
-          Use Sites
-        </label>
-        {#if status.enabled}
-          <p class="hint">{rcloneLine(status)}</p>
-          {#if status.rclone === 'missing' && !status.rcloneInstalling}
-            <button class="btn" onclick={() => installRclone()}><Icon name="download" size={15} /> Download rclone</button>
-          {/if}
-          {#if offer?.line}
-            <div class="flex flex-wrap items-center gap-2">
-              <p class="hint flex-1">{offer.line}</p>
-              {#if offer.version}
-                {@const version = offer.version}
-                <button class="btn" disabled={status.rcloneInstalling} onclick={() => installRclone(version)}><Icon name="download" size={15} /> Install rclone {version}</button>
-              {/if}
-            </div>
-          {/if}
-          {#if status.rcloneSource !== 'own' && !status.ownRclonePath}
-            <!-- Inbound never updates an rclone the user chose. -->
-            <div class="flex flex-wrap items-center gap-2">
-              <label class="flex flex-1 items-center gap-2">
-                <input type="checkbox" checked={status.autoUpdateRclone} disabled={status.rcloneInstalling}
-                  onchange={(event) => setAutoUpdate(event.currentTarget.checked, event.currentTarget)} />
-                Update rclone automatically
-              </label>
-              {#if status.rclone !== 'missing'}
-                <button class="btn" disabled={checking || status.rcloneInstalling} onclick={checkRclone}><Icon name="refresh" size={15} /> {checking ? 'Checking…' : 'Check now'}</button>
-              {/if}
-            </div>
-          {/if}
-          {#if offer?.lastCheck}<p class="hint">{offer.lastCheck}</p>{/if}
+<div class="flex h-full min-h-0 flex-col">
+  <div class="min-h-0 flex-1 overflow-y-auto {transfersOpen && status?.enabled ? 'max-md:hidden' : ''}">
+    <div class="mx-auto px-4 py-4 {siteId ? 'max-w-6xl' : 'max-w-5xl'}">
+      {#if siteId}
+        <div class="mb-3 flex items-center gap-2 {site && status?.enabled ? 'max-md:hidden' : ''}">
+          <a class="btn-icon" href="#/sites" title={allRemotes} aria-label={allRemotes}><Icon name="chevron-left" size={18} /></a>
+          <h1 class="min-w-0 flex-1 truncate text-[20px] font-semibold">{site?.name ?? 'Remote'}</h1>
+        </div>
+        {#if !status?.enabled}
+          <p class="text-[13px] text-muted">Remote files are off. <a class="link" href="#/sites">Turn them on</a> first.</p>
+        {:else if site}
+          {#key site.id}<SiteBrowser {site} onedit={site.unsaved ? undefined : () => void edit(site)} />{/key}
         {:else}
-          <p class="hint">Off, nothing runs for Sites. On, Inbound starts rclone when a site is used.</p>
+          <p class="text-[13px] text-muted">That remote no longer exists. <a class="link" href="#/sites">{allRemotes}</a></p>
         {/if}
-      </section>
+      {:else}
+        <h1 class="text-[20px] font-semibold">{allRemotes}</h1>
+        <p class="mb-3 mt-0.5 text-[12.5px] text-muted md:hidden">{phoneRemotesLine(sites.filter((item) => !item.unsaved).length, busyRemotes(transfers).size)}</p>
+        <p class="mb-3 mt-1 text-[12.5px] text-muted max-md:hidden">Servers and cloud storage you reach through {store.texts.hostName}: SFTP, FTP, WebDAV, S3, Drive, OneDrive, Dropbox and B2.</p>
 
-      {#if status.enabled}
-        <section class="mt-5">
-          <div class="mb-2 flex items-center gap-2">
-            <h2 class="flex-1 text-[14px] font-semibold">Your sites</h2>
-            <button class="btn-primary" onclick={() => edit(null)}><Icon name="add" size={15} /> Add a site</button>
-          </div>
-          {#if kindsProblem}<p class="mb-2 text-[12.5px] text-error" role="alert">{kindsProblem}</p>{/if}
-          {#if !sites.length}
-            <p class="text-[13px] text-muted">No sites yet.</p>
-          {:else}
-            <ul class="card divide-y divide-divider">
-              {#each sites as item (item.id)}
-                <li class="flex flex-wrap items-center gap-2 px-3 py-2 text-[13px]">
-                  <a class="flex min-w-0 flex-1 items-center gap-2 hover:underline" href="#/sites/{item.id}">
-                    <Icon name={item.capabilities.includes('signIn') || item.kind === 's3' || item.kind === 'b2' ? 'cloud' : 'server'} size={18} class="shrink-0 text-muted" />
-                    <span class="min-w-0">
-                      <span class="block truncate font-medium">{item.name}</span>
-                      <span class="block truncate text-[12px] text-muted">{siteSummary(item, kinds)}{item.encrypted ? '' : ' · Not encrypted'}</span>
-                    </span>
-                  </a>
-                  {#if item.capabilities.includes('signIn') && !item.signedIn}
-                    <button class="btn" onclick={() => (fixing = { site: item, problem: problems.signInNeeded })}>Sign in…</button>
-                  {/if}
-                  {#if item.trustedCertificates.length}
-                    <button class="btn" onclick={() => (forgetting = item)} aria-label="Forget the certificate trusted for {item.name}">Forget certificate</button>
-                  {/if}
-                  <button class="btn" disabled={testing === item.id} onclick={() => test(item)}>{testing === item.id ? 'Testing…' : 'Test'}</button>
-                  <button class="btn-icon" title="Edit" aria-label="Edit {item.name}" onclick={() => edit(item)}><Icon name="settings" size={16} /></button>
-                  <button class="btn-icon" title="Remove" aria-label="Remove {item.name}" onclick={() => (removing = item)}><Icon name="trash" size={16} /></button>
-                </li>
-              {/each}
-            </ul>
+        {#if !status}
+          <p class="mt-4 text-[13px] text-muted">Reading…</p>
+        {:else}
+          {#if status.enabled}
+            {#if kindsProblem}<p class="mb-2 text-[12.5px] text-error" role="alert">{kindsProblem}</p>{/if}
+            <RemotesHome {sites} {transfers} {testing} onopen={open} onadd={() => edit(null)} onedit={(item) => edit(item)} ontest={test}
+              onremove={(item) => (item.unsaved ? askClose(item) : (removing = item))} onsignin={(item) => (fixing = { site: item, problem: problems.signInNeeded })}
+              onforget={(item) => (forgetting = item)} onkeep={keep} />
           {/if}
-        </section>
-      {/if}
-    {/if}
-  {/if}
 
-  {#if transfers.length}
-    <section class="mt-6">
-      <div class="mb-2 flex items-center gap-2">
-        <h2 class="flex-1 text-[14px] font-semibold">Transfers with {store.texts.hostName}</h2>
-        {#if finished}<button class="btn" onclick={() => transfer('sites.transfer.clear', '')}><Icon name="sweep" size={15} /> Clear finished</button>{/if}
-      </div>
-      <ul class="card divide-y divide-divider text-[13px]">
-        {#each transfers as item (item.id)}
-          {@const fraction = transferFraction(item)}
-          <li class="space-y-1 px-3 py-2">
-            <div class="flex flex-wrap items-center gap-2">
-              <Icon name={item.direction === 'upload' ? 'upload' : 'download'} size={16} class="shrink-0 text-muted" />
-              <span class="min-w-0 flex-1 truncate" title={item.direction === 'upload' ? `${item.localFolder} → ${item.remoteFolder}` : `${item.remoteFolder} → ${item.localFolder}`}>
-                {item.siteName}: {item.direction === 'upload' ? item.remoteFolder : item.localFolder}
-              </span>
-              {#if item.state === 'running'}
-                <span class="tabular text-[12px] text-muted">{speed(item.speed)}</span>
-                <button class="btn-icon" title="Pause" aria-label="Pause" onclick={() => transfer('sites.transfer.pause', item.id)}><Icon name="pause" size={15} /></button>
-              {:else if item.state === 'paused'}
-                <button class="btn-icon" title="Resume" aria-label="Resume" onclick={() => transfer('sites.transfer.resume', item.id)}><Icon name="play" size={15} /></button>
-              {:else if item.state === 'failed'}
-                <button class="btn-icon" title="Retry" aria-label="Retry" onclick={() => transfer('sites.transfer.retry', item.id)}><Icon name="retry" size={15} /></button>
-              {/if}
-              {#if item.state === 'running' || item.state === 'paused'}
-                <button class="btn-icon" title="Cancel" aria-label="Cancel" onclick={() => transfer('sites.transfer.cancel', item.id)}><Icon name="stop" size={15} /></button>
+          <details class="card mt-5 px-3 py-2 text-[13px]" open={!status.enabled}>
+            <summary class="cursor-pointer select-none font-semibold">Remote files options</summary>
+            <div class="mt-2 space-y-2">
+              <label class="flex items-center gap-2">
+                <input type="checkbox" checked={status.enabled} disabled={switching} onchange={(event) => setEnabled(event.currentTarget.checked, event.currentTarget)} />
+                Use Remote files
+              </label>
+              {#if status.enabled}
+                <p class="hint">{rcloneLine(status)}</p>
+                {#if status.rclone === 'missing' && !status.rcloneInstalling}
+                  <button class="btn" onclick={() => installRclone()}><Icon name="download" size={15} /> Download rclone</button>
+                {/if}
+                {#if offer?.line}
+                  <div class="flex flex-wrap items-center gap-2">
+                    <p class="hint flex-1">{offer.line}</p>
+                    {#if offer.version}
+                      {@const version = offer.version}
+                      <button class="btn" disabled={status.rcloneInstalling} onclick={() => installRclone(version)}><Icon name="download" size={15} /> Install rclone {version}</button>
+                    {/if}
+                  </div>
+                {/if}
+                {#if status.rcloneSource !== 'own' && !status.ownRclonePath}
+                  <!-- Inbound never updates an rclone the user chose. -->
+                  <div class="flex flex-wrap items-center gap-2">
+                    <label class="flex flex-1 items-center gap-2">
+                      <input type="checkbox" checked={status.autoUpdateRclone} disabled={status.rcloneInstalling}
+                        onchange={(event) => setAutoUpdate(event.currentTarget.checked, event.currentTarget)} />
+                      Update rclone automatically
+                    </label>
+                    {#if status.rclone !== 'missing'}
+                      <button class="btn" disabled={checking || status.rcloneInstalling} onclick={checkRclone}><Icon name="refresh" size={15} /> {checking ? 'Checking…' : 'Check now'}</button>
+                    {/if}
+                  </div>
+                {/if}
+                {#if offer?.lastCheck}<p class="hint">{offer.lastCheck}</p>{/if}
+              {:else}
+                <p class="hint">Off, nothing runs for remote files. On, Inbound starts rclone when a remote is used.</p>
               {/if}
             </div>
-            {#if item.state === 'running' || item.state === 'paused'}
-              <span class="progress {fraction === null ? 'indeterminate' : ''}"><span style={fraction === null ? '' : `width: ${Math.round(fraction * 100)}%`}></span></span>
-            {/if}
-            <p class="text-[12px] {item.state === 'failed' ? 'tone-failed' : 'text-muted'}">
-              {transferLine(item)}{item.bytes > 0 ? ` · ${bytes(item.bytesDone) || '0 B'} of ${bytes(item.bytes)}` : ''}{item.message ? ` · ${item.message}` : ''}
-            </p>
-          </li>
-        {/each}
-      </ul>
-    </section>
+          </details>
+        {/if}
+      {/if}
+    </div>
+  </div>
+
+  {#if status?.enabled}
+    {#if transfersOpen}
+      <section id="remote-transfers" class="flex h-[42%] min-h-[210px] flex-col border-t border-divider bg-surface max-md:h-auto max-md:min-h-0 max-md:flex-1" aria-label="Transfers with {store.texts.hostName}">
+        <h2 class="border-b border-divider px-3 py-2 text-[15px] font-semibold md:hidden">Transfers</h2>
+        <TransferList {transfers} bind:tab={transfersTab} bind:reveal onshow={open} />
+      </section>
+    {/if}
+    <TransfersBar {transfers} bind:open={transfersOpen} />
   {/if}
 </div>
 
@@ -277,15 +266,21 @@
 
 {#if removing}
   {@const item = removing}
-  <AskDialog title="Remove {item.name}?" danger confirm="Remove"
-    text="Inbound forgets this site and what it keeps for it (the password or sign-in). Nothing on the server is deleted."
+  <AskDialog title="Remove {item.name}?" danger confirm="Remove" sheet
+    text="Inbound forgets this remote and what it keeps for it (the password or sign-in). Nothing on the server is deleted."
     onconfirm={() => remove(item)} onclose={() => (removing = null)} />
+{/if}
+
+{#if closing}
+  {@const current = closing}
+  <AskDialog title={current.title} danger confirm="Close" sheet text={current.text}
+    onconfirm={() => { closing = null; void close(current.site); }} onclose={() => (closing = null)} />
 {/if}
 
 {#if forgetting}
   {@const item = forgetting}
-  <AskDialog title={item.trustedCertificates.length === 1 ? 'Forget the certificate?' : 'Forget the certificates?'} confirm="Forget"
-    text="Stop trusting {item.trustedCertificates.length === 1 ? 'the certificate' : `the ${item.trustedCertificates.length} certificates`} saved for {item.host || item.url || item.name}? The site then can't be used until you trust its certificate again (Test asks)."
+  <AskDialog title={item.trustedCertificates.length === 1 ? 'Forget the certificate?' : 'Forget the certificates?'} confirm="Forget" sheet
+    text="Stop trusting {item.trustedCertificates.length === 1 ? 'the certificate' : `the ${item.trustedCertificates.length} certificates`} saved for {item.host || item.url || item.name}? The remote then can't be used until you trust its certificate again (Test asks)."
     onconfirm={() => forget(item)} onclose={() => (forgetting = null)} />
 {/if}
 

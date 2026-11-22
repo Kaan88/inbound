@@ -54,10 +54,10 @@ public static class BrowserBridge
     public const string EdgeStoreUrl = "https://microsoftedge.microsoft.com/addons/detail/" + EdgeStoreExtensionId;
 
     /// <summary>
-    /// UI.R41: Firefox's add-on is signed by Mozilla but not listed on Firefox Add-ons (EXT.S4); it is a file on each
-    /// GitHub release (<c>inbound-bridge-&lt;version&gt;-firefox.xpi</c>), so the link is the latest release page.
+    /// UI.R41: Firefox's add-on is listed on Firefox Add-ons (addons.mozilla.org), like Chrome's and Edge's in their
+    /// stores (owner, 2026-11-17); Firefox updates it from there.
     /// </summary>
-    public const string FirefoxReleaseUrl = "https://github.com/Kaan88/inbound/releases/latest";
+    public const string FirefoxAddonsUrl = "https://addons.mozilla.org/firefox/addon/inbound-download-manager/";
 
     /// <summary>
     /// UI.R41: which browser's extension started the native host, from its command line and the names of the programs

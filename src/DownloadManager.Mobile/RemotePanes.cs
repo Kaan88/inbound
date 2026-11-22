@@ -219,18 +219,18 @@ public static class RemoteTransfers
         string targetSiteId, string targetFolder, string conflict = RemoteConflicts.Skip) => new()
     {
         SiteId = sourceSiteId,
-        Direction = "copy",
+        Direction = "between",
         RemoteFolder = RemoteCrumbs.Normalize(sourceFolder),
-        DestinationSiteId = targetSiteId,
-        DestinationFolder = RemoteCrumbs.Normalize(targetFolder),
+        TargetSiteId = targetSiteId,
+        TargetFolder = RemoteCrumbs.Normalize(targetFolder),
         Conflict = conflict,
         Names = [.. items.Select(item => new SiteTransferNameDto { Name = item.Name, IsFolder = item.IsFolder })],
     };
 
     /// <summary>A Transfers row's title: "download · NAS", or "copy · Google Drive → Home NAS" for a copy (r6).</summary>
     public static string Title(SiteTransferDto transfer) =>
-        transfer.Direction + " · " + transfer.SiteName
-        + (transfer.Direction == "copy" && !string.IsNullOrEmpty(transfer.DestinationSiteName) ? " → " + transfer.DestinationSiteName : "");
+        (transfer.Direction == "between" ? "copy" : transfer.Direction) + " · " + transfer.SiteName
+        + (transfer.Direction == "between" && !string.IsNullOrEmpty(transfer.TargetSiteName) ? " → " + transfer.TargetSiteName : "");
 
     /// <summary>The caption under a phone destination, "Download/Inbound/Music".</summary>
     public static string PhoneLabel(string phonePath)

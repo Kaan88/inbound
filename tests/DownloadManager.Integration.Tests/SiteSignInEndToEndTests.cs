@@ -36,7 +36,7 @@ public sealed partial class SiteTransfersEndToEndTests
 
         var refused = await Call<SiteSignInResultDto>(commands, SitesMessageTypes.SignIn, new SiteSignInRequest { Id = other.Site!.Id });
         Assert.False(refused.Ok);
-        Assert.Contains("Another site's sign-in", refused.Message);
+        Assert.Contains("Another remote's sign-in", refused.Message);
 
         var cancelled = await Call<SiteResultDto>(commands, SitesMessageTypes.SignInCancel, new SiteIdRequest { Id = box.Site.Id });
         Assert.True(cancelled.Ok);

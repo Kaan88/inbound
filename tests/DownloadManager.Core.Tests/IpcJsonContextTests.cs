@@ -42,6 +42,7 @@ public sealed class IpcJsonContextTests
         "JobListEntry", "TorrentListEntry", // saved-list file: JobListJsonContext (web defaults), not IpcJson
         "PlainHttpNotConfirmedException", "RemotePairingEndedException", "RemoteServerException",
         "ServerCertificateInfo",          // a certificate shown at pairing (ANDROID.7), never sent over IPC
+        "SiteAddress",                    // SITES.11: the typed address read on the Host; the address travels as a string
     ];
 
     private static IEnumerable<Type> ContractTypes() => typeof(IpcMessage).Assembly.GetExportedTypes()

@@ -7,6 +7,7 @@ const root = path.resolve(import.meta.dirname, "..");
 const watch = process.argv.includes("--watch");
 const targetIndex = process.argv.indexOf("--target");
 const target = targetIndex >= 0 ? process.argv[targetIndex + 1] : "chrome";
+const unlisted = process.argv.includes("--unlisted");
 if (target !== "chrome" && target !== "firefox") {
   throw new Error(`Unknown --target ${target}. Use chrome or firefox.`);
 }
@@ -21,9 +22,11 @@ const dist = outdirIndex >= 0
 // (BrowserBridge.FirefoxExtensionId).
 export const FIREFOX_EXTENSION_ID = "inbound-bridge@kaan88";
 
-// The Firefox add-on is self-distributed (unlisted on addons.mozilla.org): Setup ships the signed XPI and the
-// GitHub release carries it. Firefox checks this file for newer versions; scripts/sign-extension-firefox.ps1
-// writes it, and a release squash puts it on main, so it lists only XPIs already published.
+// The Firefox add-on is listed on addons.mozilla.org (owner, 2026-11-17), so the store build has no update_url: Firefox
+// updates it from AMO, which rejects a listed version that names its own update server. An unlisted, self-distributed
+// build (--unlisted, scripts/sign-extension-firefox.ps1 -Channel unlisted) names this file instead; the script writes
+// it and a release squash puts it on main, so it lists only XPIs already published. It also moves installs of the
+// older unlisted add-on once, to the listed version.
 export const FIREFOX_UPDATE_URL = "https://raw.githubusercontent.com/Kaan88/inbound/main/extensions/firefox-updates.json";
 
 // The Firefox extension pages' CSP (see firefoxManifest): no upgrade-insecure-requests.
@@ -52,7 +55,7 @@ export const SHARED_FILES = {
  * Chrome runs a service worker, needs its own ID, and has no use for Chrome's "key" (which fixes the
  * unpacked Chrome ID) or minimum_chrome_version.
  */
-export function firefoxManifest(chromeManifest) {
+export function firefoxManifest(chromeManifest, { unlisted = false } = {}) {
   const manifest = structuredClone(chromeManifest);
   delete manifest.key;
   delete manifest.minimum_chrome_version;
@@ -71,7 +74,7 @@ export function firefoxManifest(chromeManifest) {
       // data_collection_permissions, which addons.mozilla.org asks every new add-on for, needs Firefox 140
       // (also an ESR); storage.session and MV3 host permissions as used here are older.
       strict_min_version: "140.0",
-      update_url: FIREFOX_UPDATE_URL,
+      ...(unlisted ? { update_url: FIREFOX_UPDATE_URL } : {}),
       // Nothing is sent to the developer; details go only to the desktop app on this computer or the
       // user's own paired server.
       data_collection_permissions: { required: ["none"] },
@@ -95,7 +98,7 @@ async function copyStatic() {
   }
   if (target === "firefox") {
     const manifest = JSON.parse(await readFile(path.join(root, "manifest.json"), "utf8"));
-    await writeFile(path.join(dist, "manifest.json"), JSON.stringify(firefoxManifest(manifest), null, 2) + "\n");
+    await writeFile(path.join(dist, "manifest.json"), JSON.stringify(firefoxManifest(manifest, { unlisted }), null, 2) + "\n");
   } else {
     // Byte for byte: the store packager removes the key from this text and keeps the rest as built.
     await copyFile(path.join(root, "manifest.json"), path.join(dist, "manifest.json"));

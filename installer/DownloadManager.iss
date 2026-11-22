@@ -10,7 +10,7 @@
 ;   %LOCALAPPDATA%\Inbound Download Manager\   user data: jobs, settings, logs - kept on uninstall
 
 #ifndef AppVersion
-  #define AppVersion "0.8.0"
+  #define AppVersion "0.9.0"
 #endif
 #ifndef SourceRoot
   #define SourceRoot "..\artifacts"
@@ -28,8 +28,11 @@
 #define FirefoxExtensionId "inbound-bridge@kaan88"
 #define ChromeStoreUrl "https://chromewebstore.google.com/detail/" + StoreExtensionId
 #define EdgeStoreUrl "https://microsoftedge.microsoft.com/addons/detail/" + EdgeStoreExtensionId
-; EXT.S4: the Firefox add-on is self-distributed. build-installer.ps1 passes /DFirefoxXpi=<signed XPI>; Setup
-; installs it as {app}\firefox\{#FirefoxXpiName}, and Firefox updates it from the manifest's update_url.
+; The listed add-on on addons.mozilla.org (BrowserBridge.FirefoxAddonsUrl); Setup links it when built without the XPI.
+#define FirefoxAddonsUrl "https://addons.mozilla.org/firefox/addon/inbound-download-manager/"
+; EXT.S4/S5: the Firefox add-on is signed by addons.mozilla.org and listed there (from extension 0.7.0 the XPI is the
+; listed version, with no update_url, so Firefox updates it from AMO). build-installer.ps1 passes /DFirefoxXpi=<signed
+; XPI>; Setup installs it as {app}\firefox\{#FirefoxXpiName}.
 #define FirefoxXpiName "inbound-bridge.xpi"
 ; The first extension version with an update_url (an older copy never updates and has to be added again).
 #define FirefoxSelfUpdateSince "0.5.3"
@@ -126,6 +129,8 @@ Filename: "{#EdgeStoreUrl}"; Description: "Open the extension in Microsoft Edge 
 ; XPI by hand, as INSTALL.txt says) and profiles kept outside the usual folder (they get the ticked entry).
 Filename: "{code:GetFirefoxExe}"; Parameters: """{app}\firefox\{#FirefoxXpiName}"""; Description: "Add the extension to Firefox (Firefox asks you to confirm)"; Flags: postinstall nowait skipifsilent; Check: FirefoxNeedsInbound
 Filename: "{code:GetFirefoxExe}"; Parameters: """{app}\firefox\{#FirefoxXpiName}"""; Description: "Add the extension to Firefox again (needed once if your copy is older than {#FirefoxSelfUpdateSince}, so it updates itself)"; Flags: postinstall nowait skipifsilent unchecked; Check: FirefoxHasInboundAlready
+#else
+Filename: "{#FirefoxAddonsUrl}"; Description: "Open the extension in Firefox Add-ons (Firefox)"; Flags: postinstall shellexec skipifsilent unchecked nowait
 #endif
 
 [UninstallDelete]

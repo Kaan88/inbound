@@ -84,6 +84,14 @@ public sealed partial class MainWindow : Window
         _uiState = UiStateStore.Load();
         InitializeComponent();
         UiTrace.Write("MainWindow InitializeComponent complete");
+#if HAS_UNO
+        ScrollSidebarOnUno();
+        // MAC.6: the Mac's own app and Window menus; queued so a choice runs as a click on the window's menu would.
+        MacAppChrome.InstallMenu(
+            about: () => DispatcherQueue.TryEnqueue(() => MenuAbout_Click(this, new RoutedEventArgs())),
+            settings: () => DispatcherQueue.TryEnqueue(() => MenuOptions_Click(this, new RoutedEventArgs())),
+            quit: () => DispatcherQueue.TryEnqueue(() => MenuExit_Click(this, new RoutedEventArgs())));
+#endif
         // The progress, package and completion windows open on this window's screen (U-WL-4).
         WindowCascade.MarkMain(this);
         // This PC's Host, always: its settings drive the theme and the window's own choices, and its updates are the
@@ -103,6 +111,13 @@ public sealed partial class MainWindow : Window
         SpeedGraph.Visibility = _uiState.ShowSpeedGraph ? Visibility.Visible : Visibility.Collapsed;
         ShowSpeedGraphMenuItem.IsChecked = _uiState.ShowSpeedGraph;
         SpeedGraph.IsExpanded = _uiState.SpeedGraphExpanded;
+        // Applied (clamped to the window) once the bar has its window; only a drag changes what is remembered.
+        TransfersBar.WantedHeight = _uiState.TransfersBarHeight;
+        TransfersBar.HeightChanged += () =>
+        {
+            _uiState.TransfersBarHeight = TransfersBar.WantedHeight;
+            SaveUiStateQuietly("the transfers height");
+        };
         SpeedGraph.ExpandedChanged += (_, _) => SaveUiState();
         _speedHistoryTimer.Tick += (_, _) =>
         {
@@ -224,40 +239,46 @@ public sealed partial class MainWindow : Window
 
         // Otherwise WinUI floats a shortcut's name over the window whenever the pointer rests on the root.
         RootGrid.KeyboardAcceleratorPlacementMode = Microsoft.UI.Xaml.Input.KeyboardAcceleratorPlacementMode.Hidden;
-        RootGrid.KeyboardAccelerators.Add(CreateAccelerator(
+        AddShortcut(
             Windows.System.VirtualKey.N,
             Windows.System.VirtualKeyModifiers.Control,
-            () => AddButton_Click(this, new RoutedEventArgs())));
-        RootGrid.KeyboardAccelerators.Add(CreateAccelerator(
+            () => AddButton_Click(this, new RoutedEventArgs()));
+        AddShortcut(
             Windows.System.VirtualKey.F,
             Windows.System.VirtualKeyModifiers.Control,
-            () => MenuFind_Click(this, new RoutedEventArgs())));
-        RootGrid.KeyboardAccelerators.Add(CreateAccelerator(
+            () => MenuFind_Click(this, new RoutedEventArgs()));
+        AddShortcut(
             Windows.System.VirtualKey.F3,
             Windows.System.VirtualKeyModifiers.None,
-            () => MenuFindNext_Click(this, new RoutedEventArgs())));
-        RootGrid.KeyboardAccelerators.Add(CreateAccelerator(
+            () => MenuFindNext_Click(this, new RoutedEventArgs()));
+        AddShortcut(
             Windows.System.VirtualKey.M,
             Windows.System.VirtualKeyModifiers.Control,
-            () => MenuMoveRename_Click(this, new RoutedEventArgs())));
-        RootGrid.KeyboardAccelerators.Add(CreateAccelerator(
+            () => MenuMoveRename_Click(this, new RoutedEventArgs()));
+        AddShortcut(
             Windows.System.VirtualKey.S,
             Windows.System.VirtualKeyModifiers.Control | Windows.System.VirtualKeyModifiers.Shift,
-            () => ApplySort("size", ascending: false)));
+            () =>
+            {
+                // In the Sites view the key is Download to…, wherever the keyboard is (a toolbar or sidebar click leaves it
+                // outside the panes); elsewhere it sorts by size.
+                if (_sitesShown) SitesKeyDownloadTo();
+                else ApplySort("size", ascending: false);
+            });
         // UI.R26: Ctrl+Shift+O opens the server switcher; Ctrl+0 shows this PC and Ctrl+1 to Ctrl+9 the saved servers.
-        RootGrid.KeyboardAccelerators.Add(CreateAccelerator(
+        AddShortcut(
             Windows.System.VirtualKey.O,
             Windows.System.VirtualKeyModifiers.Control | Windows.System.VirtualKeyModifiers.Shift,
-            OpenServerMenuFromKeyboard));
+            OpenServerMenuFromKeyboard);
         InitializeProviderViews();
         foreach (var accelerator in ProviderAccelerators()) RootGrid.KeyboardAccelerators.Add(accelerator);
         for (var number = 0; number <= ServerSwitch.MostNumbered; number++)
         {
             var chosen = number;
-            RootGrid.KeyboardAccelerators.Add(CreateAccelerator(
+            AddShortcut(
                 Windows.System.VirtualKey.Number0 + number,
                 Windows.System.VirtualKeyModifiers.Control,
-                () => SwitchToNumber(chosen)));
+                () => SwitchToNumber(chosen));
         }
 
         _sortKey = ListColumnSets.IsDownloadSort(_uiState.SortKey) ? _uiState.SortKey : "added";
@@ -297,6 +318,26 @@ public sealed partial class MainWindow : Window
         UpdateButtons();
         UiTrace.Write("MainWindow ctor end");
     }
+
+    /// <summary>
+    /// A window-wide shortcut. MAC.6: on a Mac a Ctrl shortcut is also ⌘ (Uno's macOS window reports Command as the
+    /// Windows key), as Mac apps use it; Ctrl stays too.
+    /// </summary>
+    private void AddShortcut(Windows.System.VirtualKey key, Windows.System.VirtualKeyModifiers modifiers, Action action)
+    {
+        foreach (var accelerator in Shortcuts(key, modifiers, action)) RootGrid.KeyboardAccelerators.Add(accelerator);
+    }
+
+    private static IEnumerable<KeyboardAccelerator> Shortcuts(Windows.System.VirtualKey key, Windows.System.VirtualKeyModifiers modifiers, Action action)
+    {
+        yield return CreateAccelerator(key, modifiers, action);
+        // ⌘M is the Mac's Minimize (the Window menu): Move/Rename keeps Ctrl+M there.
+        if (OperatingSystem.IsMacOS() && modifiers.HasFlag(Windows.System.VirtualKeyModifiers.Control) && key != Windows.System.VirtualKey.M)
+            yield return CreateAccelerator(key, MacCommand(modifiers), action);
+    }
+
+    private static Windows.System.VirtualKeyModifiers MacCommand(Windows.System.VirtualKeyModifiers modifiers) =>
+        (modifiers & ~Windows.System.VirtualKeyModifiers.Control) | Windows.System.VirtualKeyModifiers.Windows;
 
     private static KeyboardAccelerator CreateAccelerator(
         Windows.System.VirtualKey key,
@@ -401,6 +442,7 @@ public sealed partial class MainWindow : Window
             _uiState.HideCategories = _hideCategories;
             _uiState.ShowSpeedGraph = ShowSpeedGraphMenuItem.IsChecked;
             _uiState.SpeedGraphExpanded = SpeedGraph.IsExpanded;
+            _uiState.TransfersBarHeight = TransfersBar.WantedHeight;
             _uiState.ShowTorrentInfo = TorrentInfoMenuItem.IsChecked;
             // AppTheme writes the start-up hint itself; this keeps a save from here putting an older one back.
             _uiState.Theme = AppTheme.Choice;
@@ -531,6 +573,61 @@ public sealed partial class MainWindow : Window
 
     private bool _firstListTraced;
 
+#if HAS_UNO
+    private ScrollViewer? _sidebarScroller;
+
+    /// <summary>
+    /// Uno's ListBox doesn't scroll its items: with every feature on (torrents, providers, Extractions, Queues) the
+    /// sidebar ran past the bottom of a small window (a 13-inch Mac) and its last entries couldn't be reached. Its own
+    /// ScrollViewer does it here. The Windows ListBox scrolls by itself, so the Windows window is left as it is.
+    /// </summary>
+    private void ScrollSidebarOnUno()
+    {
+        // By name: Uno may not have set CategoryList.Parent yet here, and the first try, which asked it, did nothing.
+        var sidebar = SidebarGrid;
+        if (!sidebar.Children.Remove(CategoryList))
+        {
+            UiTrace.Write("sidebar: the category list is not in the sidebar grid; it stays without a scroll bar");
+            return;
+        }
+
+        var row = Grid.GetRow(CategoryList);
+        var scroller = _sidebarScroller = new ScrollViewer
+        {
+            Content = CategoryList,
+            // Hidden still scrolls (wheel, trackpad); the bar shows only while the pointer moves over the sidebar.
+            VerticalScrollBarVisibility = ScrollBarVisibility.Hidden,
+            VerticalScrollMode = ScrollMode.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            HorizontalScrollMode = ScrollMode.Disabled,
+        };
+        Grid.SetRow(scroller, row);
+        sidebar.Children.Add(scroller);
+
+        // Owner: "scrollbar should disappear when there is no mouse movement in the sidebar". As WinUI's own scroll
+        // indicators fade: shown on movement or a scroll, hidden again 1.5 s after the last one or when the pointer leaves.
+        var hide = DispatcherQueue.CreateTimer();
+        hide.Interval = TimeSpan.FromSeconds(1.5);
+        hide.IsRepeating = false;
+        hide.Tick += (_, _) => scroller.VerticalScrollBarVisibility = ScrollBarVisibility.Hidden;
+        void Show(object sender, PointerRoutedEventArgs e)
+        {
+            if (scroller.ScrollableHeight <= 0) return;
+            scroller.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
+            hide.Stop();
+            hide.Start();
+        }
+
+        scroller.AddHandler(UIElement.PointerMovedEvent, new PointerEventHandler(Show), handledEventsToo: true);
+        scroller.AddHandler(UIElement.PointerWheelChangedEvent, new PointerEventHandler(Show), handledEventsToo: true);
+        scroller.PointerExited += (_, _) =>
+        {
+            hide.Stop();
+            scroller.VerticalScrollBarVisibility = ScrollBarVisibility.Hidden;
+        };
+    }
+#endif
+
     /// <summary>
     /// PERF.5: the cold-open time is measured to the first frame drawn with the list in it, so a start is timed the
     /// same way however many jobs there are. Two lines in ui-trace.log, once per process.
@@ -544,6 +641,9 @@ public sealed partial class MainWindow : Window
         {
             Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= OnRendering;
             UiTrace.Write("First frame with the list");
+#if HAS_UNO
+            StartUnoSelfTest();
+#endif
         }
         Microsoft.UI.Xaml.Media.CompositionTarget.Rendering += OnRendering;
     }
@@ -796,6 +896,11 @@ public sealed partial class MainWindow : Window
         var active = _jobsById.Values.Count(j => j.State is "connecting" or "downloading" or "verifying");
         var retrying = _jobsById.Values.Count(j => j.State == "retryWaiting");
         var queued = _jobsById.Values.Count(j => j.State == "queued");
+#if HAS_UNO
+        // MAC.6: the Dock icon shows this Mac's running downloads; another server's list leaves it plain.
+        var running = _connection.IsRemote ? [] : _jobsById.Values.Where(j => j.State is "connecting" or "downloading" or "verifying").ToList();
+        MacAppChrome.ShowActivity(running.Count, MacAppChrome.OverallProgress(running.Select(j => j.Dto).OfType<DownloadManager.Contracts.JobDto>()));
+#endif
         var host = _status?.HostVersion;
         StatusText.Text = $"{_jobsById.Count} download{(_jobsById.Count == 1 ? string.Empty : "s")} · {active} active · {queued} queued" +
                           (retrying > 0 ? $" · {retrying} retrying" : string.Empty);
@@ -803,6 +908,7 @@ public sealed partial class MainWindow : Window
         // connecting says so, rather than "Not connected".
         if (_connection.IsRemote && !_banner.Connected)
             StatusText.Text = _banner.Status ?? $"Not connected to {_connection.Target.Name}";
+        if (_homeShown && SitesOffered) StatusText.Text = SitesHomeRules.FooterText(_sites.Count);
         if (_graphConnected)
         {
             // UI.R37: the version says whether it is the latest, as far as the last update check knows.
@@ -1206,6 +1312,13 @@ public sealed partial class MainWindow : Window
                 return;
             }
 
+            if (tag == SitesHomeTag)
+            {
+                // SITES.11 R4: All remotes takes the list's place.
+                ShowHome();
+                return;
+            }
+
             if (tag.StartsWith(SiteTagPrefix, StringComparison.Ordinal))
             {
                 // SITES.3: a saved site's folders take the list's place.
@@ -1320,7 +1433,7 @@ public sealed partial class MainWindow : Window
         var moveRename = CreateContextItem("Move/Rename…", MenuMoveRename_Click);
         // The shortcut lives on the list, not the flyout item: invoking an accelerator of a
         // closed context flyout crashed WinUI natively (CoreMessagingXP 0xc000027b).
-        moveRename.KeyboardAcceleratorTextOverride = "Ctrl+M";
+        moveRename.KeyboardAcceleratorTextOverride = OperatingSystem.IsMacOS() ? "⌃M" : "Ctrl+M"; // ⌘M minimizes on a Mac
         var moveShortcut = new KeyboardAccelerator
         {
             Key = Windows.System.VirtualKey.M,
@@ -3738,6 +3851,7 @@ public sealed partial class MainWindow : Window
             var (directoryRow, directory) = window.FolderField("Default download folder", settings.DefaultDownloadDirectory);
             var maxConcurrent = SettingsWindow.Number("Maximum simultaneous downloads", settings.MaxConcurrentDownloads, 1, 16);
             var connections = SettingsWindow.Number("Connections per download", settings.DefaultConnections, 1, 32);
+            var connectionsPerServer = SettingsWindow.Number("Connections per server, all downloads", settings.MaxConnectionsPerHost, 1, 64);
             var speedLimit = SettingsWindow.Number("Total speed limit, all downloads (KB/s)",
                 settings.GlobalSpeedLimitBytesPerSecond is > 0 ? settings.GlobalSpeedLimitBytesPerSecond.Value / 1024 : null,
                 1, OptionsSettingsRebase.SpeedLimitMaxKb, "Unlimited");
@@ -3750,7 +3864,7 @@ public sealed partial class MainWindow : Window
             void AddSiteLimitRow(string pattern, int? max)
             {
                 var site = new TextBox { Header = "Site", Text = pattern, PlaceholderText = "example.com or *.example.com" };
-                var limit = SettingsWindow.Number("Connections", max, 1, 32);
+                var limit = SettingsWindow.Number("Connections per download", max, 1, 32);
                 limit.Width = 140;
                 var remove = new Button { Content = "Remove", VerticalAlignment = VerticalAlignment.Bottom };
                 var row = new Grid { ColumnSpacing = 8 };
@@ -3768,6 +3882,7 @@ public sealed partial class MainWindow : Window
                 ShowSiteLimitEmpty();
                 remove.Click += (_, _) =>
                 {
+                    window.NoteChange();
                     siteLimitRows.Remove(entry);
                     siteLimitPanel.Children.Remove(row);
                     ShowSiteLimitEmpty();
@@ -3777,7 +3892,11 @@ public sealed partial class MainWindow : Window
             foreach (var profile in settings.ConnectionProfiles) AddSiteLimitRow(profile.Pattern, profile.MaxConnections);
             ShowSiteLimitEmpty();
             var addSiteLimit = new Button { Content = "Add per-site limit" };
-            addSiteLimit.Click += (_, _) => AddSiteLimitRow(string.Empty, null);
+            addSiteLimit.Click += (_, _) =>
+            {
+                window.NoteChange();
+                AddSiteLimitRow(string.Empty, null);
+            };
             var launch = new CheckBox { Content = PlatformText.StartAtSignIn, IsChecked = settings.LaunchAtStartup };
             var clipboard = new CheckBox { Content = "Add links I copy to the download list, without asking", IsChecked = settings.ClipboardMonitoring };
             var integration = new CheckBox { Content = "Accept downloads sent from your browser", IsChecked = settings.BrowserIntegrationEnabled };
@@ -3785,6 +3904,9 @@ public sealed partial class MainWindow : Window
             var sound = new CheckBox { Content = "Play a sound", IsChecked = settings.PlayCompletionSound };
             var completionDialog = new CheckBox { Content = "Show the download-complete window", IsChecked = settings.ShowCompletionDialog };
             var autoResume = new CheckBox { Content = "Resume unfinished downloads when Inbound starts", IsChecked = settings.AutoResumeUnfinishedOnStartup };
+            // MAC.6: only where the Host sees the network's cost and Low Power Mode (the Mac's menu-bar helper).
+            var savingPausesKnown = !_connection.IsRemote && _connection.Hello?.Capabilities.Contains("savingPauses", StringComparer.Ordinal) == true;
+            var pauseWhenSaving = new CheckBox { Content = "Pause downloads on a phone hotspot, in Low Data Mode or in Low Power Mode", IsChecked = settings.PauseOnCostlyNetworkOrLowPower };
             var closeCompletely = new CheckBox { Content = "Close the window completely (it opens a moment slower next time)", IsChecked = settings.CloseWindowCompletely };
             ToolTipService.SetToolTip(closeCompletely, "Downloads keep running in the background. Opening the window again from the tray takes a moment longer.");
             var providerOpens = ProviderOpensBox();
@@ -3919,6 +4041,7 @@ public sealed partial class MainWindow : Window
                 ShowLoginEmpty();
                 remove.Click += (_, _) =>
                 {
+                    window.NoteChange();
                     password.Password = string.Empty;
                     loginRows.Remove(entry);
                     loginPanel.Children.Remove(border);
@@ -3928,7 +4051,11 @@ public sealed partial class MainWindow : Window
             foreach (var login in settings.SiteLogins) AddLoginRow(login);
             ShowLoginEmpty();
             var addLogin = new Button { Content = "Add site login" };
-            addLogin.Click += (_, _) => AddLoginRow(new SiteLoginDto { Id = Guid.NewGuid() });
+            addLogin.Click += (_, _) =>
+            {
+                window.NoteChange();
+                AddLoginRow(new SiteLoginDto { Id = Guid.NewGuid() });
+            };
             var loginHelp = SettingsWindow.Hint((OperatingSystem.IsWindows() ? "Credentials are saved securely by Windows" : "Credentials are saved encrypted") + " and used for matching downloads. Re-enter the password when changing a saved site's address or user name. " +
                 "A login without http:// is sent over https only. Write *.example.com to include its subdomains.");
 
@@ -3981,19 +4108,20 @@ public sealed partial class MainWindow : Window
                     var at = favoriteRows.IndexOf(entry);
                     var to = at + by;
                     if (at < 0 || to < 0 || to >= favoriteRows.Count) return;
+                    window.NoteChange();
                     favoriteRows.RemoveAt(at);
                     favoriteRows.Insert(to, entry);
                     ShowFavoriteRows();
                 }
                 up.Click += (_, _) => Move(-1);
                 down.Click += (_, _) => Move(1);
-                remove.Click += (_, _) => { favoriteRows.Remove(entry); ShowFavoriteRows(); };
+                remove.Click += (_, _) => { window.NoteChange(); favoriteRows.Remove(entry); ShowFavoriteRows(); };
                 favoriteRows.Add(entry);
             }
             foreach (var favorite in settings.FavoriteFolders) AddFavoriteRow(favorite.Name, favorite.Path);
             ShowFavoriteRows();
             var addFavorite = new Button { Content = "Add favorite" };
-            addFavorite.Click += (_, _) => { AddFavoriteRow(string.Empty, string.Empty); ShowFavoriteRows(); };
+            addFavorite.Click += (_, _) => { window.NoteChange(); AddFavoriteRow(string.Empty, string.Empty); ShowFavoriteRows(); };
 
             var customCategoryEditors = new List<(CategoryDefinitionDto Category, TextBox Name, TextBox Extensions, TextBox Folder)>();
             var customCategoryControls = new List<UIElement>();
@@ -4014,6 +4142,7 @@ public sealed partial class MainWindow : Window
                     HorizontalContentAlignment = HorizontalAlignment.Stretch };
                 remove.Click += (_, _) =>
                 {
+                    window.NoteChange();
                     if (!stagedCategoryRemovals.Add(category.Id))
                     {
                         stagedCategoryRemovals.Remove(category.Id);
@@ -4070,11 +4199,18 @@ public sealed partial class MainWindow : Window
                 SettingsWindow.Section("When a download finishes"), completionDialog, notify, sound, postDownload,
                 SettingsWindow.Hint(ShellWords.PostDownloadProgramGets), postDownloadNote);
             window.AddPage("Connection", "\uE774",
-                maxConcurrent, connections, speedLimit,
+                maxConcurrent, connections,
+                SettingsWindow.Hint(ShellWords.ConnectionsPerDownloadHint),
+                connectionsPerServer,
+                SettingsWindow.Hint(ShellWords.ConnectionsPerServerHint),
+                speedLimit,
                 SettingsWindow.Hint("Leave the speed limit empty for unlimited."),
                 SettingsWindow.Section("Per-site limits"),
-                SettingsWindow.Hint("Most connections a download may open to these sites. *.example.com covers its subdomains."),
-                siteLimitEmpty, siteLimitPanel, addSiteLimit);
+                SettingsWindow.Hint(ShellWords.PerSiteLimitsHint + " *.example.com covers its subdomains."),
+                siteLimitEmpty, siteLimitPanel, addSiteLimit,
+                savingPausesKnown ? SettingsWindow.Section("Saving data and power") : null,
+                savingPausesKnown ? pauseWhenSaving : null,
+                savingPausesKnown ? SettingsWindow.Hint("They resume on their own when the Mac is back on an ordinary network and out of Low Power Mode.") : null);
             window.AddPage("Proxy", "\uE968", proxyMode, manualProxy);
             window.AddPage("Site logins", "\uE8D7", loginHelp, loginEmpty, loginPanel, addLogin);
             // The update source (channel, manifest URL, signing key) is set by the installer and is
@@ -4126,8 +4262,8 @@ public sealed partial class MainWindow : Window
             window.AddPage("Web UI", "\uE7F4", webUi.Controls);
 
             // Sites is this PC's own, so its client is this PC's Host's (the window follows the shown server, which here is this PC).
-            var sites = new SitesOptionsPage(_remote, window);
-            window.AddPage("Sites", "\uE753", sites.Controls);
+            var sites = new SitesOptionsPage(_remote, window) { ManageRemotes = ShowRemotesPage };
+            window.AddPage("Remote files", "\uE753", sites.Controls);
 
             window.Closed += (_, _) =>
             {
@@ -4168,6 +4304,8 @@ public sealed partial class MainWindow : Window
                     return ("Maximum simultaneous downloads must be between 1 and 16.", ConnectionPage);
                 if (WholeNumber(connections) is not { } connectionsValue || connectionsValue is < 1 or > 32)
                     return ("Connections per download must be between 1 and 32.", ConnectionPage);
+                if (WholeNumber(connectionsPerServer) is not { } perServerValue || perServerValue is < 1 or > 64)
+                    return ("Connections per server must be between 1 and 64.", ConnectionPage);
                 long? limit = WholeNumber(speedLimit) is { } kb ? kb * 1024L : null;
                 if (limit is <= 0) return ("Speed limit must be a positive number of KB/s.", ConnectionPage);
                 if (WholeNumber(updateInterval) is not { } checkInterval || checkInterval is < 1 or > 168)
@@ -4209,6 +4347,7 @@ public sealed partial class MainWindow : Window
                 }).ToList();
                 settings.MaxConcurrentDownloads = max;
                 settings.DefaultConnections = connectionsValue;
+                settings.MaxConnectionsPerHost = perServerValue;
                 settings.GlobalSpeedLimitBytesPerSecond = limit;
                 settings.ConnectionProfiles = profiles;
                 settings.LaunchAtStartup = launch.IsChecked == true;
@@ -4222,6 +4361,7 @@ public sealed partial class MainWindow : Window
                     settings.TorrentCategoryFoldersRoot = torrentFolderBox.Text.Trim();
                 }
                 settings.ClipboardMonitoring = clipboard.IsChecked == true;
+                if (savingPausesKnown) settings.PauseOnCostlyNetworkOrLowPower = pauseWhenSaving.IsChecked == true;
                 settings.BrowserIntegrationEnabled = integration.IsChecked == true;
                 settings.NotifyOnCompletion = notify.IsChecked == true;
                 settings.PlayCompletionSound = sound.IsChecked == true;
@@ -4519,6 +4659,7 @@ public sealed partial class MainWindow : Window
             AllowLocalNetwork = source.AllowLocalNetwork,
             DownloadOnlyOnUnmeteredNetwork = source.DownloadOnlyOnUnmeteredNetwork,
             PreventSleepWhileDownloading = source.PreventSleepWhileDownloading,
+            PauseOnCostlyNetworkOrLowPower = source.PauseOnCostlyNetworkOrLowPower,
             TorrentsEnabled = source.TorrentsEnabled,
             TorrentRoute = source.TorrentRoute,
             TorrentChooseFiles = source.TorrentChooseFiles,

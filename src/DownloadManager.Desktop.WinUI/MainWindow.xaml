@@ -105,10 +105,42 @@
                 <!-- UI.R15, UI.R16: the limits, each a submenu of common values; a choice applies at once. -->
                 <MenuFlyoutSubItem x:Name="DownloadsLimitMenu" Text="Simultaneous Downloads" AccessKey="M" />
                 <MenuFlyoutSubItem x:Name="ConnectionsLimitMenu" Text="Connections per Download" AccessKey="C" />
+                <MenuFlyoutSubItem x:Name="ServerConnectionsLimitMenu" Text="Connections per server" AccessKey="V" />
                 <MenuFlyoutSubItem x:Name="SpeedLimitMenu" Text="Speed Limit" AccessKey="P" />
                 <MenuFlyoutSeparator />
                 <MenuFlyoutItem Text="Scheduler…" AccessKey="H" Click="MenuScheduler_Click" />
                 <MenuFlyoutItem Text="Options…" AccessKey="T" Click="MenuOptions_Click" />
+            </MenuBarItem>
+
+            <!-- SITES.11 R2b: the Remote menu, only while a remote is shown. The keys are read by the Sites view (they work only while it
+                 has the keyboard, never in a text box); the menu shows them as text. -->
+            <MenuBarItem x:Name="SiteMenu" Title="Remote" AccessKey="R" Visibility="Collapsed">
+                <MenuFlyoutItem x:Name="SiteMenuDownload" Text="Download" AccessKey="D" Tag="Download" Click="SiteMenuItem_Click" />
+                <MenuFlyoutItem x:Name="SiteMenuDownloadTo" Text="Download to…" AccessKey="T" Tag="DownloadTo" Click="SiteMenuItem_Click" />
+                <MenuFlyoutItem x:Name="SiteMenuOpen" Text="Open" AccessKey="O" Tag="Open" Click="SiteMenuItem_Click" />
+                <MenuFlyoutItem x:Name="SiteMenuPreview" Text="Preview" AccessKey="W" Tag="Preview" Click="SiteMenuItem_Click" />
+                <MenuFlyoutSeparator />
+                <MenuFlyoutItem x:Name="SiteMenuUpload" Text="Upload files…" AccessKey="U" Tag="Upload" Click="SiteMenuItem_Click" />
+                <MenuFlyoutItem x:Name="SiteMenuUploadFolder" Text="Upload a folder…" AccessKey="F" Tag="UploadFolder" Click="SiteMenuItem_Click" />
+                <MenuFlyoutSeparator />
+                <MenuFlyoutItem x:Name="SiteMenuNewFolder" Text="New folder" AccessKey="N" Tag="NewFolder" Click="SiteMenuItem_Click" />
+                <MenuFlyoutItem x:Name="SiteMenuRename" Text="Rename" AccessKey="E" Tag="Rename" Click="SiteMenuItem_Click" />
+                <MenuFlyoutItem x:Name="SiteMenuDelete" Text="Delete on server…" AccessKey="V" Tag="Delete" Click="SiteMenuItem_Click" />
+                <MenuFlyoutItem x:Name="SiteMenuDeleteForGood" Text="Delete permanently on This PC…" AccessKey="M" Tag="DeleteForGood" Click="SiteMenuItem_Click" Visibility="Collapsed" />
+                <MenuFlyoutSeparator />
+                <MenuFlyoutItem x:Name="SiteMenuSync" Text="Sync linked folder…" AccessKey="Z" Tag="Sync" Click="SiteMenuItem_Click" />
+                <MenuFlyoutItem x:Name="SiteMenuRefresh" Text="Refresh" AccessKey="H" Tag="Refresh" Click="SiteMenuItem_Click" />
+                <MenuFlyoutSeparator />
+                <MenuFlyoutItem x:Name="SiteMenuStar" Text="Star this folder" AccessKey="S" Tag="StarFolder" Click="SiteMenuItem_Click" />
+                <MenuFlyoutSubItem x:Name="SiteMenuStarred" Text="Starred folders" AccessKey="L" />
+                <MenuFlyoutSeparator />
+                <MenuFlyoutItem x:Name="SiteMenuTwoPanes" Text="Two panes" AccessKey="P" Tag="TwoPanes" Click="SiteMenuItem_Click" />
+                <MenuFlyoutItem x:Name="SiteMenuCopyAddress" Text="Copy address" AccessKey="C" Tag="CopyAddress" Click="SiteMenuItem_Click" />
+                <MenuFlyoutSeparator />
+                <MenuFlyoutItem x:Name="SiteMenuPause" Text="Pause transfers" AccessKey="A" Tag="Pause" Click="SiteMenuItem_Click" />
+                <MenuFlyoutSeparator />
+                <MenuFlyoutItem x:Name="SiteMenuEdit" Text="Edit remote" AccessKey="I" Tag="Edit" Click="SiteMenuItem_Click" />
+                <MenuFlyoutItem x:Name="SiteMenuOptions" Text="Options" AccessKey="Y" Tag="Options" Click="SiteMenuItem_Click" />
             </MenuBarItem>
 
             <MenuBarItem Title="View" AccessKey="V">
@@ -120,11 +152,9 @@
                 <MenuFlyoutSubItem Text="Arrange Files" AccessKey="A">
                     <MenuFlyoutItem Text="By Order of Addition" AccessKey="A" Tag="added" Click="MenuSort_Click" />
                     <MenuFlyoutItem Text="By File Name" AccessKey="N" Tag="name" Click="MenuSort_Click" />
-                    <MenuFlyoutItem Text="By Size" AccessKey="S" AutomationProperties.AcceleratorKey="Ctrl+Shift+S" Tag="size" Click="MenuSort_Click">
-                        <MenuFlyoutItem.KeyboardAccelerators>
-                            <KeyboardAccelerator Key="S" Modifiers="Control,Shift" />
-                        </MenuFlyoutItem.KeyboardAccelerators>
-                    </MenuFlyoutItem>
+                    <!-- Ctrl+Shift+S is the window's accelerator (MainWindow.xaml.cs): sort by size, or Download to… in Sites. -->
+                    <MenuFlyoutItem Text="By Size" AccessKey="S" AutomationProperties.AcceleratorKey="Ctrl+Shift+S" Tag="size" Click="MenuSort_Click"
+                                    KeyboardAcceleratorTextOverride="Ctrl+Shift+S" />
                     <MenuFlyoutItem Text="By Status" AccessKey="T" Tag="status" Click="MenuSort_Click" />
                     <MenuFlyoutItem Text="By Transfer Rate" AccessKey="R" Tag="rate" Click="MenuSort_Click" />
                     <MenuFlyoutItem Text="By Last Try Date" AccessKey="L" Tag="lastTry" Click="MenuSort_Click" />
@@ -292,7 +322,7 @@
                             </StackPanel>
                             <DropDownButton.Flyout>
                                 <MenuFlyout Placement="BottomEdgeAlignedLeft">
-                                    <MenuFlyoutItem Text="Files…" Click="SitesUploadFiles_Click" />
+                                    <MenuFlyoutItem x:Name="SitesUploadFilesItem" Text="Files…" Click="SitesUploadFiles_Click" />
                                     <MenuFlyoutItem Text="A folder…" Click="SitesUploadFolder_Click" />
                                 </MenuFlyout>
                             </DropDownButton.Flyout>
@@ -323,45 +353,36 @@
                             </StackPanel>
                         </Button>
                         <Border Style="{StaticResource InboundToolSeparatorStyle}" />
-                        <!-- Every site transfer at once; rclone has no pause, so files in flight start again at Resume. -->
-                        <Button x:Name="SitesPauseAllButton" AutomationProperties.Name="Pause transfers" Style="{StaticResource InboundToolButtonStyle}"
-                                Click="SitesPauseAllButton_Click" IsEnabled="False"
-                                ToolTipService.ToolTip="Pause every site transfer; at Resume, files that were moving start again from the beginning">
-                            <StackPanel>
-                                <FontIcon x:Name="SitesPauseAllIcon" Glyph="&#xE769;" FontSize="25" Foreground="{ThemeResource InboundIconInfoBrush}" />
-                                <TextBlock x:Name="SitesPauseAllLabel" Text="Pause transfers" Style="{StaticResource InboundToolLabelStyle}" />
-                            </StackPanel>
-                        </Button>
-                        <Border Style="{StaticResource InboundToolSeparatorStyle}" />
-                        <Button x:Name="SitesUpButton" AutomationProperties.Name="Up" Style="{StaticResource InboundToolButtonStyle}" Click="SitesUpButton_Click"
-                                AutomationProperties.AcceleratorKey="Backspace" ToolTipService.ToolTip="Go to the folder above (Backspace)">
-                            <StackPanel>
-                                <FontIcon Glyph="&#xE74A;" FontSize="25" Foreground="{ThemeResource InboundIconInfoBrush}" />
-                                <TextBlock Text="Up" Style="{StaticResource InboundToolLabelStyle}" />
-                            </StackPanel>
-                        </Button>
                         <Button x:Name="SitesRefreshButton" AutomationProperties.Name="Refresh" Style="{StaticResource InboundToolButtonStyle}" Click="SitesRefreshButton_Click"
-                                AutomationProperties.AcceleratorKey="F5" ToolTipService.ToolTip="Read this folder from the site again (F5)">
+                                AutomationProperties.AcceleratorKey="F5" ToolTipService.ToolTip="Read this folder from the remote again (F5)">
                             <StackPanel>
                                 <FontIcon Glyph="&#xE72C;" FontSize="25" Foreground="{ThemeResource InboundIconStartBrush}" />
                                 <TextBlock Text="Refresh" Style="{StaticResource InboundToolLabelStyle}" />
                             </StackPanel>
                         </Button>
                         <Border Style="{StaticResource InboundToolSeparatorStyle}" />
-                        <Button x:Name="SitesStarButton" AutomationProperties.Name="Star folder" Style="{StaticResource InboundToolButtonStyle}" Click="SitesStarButton_Click"
-                                ToolTipService.ToolTip="Star this folder to find it again in this site's Starred list">
+                        <!-- Every site transfer at once; rclone has no pause, so files in flight start again at Resume. -->
+                        <Button x:Name="SitesPauseAllButton" AutomationProperties.Name="Pause transfers" Style="{StaticResource InboundToolButtonStyle}"
+                                Click="SitesPauseAllButton_Click" IsEnabled="False"
+                                ToolTipService.ToolTip="Pause every remote transfer; at Resume, files that were moving start again from the beginning">
                             <StackPanel>
-                                <FontIcon x:Name="SitesStarIcon" Glyph="&#xE734;" FontSize="25" Foreground="{ThemeResource InboundIconPauseBrush}" />
-                                <TextBlock x:Name="SitesStarLabel" Text="Star" Style="{StaticResource InboundToolLabelStyle}" />
+                                <FontIcon x:Name="SitesPauseAllIcon" Glyph="&#xE769;" FontSize="25" Foreground="{ThemeResource InboundIconInfoBrush}" />
+                                <TextBlock x:Name="SitesPauseAllLabel" Text="Pause transfers" Style="{StaticResource InboundToolLabelStyle}" />
                             </StackPanel>
                         </Button>
                         <Border Style="{StaticResource InboundToolSeparatorStyle}" />
-                        <!-- SITES.5: this PC's folders beside the server's, with arrows between them. Remembered. -->
-                        <Button x:Name="SitesTwoPanesButton" AutomationProperties.Name="Two panes" Style="{StaticResource InboundToolButtonStyle}"
-                                Click="SitesTwoPanesButton_Click" ToolTipService.ToolTip="Show a folder of this PC beside the server's">
+                        <Button x:Name="SitesEditSiteButton" AutomationProperties.Name="Edit remote" Style="{StaticResource InboundToolButtonStyle}"
+                                Click="SitesEditSiteButton_Click" IsEnabled="False" ToolTipService.ToolTip="Change this remote's address, user, password and folders">
                             <StackPanel>
-                                <FontIcon Glyph="&#xE89F;" FontSize="25" Foreground="{ThemeResource InboundIconInfoBrush}" />
-                                <TextBlock x:Name="SitesTwoPanesLabel" Text="Two panes" Style="{StaticResource InboundToolLabelStyle}" />
+                                <FontIcon Glyph="&#xE839;" FontSize="25" Foreground="{ThemeResource InboundIconInfoBrush}" />
+                                <TextBlock Text="Edit remote" Style="{StaticResource InboundToolLabelStyle}" />
+                            </StackPanel>
+                        </Button>
+                        <Button x:Name="SitesOptionsButton" AutomationProperties.Name="Options" Style="{StaticResource InboundToolButtonStyle}"
+                                Click="SitesOptionsButton_Click" ToolTipService.ToolTip="Open Options on the Remote files page">
+                            <StackPanel>
+                                <FontIcon Glyph="&#xE713;" FontSize="25" Foreground="{ThemeResource InboundIconInfoBrush}" />
+                                <TextBlock Text="Options" Style="{StaticResource InboundToolLabelStyle}" />
                             </StackPanel>
                         </Button>
                     </StackPanel>
@@ -456,7 +477,7 @@
             </Grid.ColumnDefinitions>
 
             <Border Grid.Column="0" Background="{ThemeResource InboundChromeBrush}" BorderBrush="{ThemeResource InboundDividerBrush}" BorderThickness="0,0,1,0">
-                <Grid>
+                <Grid x:Name="SidebarGrid">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
@@ -930,8 +951,11 @@
             </Border>
                 <!-- UI.R32, A: the sidebar's My provider entry shows the panel here, in place of the list. -->
                 <Grid x:Name="ProviderFullHost" Grid.RowSpan="2" Grid.ColumnSpan="2" Visibility="Collapsed" />
-                <!-- SITES.3: a saved site's folders, in place of the list. -->
-                <Grid x:Name="SitesHost" Grid.RowSpan="2" Grid.ColumnSpan="2" Visibility="Collapsed" />
+                <!-- SITES.3: a saved site's folders, in place of the list. Row 1 only, so the bars above (the extension hint) push it
+                     down rather than cover it (R7). -->
+                <Grid x:Name="SitesHost" Grid.Row="1" Grid.ColumnSpan="2" Visibility="Collapsed" />
+                <!-- SITES.11 R4: All remotes, in place of the list. -->
+                <Grid x:Name="SitesHomeHost" Grid.Row="1" Grid.ColumnSpan="2" Visibility="Collapsed" />
             </Grid>
             </SplitView>
         </Grid>
@@ -970,7 +994,8 @@
                 <Button x:Name="SitesChip" FontSize="11" Padding="8,0" MinHeight="0" Height="19" CornerRadius="9"
                         VerticalAlignment="Center" Visibility="Collapsed" Click="SitesChip_Click"
                         Foreground="{ThemeResource InboundSecondaryTextBrush}"
-                        ToolTipService.ToolTip="Show the site transfers">
+                        AutomationProperties.Name="Remote files transfers"
+                        ToolTipService.ToolTip="Show the remote file transfers">
                     <StackPanel Orientation="Horizontal" Spacing="5">
                         <FontIcon Glyph="&#xE8AB;" FontSize="11" Foreground="{ThemeResource InboundIconInfoBrush}" VerticalAlignment="Center" />
                         <TextBlock x:Name="SitesChipText" VerticalAlignment="Center" />

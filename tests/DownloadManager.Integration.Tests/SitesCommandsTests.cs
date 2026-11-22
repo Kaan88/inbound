@@ -370,8 +370,119 @@ public sealed class SitesCommandsTests : IAsyncLifetime
         site.PrivateKey = PuttyKey;
         var refused = await Call<SiteResultDto>(commands, SitesMessageTypes.Save, site);
         Assert.False(refused.Ok);
-        Assert.Contains("Only SFTP sites sign in with a key", refused.Message);
+        Assert.Contains("Only SFTP remotes sign in with a key", refused.Message);
         Assert.Empty((await Call<SitesListDto>(commands, SitesMessageTypes.ListRequest)).Sites);
+    }
+
+    [Fact]
+    public async Task APuttyKeyIsSavedAsAnOpenSshKeyAndItsPassphraseIsNotKept()
+    {
+        var commands = Open();
+        await On(commands);
+
+        var keySite = Site(password: null);
+        keySite.AuthMethod = SiteAuthMethods.Key;
+        keySite.PrivateKey = DownloadManager.Tests.Shared.PpkWriter.TestEd25519(passphrase: "ppk pass");
+        keySite.KeyPassphrase = "wrong";
+        var wrong = await Call<SiteResultDto>(commands, SitesMessageTypes.Save, keySite);
+        Assert.False(wrong.Ok);
+        Assert.Equal(PuttyKeyFile.WrongPassphrase, wrong.Message);
+
+        keySite.KeyPassphrase = "ppk pass";
+        var saved = await Call<SiteResultDto>(commands, SitesMessageTypes.Save, keySite);
+
+        Assert.True(saved.Ok, saved.Message);
+        Assert.True(saved.Site!.HasPrivateKey);
+        Assert.False(saved.Site.HasKeyPassphrase);
+        var record = await new SiteStore(State).GetAsync(saved.Site.Id);
+        var text = DownloadManager.Persistence.SecretProtector.UnprotectSiteSecret(record!.SealedPrivateKey);
+        Assert.StartsWith("-----BEGIN OPENSSH PRIVATE KEY-----", text);
+        Assert.Null(record.SealedKeyPassphrase);
+    }
+
+    [Fact]
+    public async Task ARemoteKeepsItsLastFolderSortAndSpeedLimitsForEveryClient()
+    {
+        var commands = Open();
+        await On(commands);
+        var request = Site();
+        request.DownLimit = 300;
+        var saved = (await Call<SiteResultDto>(commands, SitesMessageTypes.Save, request)).Site!;
+        Assert.Equal((300, 0), (saved.DownLimit, saved.UpLimit));
+
+        var remembered = await Call<SiteResultDto>(commands, SitesMessageTypes.Remember,
+            new SiteRememberRequest { Id = saved.Id, LastFolder = "/pub/docs/", Sort = SiteSortKeys.Size, SortDescending = true });
+        Assert.True(remembered.Ok, remembered.Message);
+        var listed = (await Call<SitesListDto>(commands, SitesMessageTypes.ListRequest)).Sites.Single();
+        Assert.Equal(("/pub/docs", SiteSortKeys.Size, true), (listed.LastFolder, listed.Sort, listed.SortDescending));
+
+        // Only the fields sent change; an edit from an older client (no limits) keeps the limits.
+        await Call<SiteResultDto>(commands, SitesMessageTypes.Remember, new SiteRememberRequest { Id = saved.Id, LastFolder = "/pub" });
+        var edit = Site(id: saved.Id, password: null);
+        var edited = (await Call<SiteResultDto>(commands, SitesMessageTypes.Save, edit)).Site!;
+        Assert.Equal(("/pub", SiteSortKeys.Size, 300), (edited.LastFolder, edited.Sort, edited.DownLimit));
+
+        Assert.False((await Call<SiteResultDto>(commands, SitesMessageTypes.Remember, new SiteRememberRequest { Id = saved.Id, Sort = "colour" })).Ok);
+        Assert.False((await Call<SiteResultDto>(commands, SitesMessageTypes.Remember, new SiteRememberRequest { Id = saved.Id, LastFolder = "/a/../b" })).Ok);
+        edit.UpLimit = -1;
+        Assert.Contains("speed limit", (await Call<SiteResultDto>(commands, SitesMessageTypes.Save, edit)).Message);
+    }
+
+    [Fact]
+    public async Task AScheduledSyncNeedsAFullFolderHereAndCanBeForgotten()
+    {
+        var commands = Open();
+        await On(commands);
+        var saved = (await Call<SiteResultDto>(commands, SitesMessageTypes.Save, Site())).Site!;
+        var folder = Path.Combine(_root, "mirror");
+
+        Assert.False((await Call<SiteResultDto>(commands, SitesMessageTypes.SyncSchedule,
+            new SiteSyncScheduleRequest { SiteId = saved.Id, RemoteFolder = "/pub" })).Ok);
+        var kept = await Call<SiteResultDto>(commands, SitesMessageTypes.SyncSchedule,
+            new SiteSyncScheduleRequest { SiteId = saved.Id, RemoteFolder = "/pub/", LocalFolder = folder });
+        Assert.True(kept.Ok, kept.Message);
+        Assert.Equal(("download", "/pub", folder), (kept.Site!.ScheduledSync!.Direction, kept.Site.ScheduledSync.RemoteFolder, kept.Site.ScheduledSync.LocalFolder));
+        var forgot = await Call<SiteResultDto>(commands, SitesMessageTypes.SyncSchedule, new SiteSyncScheduleRequest { SiteId = saved.Id, Enabled = false });
+        Assert.Null(forgot.Site!.ScheduledSync);
+    }
+
+    [Fact]
+    public async Task ACopyBetweenRemotesNeedsAKnownTargetAndAnotherFolder()
+    {
+        var commands = Open();
+        await On(commands);
+        var saved = (await Call<SiteResultDto>(commands, SitesMessageTypes.Save, Site())).Site!;
+        var start = new SiteTransferStartRequest
+        {
+            SiteId = saved.Id, Direction = "between", RemoteFolder = "/pub", TargetSiteId = SiteStore.NewId(), TargetFolder = "/copy",
+            Names = [new SiteTransferNameDto { Name = "docs", IsFolder = true }],
+        };
+        Assert.Contains("no longer exists", (await Call<SiteTransferResultDto>(commands, SitesMessageTypes.TransferStart, start)).Message);
+        start.TargetSiteId = saved.Id;
+        start.TargetFolder = "/pub/docs/inner";
+        Assert.Contains("into itself", (await Call<SiteTransferResultDto>(commands, SitesMessageTypes.TransferStart, start)).Message);
+        start.TargetFolder = "/pub";
+        Assert.Contains("same folder", (await Call<SiteTransferResultDto>(commands, SitesMessageTypes.TransferStart, start)).Message);
+    }
+
+    [Fact]
+    public void APreviewIsAnImageByItsSignatureTextWithoutNulBytesAndNothingElse()
+    {
+        byte[] png = [0x89, (byte)'P', (byte)'N', (byte)'G', 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3];
+        var image = SitesCommands.Preview("photo.dat", png, png.Length, truncated: false);
+        Assert.Equal((SitePreviewKinds.Image, "image/png"), (image.Kind, image.MimeType));
+        Assert.Equal(png, image.Data);
+        var big = SitesCommands.Preview("photo.png", png, 10_000_000, truncated: true);
+        Assert.Null(big.Data);
+        Assert.Contains("larger", big.Message);
+
+        var text = SitesCommands.Preview("notes", "hello\nthere"u8, 11, truncated: false);
+        Assert.Equal(SitePreviewKinds.Text, text.Kind);
+        var binary = SitesCommands.Preview("tool.exe", [0x4D, 0x5A, 0, 0, 3], 5, truncated: false);
+        Assert.Equal(SitePreviewKinds.None, binary.Kind);
+        Assert.Null(binary.Data);
+        var svg = SitesCommands.Preview("logo.svg", "<svg/>"u8, 6, truncated: false);
+        Assert.Equal(SitePreviewKinds.Text, svg.Kind); // shown as text, never drawn
     }
 
     [Fact]
@@ -478,7 +589,24 @@ public sealed class SitesCommandsTests : IAsyncLifetime
 
         var renamed = await Call<SiteResultDto>(reopened, SitesMessageTypes.Save, Site(id: saved.Id, name: "Renamed", password: null));
         Assert.Equal(["/home/tester"], renamed.Site!.Stars);
-        var moved = await Call<SiteResultDto>(reopened, SitesMessageTypes.Save, Site(id: saved.Id, host: "other.example", password: null));
+        // Audit 2026-11-15: a saved password is never sent to another server, so a move without one is refused and
+        // changes nothing; with the password typed again it goes through, and the stars of the old server go.
+        var refusedMove = await Call<SiteResultDto>(reopened, SitesMessageTypes.Save, Site(id: saved.Id, host: "other.example", password: null));
+        Assert.False(refusedMove.Ok);
+        Assert.Contains("password again", refusedMove.Message);
+        Assert.Equal(["/home/tester"], Assert.Single((await Call<SitesListDto>(reopened, SitesMessageTypes.ListRequest)).Sites).Stars);
+        var moved = await Call<SiteResultDto>(reopened, SitesMessageTypes.Save, Site(id: saved.Id, host: "other.example", password: "typed again"));
+        // The two-step way round (audit 2026-11-15): moved with key sign-in, then back to a password without one. The
+        // old server's password did not come along, so the second save (same server now) is kept without a password.
+        var keyedRequest = Site(id: saved.Id, host: "third.example", password: null);
+        keyedRequest.AuthMethod = SiteAuthMethods.Key;
+        keyedRequest.PrivateKey = "-----BEGIN OPENSSH PRIVATE KEY-----\ninvented\n-----END OPENSSH PRIVATE KEY-----";
+        var keyed = await Call<SiteResultDto>(reopened, SitesMessageTypes.Save, keyedRequest);
+        Assert.True(keyed.Ok, keyed.Message);
+        Assert.False(keyed.Site!.HasPassword);
+        var backToPassword = await Call<SiteResultDto>(reopened, SitesMessageTypes.Save, Site(id: saved.Id, host: "third.example", password: null));
+        Assert.True(backToPassword.Ok, backToPassword.Message);
+        Assert.False(backToPassword.Site!.HasPassword);
         Assert.Empty(moved.Site!.Stars);
     }
 
@@ -553,7 +681,7 @@ public sealed class SitesCommandsTests : IAsyncLifetime
         await On(commands);
         var unknown = await Call<SiteBrowseResultDto>(commands, SitesMessageTypes.Browse, new SiteBrowseRequest { Id = SiteStore.NewId() });
         Assert.False(unknown.Ok);
-        Assert.Equal("That site no longer exists.", unknown.Message);
+        Assert.Equal("That remote no longer exists.", unknown.Message);
 
         var saved = (await Call<SiteResultDto>(commands, SitesMessageTypes.Save, Site())).Site!;
         var dots = await Call<SiteBrowseResultDto>(commands, SitesMessageTypes.Browse, new SiteBrowseRequest { Id = saved.Id, Path = "/pub/../etc" });

@@ -40,6 +40,19 @@ public sealed class DesktopAuditFixTests
     }
 
     [Fact]
+    public void CONN1_the_per_server_limit_is_sent_only_when_the_user_changed_it()
+    {
+        var atOpen = Settings();
+        var edited = Settings();
+        var latest = Settings();
+        latest.MaxConnectionsPerHost = 12;
+        Assert.Equal(12, OptionsSettingsRebase.Rebase(atOpen, edited, latest).MaxConnectionsPerHost);
+
+        edited.MaxConnectionsPerHost = 64;
+        Assert.Equal(64, OptionsSettingsRebase.Rebase(atOpen, edited, latest).MaxConnectionsPerHost);
+    }
+
+    [Fact]
     public void H1_a_field_left_as_it_was_keeps_the_value_set_elsewhere_and_a_changed_one_wins()
     {
         var atOpen = Settings();

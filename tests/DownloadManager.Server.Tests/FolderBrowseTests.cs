@@ -65,6 +65,14 @@ public sealed class FolderBrowseTests : IDisposable
         Assert.Equal(["Movies"], listing.Folders.Select(folder => folder.Name));
         Assert.False(browser.Browse(Outside, FolderBrowseFiles.Archives).Ok);
         Assert.False(browser.Browse(Root, "everything").Ok);
+
+        // SITES.14: "all" lists every file a dialog would show, with size and date, under the same roots.
+        var every = browser.Browse(Root, FolderBrowseFiles.All);
+        Assert.True(every.Ok, every.Error);
+        Assert.Equal(["Backup.ZIP", "readme.txt", "set.part1.rar"], every.Files.Select(file => file.Name));
+        Assert.All(every.Files, file => Assert.NotNull(file.Modified));
+        Assert.Equal(["Movies"], every.Folders.Select(folder => folder.Name));
+        Assert.False(browser.Browse(Outside, FolderBrowseFiles.All).Ok);
     }
 
     [Fact]

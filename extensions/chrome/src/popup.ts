@@ -5,7 +5,7 @@
 
 import { AskPanel } from "./ask-panel";
 import { connectionProblem, isAppMissing } from "./connection-problem";
-import { renderPopupRows, type PopupListView } from "./popup-list";
+import { renderPopupRows, withoutCleared, type PopupListView } from "./popup-list";
 import { confirmDialog, dialogOpen } from "./ui/dialog";
 import { fillIcons, icon } from "./ui/icon";
 import { menuOpen, openMenu } from "./ui/menu";
@@ -49,6 +49,8 @@ interface JobsAnswer {
   ok?: boolean;
   jobs?: JobSummary[];
   groups?: Array<{ target: "local" | "server"; ok: boolean; error?: string }>;
+  /** EXT.R14: downloads that finished since the popup was last opened, newest first (only on the first answer). */
+  justFinished?: string[];
 }
 
 const GET_APP_URL = "https://github.com/Kaan88/inbound/releases/latest";
@@ -60,6 +62,11 @@ function byId<T extends HTMLElement>(id: string): T {
 
 let status: Status | null = null;
 let jobs: JobSummary[] = [];
+/** EXT.R14: what finished since the popup was last opened, newest first. */
+let finishedFirst: string[] = [];
+/** EXT.R16: finished downloads cleared from the popup's list (kept for the browser session); the app's list is not touched. */
+let clearedIds = new Set<string>();
+const CLEARED_KEY = "clearedFinished";
 let groupsOk: Partial<Record<"local" | "server", boolean>> = {};
 let leftOpen = false;
 let checking = true;
@@ -219,6 +226,8 @@ function listView(): PopupListView {
   const paired = !!status?.server && !serverOnly();
   return {
     paired,
+    finishedFirst,
+    hiddenIds: clearedIds,
     serverName: serverName(status?.server),
     groupsOk: {
       local: groupsOk.local ?? (status?.connected !== false),
@@ -310,9 +319,14 @@ function drawList(): void {
   });
   if (shown === 0 && !checking) {
     list.classList.add("hidden");
-    empty.replaceChildren(...emptyState("download", "tint-info", "No downloads yet",
-      ["Downloads you send from this browser, and the app's own, appear here."],
-      { label: "Download all links on this page", run: () => void downloadAll() }));
+    // Everything left was cleared with "Clear finished": say so, and offer to bring the finished ones back.
+    empty.replaceChildren(...(jobs.length > 0 && clearedIds.size > 0
+      ? emptyState("download", "tint-info", "Finished downloads are hidden from this list",
+        ["Clear finished hides them here; nothing was deleted."],
+        { label: "Show them", run: showCleared })
+      : emptyState("download", "tint-info", "No downloads yet",
+        ["Downloads you send from this browser, and the app's own, appear here."],
+        { label: "Download all links on this page", run: () => void downloadAll() })));
     empty.classList.remove("hidden");
   } else {
     list.classList.remove("hidden");
@@ -350,7 +364,9 @@ function renderStatusBar(): void {
     switcher.replaceChildren(`Send to: ${target}`, icon("chevron-up", 12));
     switcher.title = "Where sent downloads go";
   }
-  const visible = jobs.length;
+  const shownJobs = withoutCleared(jobs, clearedIds);
+  byId<HTMLButtonElement>("clearFinished").classList.toggle("hidden", !shownJobs.some((job) => job.state === "completed"));
+  const visible = shownJobs.length;
   const active = jobs.filter((job) => ["downloading", "connecting", "verifying", "retrying"].includes(job.state)).length;
   const queued = jobs.filter((job) => job.state === "queued").length;
   counts.textContent = visible === 0 ? "" : [
@@ -584,6 +600,31 @@ function openSwitcher(): void {
   ], { upward: true });
 }
 
+/** EXT.R16: hides the finished downloads from the popup's list until another one finishes. Nothing is deleted. */
+function clearFinished(): void {
+  for (const job of jobs) if (job.state === "completed") clearedIds.add(job.id);
+  finishedFirst = finishedFirst.filter((id) => !clearedIds.has(id));
+  try { void chrome.storage.session.set({ [CLEARED_KEY]: [...clearedIds].slice(-200) }); } catch { /* kept for this popup only */ }
+  say("Finished downloads cleared from this list");
+  renderList();
+  renderStatusBar();
+}
+
+/** Brings back the finished downloads that "Clear finished" hid. */
+function showCleared(): void {
+  clearedIds = new Set();
+  try { void chrome.storage.session.set({ [CLEARED_KEY]: [] }); } catch { /* kept for this popup only */ }
+  renderList();
+  renderStatusBar();
+}
+
+async function loadCleared(): Promise<void> {
+  try {
+    const stored = (await chrome.storage.session.get(CLEARED_KEY))[CLEARED_KEY];
+    if (Array.isArray(stored)) clearedIds = new Set(stored.filter((id): id is string => typeof id === "string"));
+  } catch { /* none cleared */ }
+}
+
 // ---- Loading --------------------------------------------------------------------------------------------------
 
 async function pollJobs(): Promise<void> {
@@ -592,6 +633,10 @@ async function pollJobs(): Promise<void> {
     const result = await chrome.runtime.sendMessage({ type: "dm.jobs" }) as JobsAnswer;
     if (Array.isArray(result?.jobs)) {
       jobs = result.jobs;
+      // Kept while the popup is open, so the finished ones stay on top of the list it opened with.
+      if (Array.isArray(result.justFinished) && result.justFinished.length > 0) {
+        finishedFirst = [...result.justFinished, ...finishedFirst.filter((id) => !result.justFinished!.includes(id))];
+      }
       groupsOk = Object.fromEntries((result.groups ?? []).map((group) => [group.target, group.ok]));
       renderList();
       if (!menuOpen()) renderStatusBar();
@@ -662,7 +707,7 @@ document.addEventListener("DOMContentLoaded", () => {
   renderStatusBar();
   // Skeleton rows only if the first answer takes a while; a quick answer draws the list straight away.
   window.setTimeout(showSkeleton, 300);
-  void refresh();
+  void loadCleared().then(() => refresh());
 
   // Only while the popup is open.
   const liveTimer = window.setInterval(() => void pollJobs(), 1000);
@@ -675,5 +720,6 @@ document.addEventListener("DOMContentLoaded", () => {
   byId("options").addEventListener("click", () => void openOptions());
   byId("pauseCatching").addEventListener("click", () => void togglePause());
   byId("targetSwitch").addEventListener("click", openSwitcher);
+  byId("clearFinished").addEventListener("click", clearFinished);
   byId("errorClose").addEventListener("click", clearError);
 });

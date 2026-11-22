@@ -62,7 +62,7 @@ public static class RemoteTransferText
     public static (string Source, string Destination) Route(SiteTransferDto t, bool phoneHost) => t.Direction switch
     {
         "upload" => (phoneHost ? PhonePath(t.LocalFolder) : t.LocalFolder, Place(t.SiteName, t.RemoteFolder)),
-        "copy" => (t.SiteName, Place(t.DestinationSiteName ?? "", t.DestinationFolder)),
+        "between" => (t.SiteName, Place(t.TargetSiteName ?? "", t.TargetFolder)),
         _ => (t.SiteName, phoneHost ? PhonePath(t.LocalFolder) : t.LocalFolder),
     };
 
@@ -73,7 +73,7 @@ public static class RemoteTransferText
         return t.Direction switch
         {
             "upload" => (local, Place(t.SiteName, t.RemoteFolder)),
-            "copy" => (Place(t.SiteName, t.RemoteFolder), Place(t.DestinationSiteName ?? "", t.DestinationFolder)),
+            "between" => (Place(t.SiteName, t.RemoteFolder), Place(t.TargetSiteName ?? "", t.TargetFolder)),
             _ => (Place(t.SiteName, t.RemoteFolder), local),
         };
     }

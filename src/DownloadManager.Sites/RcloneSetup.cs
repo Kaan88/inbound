@@ -121,7 +121,7 @@ public static partial class RcloneSetup
     /// <summary>The message for an rclone too old for SFTP, or null when it is new enough.</summary>
     public static string? TooOldForSftp(Version version) => version >= MinimumForSftp
         ? null
-        : $"rclone {version.ToString(3)} is too old for SFTP sites: {MinimumForSftp.ToString(3)} or later is needed to check the server's key.";
+        : $"rclone {version.ToString(3)} is too old for SFTP remotes: {MinimumForSftp.ToString(3)} or later is needed to check the server's key.";
 
     [GeneratedRegex(@"^rclone v(\d+)\.(\d+)\.(\d+)(?:[-+][0-9A-Za-z.\-]*)?\s*$")]
     private static partial Regex VersionLine();

@@ -61,7 +61,12 @@ public sealed partial class MainWindow
     /// <summary>Ctrl+T opens and closes the drawer; Esc closes one that isn't pinned, wherever the focus is, and is otherwise left alone.</summary>
     private IEnumerable<KeyboardAccelerator> ProviderAccelerators()
     {
-        yield return CreateAccelerator(Windows.System.VirtualKey.T, Windows.System.VirtualKeyModifiers.Control, ToggleProviderDrawer);
+        foreach (var shortcut in Shortcuts(Windows.System.VirtualKey.T, Windows.System.VirtualKeyModifiers.Control, () =>
+        {
+            // In the Sites view Ctrl+T is the view switch (Two panes / Remote only); elsewhere the provider drawer.
+            if (_sitesShown) SitesKeyTwoPanes();
+            else ToggleProviderDrawer();
+        })) yield return shortcut;
         var escape = new KeyboardAccelerator { Key = Windows.System.VirtualKey.Escape };
         escape.Invoked += (_, args) => args.Handled = CloseUnpinnedDrawer();
         yield return escape;

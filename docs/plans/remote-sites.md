@@ -1,5 +1,7 @@
 # Sites: integration plan (FTP, FTPS, SFTP, WebDAV and cloud storage through rclone)
 
+Naming (owner, 2026-11-17, SITES.12): what people see is "Remote files"; one place is "a remote" (menu "Remote", "Edit remote", "Add a remote", "All remotes"), so it is not mistaken for site logins. The words "site" and "Sites" below, and `sites.*`, `dm sites`, the class and file names, are the working names and stay in the code.
+
 Status: plan only, 2026-11-13. Nothing is built. Tracked as ROADMAP SITES.1 to SITES.9.
 
 Order together with the performance work (PERF.8 to PERF.20), and the rules that work sets for these phases:
@@ -8,7 +10,7 @@ Order together with the performance work (PERF.8 to PERF.20), and the rules that
 ## What this is
 
 A Sites view in Inbound: saved remote places, a file browser for each, and uploads, downloads, delete, rename and new
-folder. Every protocol runs through one `rclone` process that the Host controls (downloaded from Options > Sites on Windows and Linux desktops, included in the Docker image). The agreed design is the
+folder. Every protocol runs through one `rclone` process that the Host controls (downloaded from Options > Remote files on Windows and Linux desktops, included in the Docker image). The agreed design is the
 fourth mockup page (owner, 2026-11-13: "I completely agree with your mockups and suggestions").
 
 ## Owner decisions
@@ -27,8 +29,8 @@ fourth mockup page (owner, 2026-11-13: "I completely agree with your mockups and
 ## The agreed design in short
 
 - Selecting a site in the sidebar replaces the download toolbar with a site toolbar: Download, Upload, New folder,
-  Rename, Delete on server, Refresh, Pause transfers (stop and restart: rclone has no pause), Edit site, Options.
-- There is no Connect or Disconnect. Selecting a site lists it. Trouble shows in the pane with Retry and Edit site.
+  Rename, Delete on server, Refresh, Pause transfers (stop and restart: rclone has no pause), Edit remote, Options.
+- There is no Connect or Disconnect. Selecting a site lists it. Trouble shows in the pane with Retry and Edit remote.
 - Two views: Server only (the default) and Two panes, with arrow buttons between the panes, breadcrumbs, starred
   folders and a linked local folder per site.
 - An "On this PC" column: Same, Older here, Some of it, Not here. It compares name, size and time only.
@@ -37,7 +39,7 @@ fourth mockup page (owner, 2026-11-13: "I completely agree with your mockups and
 - Site transfers never appear in the main downloads list, the Finished view or the extension popup. The status
   bar has one chip, and each sidebar site shows arrows with counts, a clock for waiting ones and a progress line.
 - "Delete on server" always asks, with the count and size. Local delete goes to the Recycle Bin.
-- Add a site by picking a tile, then four fields; the rest is under Advanced, with a Test button.
+- Add a remote by picking a tile, then four fields; the rest is under Advanced, with a Test button.
 - Web UI: the same view. "Here" means the machine Inbound runs on. Download and Upload ask "the server or this
   device"; both are in the first web UI release (owner, 2026-11-15). Phone: one pane, bottom sheets. The extension shows nothing of Sites (owner, 2026-11-15).
 
@@ -65,7 +67,7 @@ The Host stays the single owner. Clients never talk to rclone. rclone holds no s
 | `DownloadManager.Sites` (new, `net10.0`) | `RcloneProcess`, `RcloneSupervisor`, `RcloneClient` (rc calls), `RcloneLocator`. Modelled on `DownloadManager.Torrents` (`TorrentWorkerProcess.cs`, `TorrentWorkerSupervisor.cs`, `TorrentSetup.cs`). No UI. |
 | `DownloadManager.Runtime` | `SitesService` (sites, listings, transfers, remote changes, trust), `HostCommandDispatcher.Sites.cs`, a share in the speed budget. |
 | `DownloadManager.Host`, `Host.Linux`, `Server` | Wiring in each `Program.cs` and `ServerApp.cs`, start off the start path, stop at shutdown before the pipe closes. |
-| `DownloadManager.Desktop.WinUI` (shared with Uno) | `MainWindow.Sites.cs`, a `SitesPanel` control hosted like `ProviderFullHost`, site toolbar, Add a site dialog, Options page. |
+| `DownloadManager.Desktop.WinUI` (shared with Uno) | `MainWindow.Sites.cs`, a `SitesPanel` control hosted like `ProviderFullHost`, site toolbar, Add a remote dialog, Options page. |
 | `webui` | `screens/Sites.svelte`, `lib/sites.ts`, a `sites` route in `App.svelte`. |
 | `DownloadManager.Cli` | `dm sites ...`. Not `dm site`: that already means site logins (`Program.cs:606`). |
 
@@ -130,7 +132,7 @@ The price is that these places must be taught about it on purpose:
      says yes (the handshake itself sends only the key exchange).
   3. The key is stored with the site and passed to rclone as `host_keys` on every call.
   4. If rclone reports a different key, the site stops with both fingerprints and a hard warning. There is no
-     "continue anyway" button; the user must open Edit site and replace the key. rclone's refusal has two message
+     "continue anyway" button; the user must open Edit remote and replace the key. rclone's refusal has two message
      forms, one for a changed key and one when the key's algorithm no longer matches; both must be recognised.
 - **FTPS certificates.** rclone offers a CA file or "do not verify", not pinning, and there is **no per-site CA**:
   the CA file is read once when rclone starts (`RCLONE_CA_CERT`; run point 6). A certificate that fails verification
@@ -228,13 +230,15 @@ sent to clients that have a site open.
   (owner, 2026-11-15). In bridge mode the stream passes through the Host's pipe; that is measured first, and if it
   is too slow the stream gets a faster path (for example the Server talking to rclone's own loopback address with
   credentials the Host hands it) rather than being left out.
+- **Rework (SITES.11):** the screens above were rebuilt to the agreed mockup; `docs/plans/sites-rework.md` has the
+  stages, what is not as drawn, and the picture pairs.
 - **CLI.** `dm sites list|add|remove|test`, `dm sites ls <site>:<path>`, `dm sites get`, `dm sites put`,
   `dm sites rm`, `dm sites mv`, `dm sites mkdir`, `dm sites transfers`.
 - **Extension.** Nothing (owner, 2026-11-15): no popup line and no new native-host message.
 
 ## The switch
 
-`Options > Sites > Use Sites`, off until the user turns it on. It is also the place for "Use my own rclone", the
+`Options > Remote files > Use Remote files`, off until the user turns it on. It is also the place for "Use my own rclone", the
 transfers-at-once limit and the default view.
 
 - Off: no Sites section, no site toolbar, no chip, no rclone process, `sites.*` commands answer "Sites is off".
@@ -248,7 +252,7 @@ transfers-at-once limit and the default view.
 
 ## Setup, updates, Docker, licences
 
-- **Getting rclone (owner, 2026-11-15):** not in Setup and not in the update zip. Options > Sites has "Download
+- **Getting rclone (owner, 2026-11-15):** not in Setup and not in the update zip. Options > Remote files has "Download
   rclone": the Host downloads the official zip for this OS and CPU from `downloads.rclone.org`, checks its SHA-256
   against the value built into this Inbound release (never one read from the server), unpacks only the binary into
   `<state>\tools\rclone\<version>\` (a temp name, then a rename, so a cut download leaves nothing usable), and
@@ -272,7 +276,7 @@ transfers-at-once limit and the default view.
     the current version, at the next rclone start, never while a transfer runs. The previous version's folder is
     kept for a rollback: if the new one fails to start twice, the Host goes back and stops offering that version.
     Older folders are removed.
-  - **Desktop:** a notice in Options > Sites and in the app's notifications, "Update rclone" to install, and an
+  - **Desktop:** a notice in Options > Remote files and in the app's notifications, "Update rclone" to install, and an
     "Update rclone automatically" switch, on by default (owner, 2026-11-15). The Inbound version's own pinned rclone stays the floor:
     an update never goes below it.
   - **Docker:** the image keeps its pinned rclone, which is used until a newer, checked one sits in the data volume
@@ -301,6 +305,25 @@ For `changelog.json` when the version is set. No test status goes into release n
   server, all.
 - New: `dm sites` adds, tests, browses and changes sites, and starts and controls transfers. Tags: all.
 - New: Help › About links the third-party notices. Tags: windows, linux.
+
+## Release notes draft for the rework (SITES.11, SITES.12; used for 0.9.0, released 2026-11-18)
+
+Rework R7 is closed and the draft below was used for the 0.9.0 release notes.
+
+- Changed: Sites is now called Remote files. Each server or cloud account is a remote; `dm remotes` works as `dm sites`.
+  Tags: all.
+- New: All remotes, with "Open an address once", and Add a remote, which starts from the kind of remote and tests it
+  before saving. Tags: all.
+- New: browse a remote beside this PC's folder or in two panes, with right-click menus, double click to download or
+  open, drag and drop, and "Some of it" on folders partly here. Tags: windows, linux.
+- New: a transfers list like the downloads list, with stop, resume and retry for each transfer and per-file progress.
+  Tags: all.
+- New: Delete asks with the number of files; on this PC it goes to the Recycle Bin, and Shift+Delete deletes for
+  good. Overwrite asks file by file, with sizes and dates. Tags: windows.
+- New: the web UI has the same pages, made for a phone too: tick boxes, an action bar and bottom sheets. Downloads go
+  to the server; "To this device" is a choice in the Download dialog. Tags: server, all.
+- Changed: the extension's toolbar ring is easier to see, and a count shows downloads that finished since the popup
+  was last opened. Tags: extension.
 
 ## FTP: undoing part of CUT.1
 

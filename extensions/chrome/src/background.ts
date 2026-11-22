@@ -13,8 +13,8 @@ import {
 } from "./capture-rules";
 import { RESTART_SAVED_WEB_PAGE_TEXT, restartInterruptedText, restartSavedWebPage } from "./keep-in-browser";
 import { JOB_ACTION_MESSAGES, JOB_COMMAND_MESSAGES, POPUP_JOB_LIMIT, jobCommandOutcome, latestJobs, type JobAction, type JobCommand, type JobSummary } from "./job-list";
-import { DownloadWatch, IDLE, drawKey, iconTitle } from "./toolbar-status";
-import { DEFAULT_ICON_PATHS, RING_COLORS, ringFor, ringImages } from "./toolbar-icon";
+import { DownloadWatch, IDLE, addFinished, drawKey, finishedBadge, finishedTitle, iconTitle, keepNames, offTitle, parseFinished, parseFinishedNames } from "./toolbar-status";
+import { DEFAULT_ICON_PATHS, RING_COLORS, ringFor, ringImages, type Ring } from "./toolbar-icon";
 import {
   NativeTransport, ServerTransport, SERVER_STORAGE_KEY, TARGET_LABELS, automaticTarget, availableTargets, extractError,
   initialTarget, isNativeHostMissing, pairWithServer, pairingName, readPairing, refusalText, serverDisplayName, type Envelope, type ServerPairing,
@@ -97,6 +97,15 @@ const watch = new DownloadWatch(chrome.runtime.id);
 // icon, if nothing is going on), and a ring left behind by that worker goes.
 let drawnKey: string | null = null;
 let flashing = false;
+/** EXT.R14: ids of downloads from this browser that finished since the popup was last opened, newest first. Kept in session storage (FINISHED_KEY) for a worker restart. */
+let finishedIds: string[] = [];
+let finishedLoad: Promise<void> | null = null;
+const FINISHED_KEY = "finishedIds";
+/** EXT.R16: the file names of those downloads (id to name), for the tooltip and the notification. */
+let finishedNames: Record<string, string> = {};
+const FINISHED_NAMES_KEY = "finishedNames";
+/** EXT.R16: the id of a "finished" notification starts with this, then the download's id. */
+const FINISHED_NOTE_PREFIX = "inbound-finished:";
 /** A finish is being shown (popup or flash): the icon is drawn once that is decided, not before. */
 let finishing = false;
 let paintQueue: Promise<void> = Promise.resolve();
@@ -208,13 +217,13 @@ if (chrome.downloads.onDeterminingFilename) {
   if (webRequest?.onHeadersReceived) {
     try {
       webRequest.onHeadersReceived.addListener(
-        ((details: chrome.webRequest.WebResponseHeadersDetails) => {
+        ((details: chrome.webRequest.OnHeadersReceivedDetails) => {
           // A download keepInBrowser started again is Firefox's own, however its request is typed.
           if (restartedInBrowser.has(details.url)) return undefined;
           const download = responseDownload(details);
           if (!download) return undefined;
           return onDownloadResponse(details, download).catch(() => ({}));
-        }) as unknown as (details: chrome.webRequest.WebResponseHeadersDetails) => chrome.webRequest.BlockingResponse | undefined,
+        }) as unknown as (details: chrome.webRequest.OnHeadersReceivedDetails) => chrome.webRequest.BlockingResponse | undefined,
         { urls: ["http://*/*", "https://*/*"], types: ["main_frame", "sub_frame"] },
         ["blocking", "responseHeaders"],
       );
@@ -264,6 +273,7 @@ void initialize();
 
 async function initialize(): Promise<void> {
   await ensureSettingsLoaded();
+  await ensureFinishedLoaded();
   // EXT.R12: a ring an earlier worker drew outlives it; this worker follows nothing yet, so the plain icon comes back.
   showDownloadState();
   await installMenus();
@@ -281,7 +291,7 @@ async function ensureSettingsLoaded(): Promise<void> {
 
 async function loadSettings(): Promise<void> {
   const stored = await chrome.storage.local.get("settings");
-  const migrated = migrateSettings(stored.settings);
+  const migrated = migrateSettings(stored.settings as Parameters<typeof migrateSettings>[0]);
   settings = migrated.settings;
   if (migrated.changed) {
     // Once: a copy that never edited the old allow-list now catches everything except the exclude list.
@@ -376,10 +386,11 @@ function updateBadge(): void {
     server !== null && server.down;
   // EXT.R12: while downloads sent from the browser are under way (or one failed or is paused), the tooltip says so.
   const downloads = iconTitle(watch.state());
+  const finished = finishedIds.length;
   try {
-    void action.setBadgeText({ text: waiting > 0 ? String(Math.min(waiting, 99)) : off || paused ? "OFF" : serverDown ? "!" : "" })
+    void action.setBadgeText({ text: waiting > 0 ? String(Math.min(waiting, 99)) : off || paused ? "OFF" : serverDown ? "!" : finishedBadge(finished) })
       ?.catch?.(() => undefined);
-    void action.setBadgeBackgroundColor?.({ color: waiting > 0 ? "#1f6fc5" : serverDown ? "#b3261e" : "#8a5a00" })?.catch?.(() => undefined);
+    void action.setBadgeBackgroundColor?.({ color: waiting > 0 ? "#1f6fc5" : serverDown ? "#b3261e" : off || paused ? "#8a5a00" : finished > 0 ? "#1b7a3a" : "#8a5a00" })?.catch?.(() => undefined);
     void (action as { setBadgeTextColor?: (details: { color: string }) => Promise<void> }).setBadgeTextColor?.({ color: "#ffffff" })
       ?.catch?.(() => undefined);
     void action.setTitle?.({
@@ -387,13 +398,16 @@ function updateBadge(): void {
         ? `Inbound Download Manager: ${waiting === 1 ? "a download is" : `${waiting} downloads are`} waiting for a folder`
         : downloads
         ? downloads
-        : off
-        ? "Inbound Download Manager: automatic sending is off"
-        : paused
-          ? "Inbound Download Manager: sending is paused"
-          : serverDown
-            ? "Inbound Download Manager: the server isn't answering, so downloads stay in the browser"
-            : "Inbound Download Manager: sending downloads",
+        // The badge says OFF while sending is off or paused, so the tooltip says that first and the finished ones after.
+        : offTitle(off, paused, finished)
+        ? offTitle(off, paused, finished)!
+        // The badge shows a red "!" while the server is down, so the tooltip explains that before the finished ones.
+        : serverDown
+        ? "Inbound Download Manager: the server isn't answering, so downloads stay in the browser" +
+          (finished > 0 ? ` (${finished === 1 ? "1 download" : `${finished} downloads`} finished)` : "")
+        : finishedTitle(finished, newestFinishedName())
+        ? finishedTitle(finished, newestFinishedName())!
+        : "Inbound Download Manager: sending downloads",
     })?.catch?.(() => undefined);
   } catch { /* the badge is a convenience */ }
   if (paused && badgeTimer === undefined) {
@@ -777,7 +791,7 @@ function takeSettledFromResponse(item: chrome.downloads.DownloadItem): boolean {
  * accepted it (or the folder window has it); every other answer lets Firefox go on, and then onCreated sees
  * the download as before unless this already said what became of it.
  */
-async function onDownloadResponse(details: chrome.webRequest.WebResponseHeadersDetails,
+async function onDownloadResponse(details: chrome.webRequest.OnHeadersReceivedDetails,
   download: ResponseDownload): Promise<chrome.webRequest.BlockingResponse> {
   await ensureSettingsLoaded();
   const proceed: chrome.webRequest.BlockingResponse = {};
@@ -1515,9 +1529,17 @@ function flashMs(): number {
 function followJob(job: JobSummary | undefined, eventType?: string): void {
   if (!job) return;
   const change = watch.update(job, eventType);
-  if (change.finished && !finishing) {
-    finishing = true;
-    void downloadFinished();
+  if (change.finished) {
+    if (!finishing) {
+      finishing = true;
+      void downloadFinished(job);
+    } else {
+      // A second download finishing while the first is still being handled: the mark is recorded, and a notification
+      // (which neither flashes nor opens the popup) is shown too, so it is not lost.
+      void recordFinished(job.id, job.fileName).then(() => {
+        if (settings.onFinish === "notify") showFinishedNotification(job);
+      });
+    }
   }
   showDownloadState();
 }
@@ -1531,20 +1553,20 @@ function appEventsStopped(): void {
 /** The icon and its tooltip for what the followed downloads are doing, when that changed. */
 function showDownloadState(): void {
   const state = watch.state();
-  const key = drawKey(state);
+  const key = drawKey(state, finishedIds.length);
   if (key === drawnKey) return;
   drawnKey = key;
   updateBadge();
   // A finish being shown paints the state itself when it is done.
-  if (!flashing && !finishing) void paintRing(ringFor(state));
+  if (!flashing && !finishing) void paintRing(ringFor(state, finishedIds.length));
 }
 
-function paintRing(ring: { color: string; fill: number } | null): Promise<void> {
+function paintRing(ring: Ring | null): Promise<void> {
   paintQueue = paintQueue.then(() => drawIcon(ring)).catch(() => undefined);
   return paintQueue;
 }
 
-async function drawIcon(ring: { color: string; fill: number } | null): Promise<void> {
+async function drawIcon(ring: Ring | null): Promise<void> {
   const action = (chrome as { action?: typeof chrome.action }).action;
   if (typeof action?.setIcon !== "function") return;
   if (!ring) {
@@ -1552,29 +1574,117 @@ async function drawIcon(ring: { color: string; fill: number } | null): Promise<v
     return;
   }
   const images = await ringImages(ring);
-  if (images) await action.setIcon({ imageData: images as unknown as chrome.action.TabIconDetails["imageData"] });
+  if (images) await action.setIcon({ imageData: images } as unknown as chrome.action.TabIconDetails);
 }
 
 /** EXT.R12: a download sent from the browser finished: the popup opens, the icon flashes, or nothing (Settings). */
-async function downloadFinished(): Promise<void> {
+async function downloadFinished(job: JobSummary): Promise<void> {
+  const jobId = job.id;
   try {
     await ensureSettingsLoaded();
     if (settings.onFinish === "nothing") return;
+    // EXT.R14: remembered first, so the icon's mark and the popup's top row are there whichever way it goes on.
+    await recordFinished(jobId, job.fileName);
+    // EXT.R16: a notification with Open and Show in folder; the mark above stays, so the popup still has it on top.
+    if (settings.onFinish === "notify") { showFinishedNotification(job); return; }
     if (settings.onFinish === "popup" && await openPopupForFinish()) return;
     await flashIcon();
   } finally {
     finishing = false;
-    await paintRing(ringFor(watch.state()));
+    await paintRing(ringFor(watch.state(), finishedIds.length));
   }
 }
 
+function ensureFinishedLoaded(): Promise<void> {
+  finishedLoad ??= (async () => {
+    try {
+      const stored = (await chrome.storage.session.get(FINISHED_KEY))[FINISHED_KEY];
+      // Finishes that happened while this was loading stay in front.
+      finishedIds = [...finishedIds, ...parseFinished(stored).filter((id) => !finishedIds.includes(id))];
+      const names = (await chrome.storage.session.get(FINISHED_NAMES_KEY))[FINISHED_NAMES_KEY];
+      finishedNames = { ...parseFinishedNames(names), ...finishedNames };
+    } catch { /* the mark starts empty */ }
+  })();
+  return finishedLoad;
+}
+
+/** EXT.R14: a download from this browser finished: the icon marks it until the popup is opened. "Do nothing" marks nothing. */
+async function recordFinished(jobId: string, fileName?: string): Promise<void> {
+  await ensureSettingsLoaded();
+  if (settings.onFinish === "nothing") return;
+  await ensureFinishedLoaded();
+  finishedIds = addFinished(finishedIds, jobId);
+  if (fileName) finishedNames[jobId] = fileName;
+  finishedNames = keepNames(finishedNames, finishedIds);
+  await persistFinished();
+  showDownloadState();
+}
+
+async function persistFinished(): Promise<void> {
+  try { await chrome.storage.session.set({ [FINISHED_KEY]: finishedIds, [FINISHED_NAMES_KEY]: finishedNames }); } catch { /* memory still has it */ }
+}
+
+/** EXT.R16: the newest finished download's file name, or undefined when it is not known. */
+function newestFinishedName(): string | undefined {
+  return finishedIds.length > 0 ? finishedNames[finishedIds[0]!] : undefined;
+}
+
 /**
- * Opens the toolbar popup, where the finished download is at the top. Chrome and Edge allow it from 127 without a
- * click; Firefox and older Chrome refuse it, and the icon flashes instead. Never while the popup is open or opening.
+ * EXT.R16: "Show a notification": Open and Show in folder as buttons where the browser has them (Chrome, Edge); where
+ * it has none (Firefox) a click on the notification shows the file in its folder. Failures are silent.
+ */
+function showFinishedNotification(job: JobSummary): void {
+  const name = job.fileName || "A download";
+  const base = { type: "basic", iconUrl: "icons/icon128.png", title: "Download finished", message: name.slice(0, 300) };
+  const id = FINISHED_NOTE_PREFIX + job.id;
+  const plain = () => {
+    try { void (chrome.notifications.create(id, base as chrome.notifications.NotificationCreateOptions) as unknown); } catch { /* optional */ }
+  };
+  try {
+    const made = chrome.notifications.create(id, { ...base, buttons: [{ title: "Open" }, { title: "Show in folder" }] } as chrome.notifications.NotificationCreateOptions) as unknown;
+    // Firefox refuses `buttons` (by throwing or by a rejected promise): again without them.
+    (made as Promise<unknown> | undefined)?.catch?.(plain);
+  } catch {
+    plain();
+  }
+}
+
+async function finishedNoteCommand(notificationId: string, type: "job.open" | "job.reveal"): Promise<void> {
+  if (!notificationId.startsWith(FINISHED_NOTE_PREFIX)) return;
+  const jobId = notificationId.slice(FINISHED_NOTE_PREFIX.length);
+  if (!/^[0-9a-f-]{32,36}$/i.test(jobId)) return;
+  try {
+    await native.request(type, { jobId }, 10000, "Timed out waiting for the desktop app.");
+    chrome.notifications.clear?.(notificationId);
+  } catch { /* the app is not there; the popup still lists it */ }
+}
+
+try {
+  chrome.notifications?.onButtonClicked?.addListener((id, index) => { void finishedNoteCommand(id, index === 0 ? "job.open" : "job.reveal"); });
+  chrome.notifications?.onClicked?.addListener((id) => { void finishedNoteCommand(id, "job.reveal"); });
+} catch { /* notifications are optional */ }
+
+/** The popup was opened: what finished is seen there. Returns the ids (newest first) so it can put them on top. */
+async function takeFinished(): Promise<string[]> {
+  await ensureFinishedLoaded();
+  const seen = finishedIds;
+  if (seen.length === 0) return seen;
+  finishedIds = [];
+  finishedNames = {};
+  await persistFinished();
+  updateBadge();
+  showDownloadState();
+  return seen;
+}
+
+/**
+ * EXT.R15: opens the toolbar popup, where the finished download is at the top. Only when a normal browser window is
+ * focused and the ask-where-to-save popup is neither open, opening nor holding downloads. Chrome and Edge allow it from
+ * 127 without a click; Firefox (feature-detected) and older Chrome refuse it. False means "use the finished mark and
+ * flash instead"; failures are silent.
  */
 async function openPopupForFinish(): Promise<boolean> {
-  if (askPorts.size > 0) return true;
-  if (popupOpening) return false;
+  if (askPorts.size > 0 || popupOpening !== null || askQueue.length > 0) return false;
   const action = (chrome as { action?: typeof chrome.action }).action;
   if (typeof action?.openPopup !== "function") return false;
   try {
@@ -2109,9 +2219,15 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
       jobsInFlight ??= jobsAnswer().finally(() => { jobsInFlight = null; });
       const answer = await jobsInFlight;
       // EXT.R12: the popup shows the list, so a failure or a pause has been seen and the icon stops showing it.
-      if (fromPage(sender, "popup.html")) watch.acknowledge();
+      let justFinished: string[] = [];
+      if (fromPage(sender, "popup.html")) {
+        watch.acknowledge();
+        // Only when this PC answered: with the app unreachable the popup shows no list, so the mark stays for the
+        // next successful open.
+        if (localAnswered(answer)) justFinished = await takeFinished();
+      }
       showDownloadState();
-      return answer;
+      return justFinished.length > 0 ? { ...(answer as object), justFinished } : answer;
     }
 
     case "dm.jobAction": {
@@ -2187,6 +2303,13 @@ let jobsInFlight: Promise<unknown> | null = null;
  * newest POPUP_JOB_LIMIT only, so a long list can't make a reply over the browser's 1 MB native-message limit; an
  * older Host sends them all and latestJobs picks.
  */
+/** Whether this PC's part of a jobs answer was a real list (the popup then shows what finished). */
+function localAnswered(answer: unknown): boolean {
+  const reply = answer as { ok?: boolean; groups?: Array<{ target: string; ok: boolean }> } | undefined;
+  const local = reply?.groups?.find((group) => group.target === "local");
+  return local ? local.ok : reply?.ok !== false;
+}
+
 async function jobsAnswer(): Promise<unknown> {
   const query = { limit: POPUP_JOB_LIMIT };
   const local = (async (): Promise<JobsAnswer> => {

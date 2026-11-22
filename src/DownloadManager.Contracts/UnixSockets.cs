@@ -9,6 +9,7 @@ namespace DownloadManager.Contracts;
 /// user ID checked on both ends. It does what the Windows pipe ACL and <see cref="PipeOwner"/> do there.
 /// </summary>
 [SupportedOSPlatform("linux")]
+[SupportedOSPlatform("macos")]
 public static class UnixSockets
 {
     /// <summary>
@@ -17,6 +18,9 @@ public static class UnixSockets
     /// </summary>
     public static string Directory()
     {
+        // macOS: a socket path is at most 104 bytes, and $TMPDIR (/var/folders/xx/.../T/) leaves too little of that.
+        // /tmp is short; the folder is still this user's and closed to others (EnsureDirectory checks both).
+        if (OperatingSystem.IsMacOS()) return $"/tmp/inbound-{EffectiveUserId()}";
         var runtime = Environment.GetEnvironmentVariable("XDG_RUNTIME_DIR");
         return !string.IsNullOrWhiteSpace(runtime) && Path.IsPathRooted(runtime)
             ? Path.Combine(runtime, "inbound")
@@ -107,6 +111,9 @@ public static class UnixSockets
     /// <summary>The peer's user ID from <c>SO_PEERCRED</c>; -1 when it can't be read.</summary>
     public static long PeerUserId(Socket socket)
     {
+        // macOS has no SO_PEERCRED; getpeereid(3) gives the same user ID.
+        if (OperatingSystem.IsMacOS())
+            return GetPeerEid((int)socket.Handle, out var peerUid, out _) == 0 ? peerUid : -1;
         // struct ucred { pid_t pid; uid_t uid; gid_t gid; }
         Span<byte> cred = stackalloc byte[12];
         var length = cred.Length;
@@ -129,6 +136,7 @@ public static class UnixSockets
     /// <summary>The owner's user ID of <paramref name="path"/>, not following a final link. 0 on success.</summary>
     private static int Stat(string path, out uint owner)
     {
+        if (OperatingSystem.IsMacOS()) return MacLStat(path, out owner);
         // struct statx is the same on every architecture: stx_uid is the u32 at offset 20.
         Span<byte> buffer = stackalloc byte[256];
         owner = uint.MaxValue;
@@ -140,6 +148,28 @@ public static class UnixSockets
     private const int AtFdCwd = -100;
     private const int AtSymlinkNoFollow = 0x100;
     private const uint StatxUid = 0x8;
+
+    [DllImport("libc", EntryPoint = "getpeereid", SetLastError = true)]
+    private static extern int GetPeerEid(int socket, out uint uid, out uint gid);
+
+    /// <summary>macOS: lstat(2). In the 64-bit-inode struct stat (arm64, and x86_64's lstat$INODE64) st_uid is the u32 at offset 16.</summary>
+    private static int MacLStat(string path, out uint owner)
+    {
+        Span<byte> buffer = stackalloc byte[256];
+        owner = uint.MaxValue;
+        var result = RuntimeInformation.ProcessArchitecture == Architecture.X64
+            ? LStatInode64(path, ref MemoryMarshal.GetReference(buffer))
+            : LStat(path, ref MemoryMarshal.GetReference(buffer));
+        if (result != 0) return -1;
+        owner = BitConverter.ToUInt32(buffer[16..20]);
+        return 0;
+    }
+
+    [DllImport("libc", EntryPoint = "lstat", SetLastError = true)]
+    private static extern int LStat([MarshalAs(UnmanagedType.LPUTF8Str)] string path, ref byte buffer);
+
+    [DllImport("libc", EntryPoint = "lstat$INODE64", SetLastError = true)]
+    private static extern int LStatInode64([MarshalAs(UnmanagedType.LPUTF8Str)] string path, ref byte buffer);
 
     [DllImport("libc", EntryPoint = "statx", SetLastError = true)]
     private static extern int StatX(int dirFd, [MarshalAs(UnmanagedType.LPUTF8Str)] string path, int flags, uint mask, ref byte buffer);

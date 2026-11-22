@@ -36,8 +36,15 @@ internal static class StaticAssetCompression
                 path is not null && path.StartsWith(Prefix, StringComparison.Ordinal))
             {
                 var response = context.Response;
-                // private: the files are behind the sign-in, so a shared cache on the way must not keep them.
-                response.Headers.CacheControl = "private, max-age=31536000, immutable";
+                // private: the files are behind the sign-in, so a shared cache on the way must not keep them. Only a file
+                // that was found is kept for good (audit 2026-11-15): a miss while an update swaps the files must not stay
+                // in the browser for a year.
+                response.OnStarting(() =>
+                {
+                    if (response.StatusCode == StatusCodes.Status200OK)
+                        response.Headers.CacheControl = "private, max-age=31536000, immutable";
+                    return Task.CompletedTask;
+                });
                 response.Headers.Vary = HeaderNames.AcceptEncoding;
                 var chosen = Choose(request.Headers.AcceptEncoding.ToString(), path, files);
                 if (chosen is { } pick)

@@ -10,30 +10,42 @@ public sealed class SiteTransferStartRequest
     public const string SafeSingleDownloadCapability = "sitesSafeSingleDownload";
 
     /// <summary>
-    /// ANDROID.8 (r6): the Host takes <see cref="Direction"/> <c>copy</c>, from one site's folder to another site's folder
-    /// (or another folder of the same site). rclone on the Host streams each file from one to the other; nothing is staged
-    /// on the Host's disk. An older Host lacks it and refuses <c>copy</c> with "Choose download or upload."
+    /// ANDROID.8 (r6): the Host copies from one remote's folder to another's (or another folder of the same one) with
+    /// <see cref="Direction"/> <c>between</c>, and still takes Android 0.1.0 to 0.1.2's name for it, <c>copy</c> with
+    /// <see cref="DestinationSiteId"/> and <see cref="DestinationFolder"/>. rclone on the Host streams each file from one to
+    /// the other; nothing is staged on the Host's disk.
     /// </summary>
     public const string RemoteCopyCapability = "sitesRemoteCopy";
+
     /// <summary>Requires one file (never a directory) and no replacement even at final publication.</summary>
     public bool SafeSingleDownload { get; set; }
 
     public string SiteId { get; set; } = "";
 
-    /// <summary><c>download</c>, <c>upload</c> or <c>copy</c> (<see cref="RemoteCopyCapability"/>).</summary>
+    /// <summary><c>download</c>, <c>upload</c> or (SITES.13) <c>between</c>: from this remote to <see cref="TargetSiteId"/>.</summary>
     public string Direction { get; set; } = "download";
 
-    /// <summary>The folder on the server, absolute (<c>/srv/pub</c>); for a copy, the source folder on <see cref="SiteId"/>.</summary>
+    /// <summary>The folder on the server, absolute (<c>/srv/pub</c>); for <c>between</c>, the source folder.</summary>
     public string RemoteFolder { get; set; } = "/";
 
-    /// <summary>The folder on this PC, a full path. A download creates it when missing. Not used by a copy.</summary>
+    /// <summary>The folder on this PC, a full path. A download creates it when missing. Not used for <c>between</c>.</summary>
     public string LocalFolder { get; set; } = "";
 
-    /// <summary>A copy's target site; it may be <see cref="SiteId"/> itself. Null for a download or an upload.</summary>
+    /// <summary>SITES.13, <c>between</c> only: the remote the files go to (may be the same remote, another folder).</summary>
+    public string? TargetSiteId { get; set; }
+
+    /// <summary>SITES.13, <c>between</c> only: the folder on the target remote, absolute.</summary>
+    public string? TargetFolder { get; set; }
+
+    /// <summary>Android 0.1.0 to 0.1.2, <c>copy</c> only: read as <see cref="TargetSiteId"/> and <see cref="TargetFolder"/>.</summary>
     public string? DestinationSiteId { get; set; }
 
-    /// <summary>A copy's target folder on <see cref="DestinationSiteId"/>, absolute. Null for a download or an upload.</summary>
     public string? DestinationFolder { get; set; }
+
+    /// <summary>
+    /// SITES.13: made paused, waiting for a schedule with "Remote files transfers" on to start it (its start time).
+    /// </summary>
+    public bool WaitForSchedule { get; set; }
 
     public List<SiteTransferNameDto> Names { get; set; } = [];
 
@@ -45,6 +57,24 @@ public sealed class SiteTransferNameDto
 {
     public string Name { get; set; } = "";
     public bool IsFolder { get; set; }
+}
+
+/// <summary>SITES.11: one file of a batch, for <c>sites.transfer.stopFile</c>.</summary>
+public sealed class SiteTransferFileRequest
+{
+    public string Id { get; set; } = "";
+
+    /// <summary>As <see cref="SiteTransferItemDto.Path"/>.</summary>
+    public string Path { get; set; } = "";
+}
+
+/// <summary>SITES.13, <c>sites.transfer.schedule</c>.</summary>
+public sealed class SiteTransferScheduleRequest
+{
+    public string Id { get; set; } = "";
+
+    /// <summary>True: the batch is paused (if running) and waits for a schedule's start. False: it stays paused, waiting for the user.</summary>
+    public bool Wait { get; set; } = true;
 }
 
 public sealed class SiteTransferIdRequest
@@ -63,12 +93,16 @@ public sealed class SiteTransferDto
     public string RemoteFolder { get; set; } = "";
     public string LocalFolder { get; set; } = "";
 
-    /// <summary>A copy's target site, its name and folder; null for a download or an upload.</summary>
-    public string? DestinationSiteId { get; set; }
-    public string? DestinationSiteName { get; set; }
-    public string? DestinationFolder { get; set; }
-
     public string Conflict { get; set; } = "";
+
+    /// <summary>SITES.13, <c>between</c>: the remote the files go to, its name, and the folder there. Null otherwise.</summary>
+    public string? TargetSiteId { get; set; }
+
+    public string? TargetSiteName { get; set; }
+    public string? TargetFolder { get; set; }
+
+    /// <summary>SITES.13: paused until a schedule with "Remote files transfers" on starts it.</summary>
+    public bool WaitsForSchedule { get; set; }
 
     /// <summary><c>running</c>, <c>paused</c>, <c>done</c>, <c>failed</c> or <c>canceled</c>.</summary>
     public string State { get; set; } = "";
@@ -90,16 +124,93 @@ public sealed class SiteTransferDto
     /// <summary>Files moving now.</summary>
     public int FilesRunning { get; set; }
 
+    /// <summary>
+    /// SITES.11: files the user stopped one by one (<c>sites.transfer.stopFile</c>); they are not moved and are not
+    /// failures. Retry leaves them; <c>sites.transfer.startFile</c> starts one again. A batch whose files were all stopped
+    /// ends <c>done</c> with none copied. A Host from before SITES.11 never sends it.
+    /// </summary>
+    public int FilesStopped { get; set; }
+
+    /// <summary>
+    /// SITES.11: the names the user picked (files and folders of the source folder), the first few in the order picked,
+    /// for a row's title ("isos and 2 more"); <see cref="PickedCount"/> is how many there were. Empty from an older Host.
+    /// </summary>
+    public List<string> Picked { get; set; } = [];
+
+    public int PickedCount { get; set; }
+
+    /// <summary>
+    /// SITES.11: the first failed file (as <see cref="SiteTransferItemDto.Path"/>) and why, so a row can say it without
+    /// opening; null when none failed.
+    /// </summary>
+    public string? FirstFailedPath { get; set; }
+
+    public string? FirstFailedError { get; set; }
+
+    /// <summary>
+    /// SITES.11: when a running batch that lost its connection tries again (it waits, doubling up to a minute, before its
+    /// next file); null when it is not waiting so. <see cref="Message"/> is not set while it waits; the last file's error is.
+    /// </summary>
+    public DateTimeOffset? RetryAt { get; set; }
+
+    /// <summary>SITES.11: why it waits for <see cref="RetryAt"/> (the connection error), null otherwise.</summary>
+    public string? RetryReason { get; set; }
+
     /// <summary>Total bytes as listed; files of unknown size count as 0.</summary>
     public long Bytes { get; set; }
 
     public long BytesDone { get; set; }
 
+    /// <summary>
+    /// SITES.11: the bytes of failed and stopped files, which are not going to move: the bar's whole is
+    /// <see cref="Bytes"/> less this, and <see cref="SecondsLeft"/> leaves them out. 0 from an older Host.
+    /// </summary>
+    public long BytesSetAside { get; set; }
+
     /// <summary>Bytes a second over the last few seconds; 0 when nothing moves.</summary>
     public long Speed { get; set; }
 
+    /// <summary>
+    /// SITES.11: whole seconds until the batch is done at <see cref="Speed"/> (<see cref="SiteTransferTime.SecondsLeft"/>);
+    /// null unless it is running and moving, or when a file still to move has no known size.
+    /// </summary>
+    public long? SecondsLeft { get; set; }
+
+    /// <summary>SITES.11: the files moving now (at most "transfers at once"); empty when nothing moves.</summary>
+    public List<SiteTransferMovingDto> Moving { get; set; } = [];
+
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset? FinishedAt { get; set; }
+}
+
+/// <summary>SITES.11: one file of a batch while it moves, as rclone last reported it (about once a second).</summary>
+public sealed class SiteTransferMovingDto
+{
+    /// <summary>Relative to the source folder, <c>/</c>-separated, as <see cref="SiteTransferItemDto.Path"/>.</summary>
+    public string Path { get; set; } = "";
+
+    /// <summary>The file's size; -1 when unknown.</summary>
+    public long Size { get; set; }
+
+    public long BytesDone { get; set; }
+    public long Speed { get; set; }
+    public long? SecondsLeft { get; set; }
+}
+
+/// <summary>SITES.11: time left, one rule for every client.</summary>
+public static class SiteTransferTime
+{
+    /// <summary>
+    /// Whole seconds, rounded up, to move what is left at <paramref name="speed"/> bytes a second: null when nothing
+    /// moves or the size is unknown (negative), 0 when nothing is left.
+    /// </summary>
+    public static long? SecondsLeft(long size, long bytesDone, long speed)
+    {
+        if (size < 0 || speed <= 0) return null;
+        var left = size - Math.Max(0, bytesDone);
+        if (left <= 0) return 0;
+        return left / speed + (left % speed == 0 ? 0 : 1);
+    }
 }
 
 public sealed class SiteTransferItemDto
@@ -112,7 +223,7 @@ public sealed class SiteTransferItemDto
 
     public long Size { get; set; }
 
-    /// <summary><c>waiting</c>, <c>running</c>, <c>done</c>, <c>skipped</c> or <c>failed</c>.</summary>
+    /// <summary><c>waiting</c>, <c>running</c>, <c>done</c>, <c>skipped</c>, <c>failed</c> or (SITES.11) <c>stopped</c>.</summary>
     public string State { get; set; } = "";
 
     public int Tries { get; set; }
