@@ -194,6 +194,14 @@ npm run build
 # chrome://extensions -> Developer mode -> Load unpacked -> dist
 ```
 
+The rclone end-to-end tests (remote transfers, copies between remotes) skip without
+`INBOUND_RCLONE` and say so only as "skipped"; set it for the shell before a Sites change is
+called tested. A Windows rclone 1.76.0 is kept outside the repository:
+
+```powershell
+$env:INBOUND_RCLONE = "$env:USERPROFILE\tools\rclone\rclone.exe"
+```
+
 TorBox live tests call the real API, so they are opt-in. The project builds with the solution, but
 `dotnet test` finds nothing in it without `-p:RunLiveTests=true`, `scripts\test.ps1` doesn't list it,
 and without the key each test skips and says why. Set the key for this one shell, and never echo it.
