@@ -11,6 +11,10 @@ it, since this branch does not merge into `main` without the owner's say-so.
 
 ## Android 0.1.0: redesign merged, Fable audit, fixes, 2026-11-22
 
+- Owner, 2026-11-22: "have an agent look at existing extension adaptability to mobile edge for capturing links, or other
+  solutions. non critical or required for release." A research agent is looking (ROADMAP ANDROID.15); not a release gate.
+- Signed 0.1.0 candidate (clean Release, permanent key, `check-apk.py --release` passes; APK SHA-256
+  `509dabbc35dfa01a9e40ab168f01f693536f157a73af888b36734a8beb27f50e`) installed in place on the S24 over 0.0.11.
 - Merged `android-remote-files-redesign` (`6ab63b17`); the two capability-list conflicts resolved as in the trial. Full
   suites on the merge: Server 209, Mobile 706, Sites 228, Engine 214, Integration 2,154 of 2,166 (two timing tests failed
   once and passed twice alone; no hang).
