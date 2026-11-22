@@ -312,7 +312,7 @@ internal sealed class DetailsScreen
             if (e.Item!.ItemId == 1) { Outside.CopyText(_activity, "Address", _row.Job.Url); _activity.ShowMessage("Address copied"); }
             else if (e.Item.ItemId == 3) _activity.ShowRefreshLink(_row);
             else if (e.Item.ItemId == 4) ChooseQueue();
-            else if (!Outside.ShowDownloadFolder(_activity)) _activity.ShowMessage("No app on this phone can show the folder.");
+            else _activity.ShowRowFolder(_row);
         };
         menu.Show();
     }

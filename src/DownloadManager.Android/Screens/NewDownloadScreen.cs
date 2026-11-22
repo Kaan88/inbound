@@ -478,6 +478,7 @@ internal sealed class NewDownloadScreen
         var conflictPolicy = _model.IfExists;
         _busy = true;
         UpdateButton();
+        _activity.ExpectNewRow(); // x10: the card that arrives next is outlined for a moment
         _ = Task.Run(async () =>
         {
             NewDownloadModel.SubmitResult result;
@@ -487,6 +488,7 @@ internal sealed class NewDownloadScreen
             {
                 _busy = false;
                 UpdateButton();
+                if (result.Error is not null || result.Added != 1) _activity.ForgetNewRow();
                 if (result.Error is { } error)
                 {
                     if (!Root.IsAttachedToWindow) return;
@@ -503,11 +505,14 @@ internal sealed class NewDownloadScreen
                 }
                 // Only this page: if it was closed meanwhile and another one opened, that one stays (finding 18).
                 _activity.CloseRowPage(Root);
-                // x10: on this phone the snackbar names the folder and offers Show in folder (the Remote Files tab at that folder).
+                // x10: on this phone the snackbar names the folder and offers Show in folder (the folder page over Downloads). The FAB
+                // lifts above it. A paired Host names its own place and has no action: its files are not on this phone.
                 var phoneFolder = _activity.Capabilities.CanOpenFiles && result.Added > 0 ? MainActivity.PhoneFolderOf(saveTo) : null;
-                if (phoneFolder is null) _activity.ShowMessage(NewDownloadModel.Describe(result));
+                if (result.Added > 0 && _activity.Capabilities.IsRemote)
+                    _activity.ShowMessage(NewDownloadModel.Describe(result) + " · saving on " + _activity.HostName + " in " + saveTo, downloadsFeedback: true);
+                else if (phoneFolder is null) _activity.ShowMessage(NewDownloadModel.Describe(result), downloadsFeedback: true);
                 else _activity.ShowMessage(NewDownloadModel.Describe(result) + " · saving to " + phoneFolder, "Show in folder",
-                    () => _activity.ShowPhoneFolder(phoneFolder, null));
+                    () => _activity.ShowAddedFolder(phoneFolder), downloadsFeedback: true);
             });
         });
     }

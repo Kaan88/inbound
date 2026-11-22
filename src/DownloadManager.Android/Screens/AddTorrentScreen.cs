@@ -516,6 +516,7 @@ internal sealed class AddTorrentScreen
         _busy = true;
         _error.Visibility = ViewStates.Gone;
         UpdateSend();
+        _activity.ExpectNewRow();
         TorBoxUi.Run(_activity, () => phone.DownloadAsync(_destination, _life.Token), result =>
         {
             _busy = false;
@@ -523,7 +524,8 @@ internal sealed class AddTorrentScreen
             if (result.Done)
             {
                 _activity.CloseRowPage(Root);
-                _activity.ShowMessage("Added to Downloads");
+                // x10: the same Show in folder as a plain download; the folder is the one chosen, else the Host's torrent folder.
+                _activity.ShowAdded("Added to Downloads", _destination ?? phone.Destination ?? _host.DefaultDownloadDirectory);
                 return;
             }
 
@@ -546,7 +548,8 @@ internal sealed class AddTorrentScreen
             if (result.Done)
             {
                 _activity.CloseRowPage(Root);
-                _activity.ShowMessage(hit ? "Added to Downloads from TorBox" : "Sent to TorBox. It waits on the TorBox list and starts when it's ready.");
+                if (hit) _activity.ShowAdded("Added to Downloads from TorBox", _destination ?? _host.DefaultDownloadDirectory);
+                else _activity.ShowMessage("Sent to TorBox. It waits on the TorBox list and starts when it's ready.");
                 return;
             }
 

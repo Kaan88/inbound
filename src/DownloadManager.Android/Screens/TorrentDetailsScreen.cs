@@ -231,7 +231,7 @@ internal sealed class TorrentDetailsScreen
         menu.MenuItemClick += (_, e) =>
         {
             if (e.Item!.ItemId == 1) { Outside.CopyText(_activity, "Magnet link", _row.Job.Url); _activity.ShowMessage("Magnet link copied"); }
-            else if (!Outside.ShowDownloadFolder(_activity)) _activity.ShowMessage("No app on this phone can show the folder.");
+            else _activity.ShowRowFolder(_row);
         };
         menu.Show();
     }
