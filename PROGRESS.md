@@ -1,5 +1,25 @@
 # Progress — session handoff
 
+## Android 0.1.3 published; Android official on main, 2026-11-23
+
+- **Where to pick up:** Android lives on `main` (`d6cd023f` and later). Owner: "don't make a new desktop release yet,
+  but make android an official part of it now" (README, CLAUDE.md and the handoff say so). New Android work: a short
+  branch from `main` in a worktree, then fast-forward `main`. `android-remote-files-parity` is even with `main` and
+  retired. No desktop release without the owner's say-so.
+- **Fable on the merge:** one medium-high finding fixed (background writes changed a remote's revision and made fresh
+  listings stale; `70d4cf44`, test fails without it), two lows fixed, three recorded (review queue, Done entry).
+- **Tests:** solution build clean; Sites, Mobile, Core, Server, Engine and Integration pass. With `INBOUND_RCLONE` set
+  to a local rclone 1.76.0 the 58 rclone end-to-end tests ran and pass after three test updates (`d6cd023f`); they had
+  been skipping. The 10 left skip on Windows (Linux-only SFTP).
+- **S24, real data (0.1.3):** update over 0.1.2 kept data, remotes and the 10 stored transfers; a Dropbox → Google Drive
+  copy (6.3 KB) finished through main's engine, Show in folder marked it, and the copy was deleted again. minipc asked
+  to trust its server keys; not trusted (owner's call). Display settings restored to the baseline.
+- **Released:** [android-v0.1.3](https://github.com/Kaan88/inbound/releases/tag/android-v0.1.3) from `d6cd023f`,
+  versionCode 15, APK SHA-256 `0874263374a55da15dde10954ef4ea89ab4490708d8d9e89d2f81b9871643abf`, manifest
+  `9a17a4619ab7a328f804e1ea60049a36daa4c0fbd18ad8d8a7abe11ac89a4a50` also on `android-latest`; downloads match; desktop
+  latest is still v0.9.0. The 0.1.1/0.1.2 fixes still wait for Fable (review queue).
+- **Open question for the owner:** was minipc trusted before the update? If so, its keys were lost somewhere.
+
 ## Merge of main into the Android branch, 2026-11-23
 
 Owner, 2026-11-22: "Merge main into this branch now, then this branch into main?" "yes, then to main." main (desktop
