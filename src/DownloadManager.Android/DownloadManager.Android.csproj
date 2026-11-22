@@ -11,8 +11,8 @@
     <OutputType>Exe</OutputType>
     <ApplicationId>app.inbound.android</ApplicationId>
     <ApplicationTitle>Inbound</ApplicationTitle>
-    <ApplicationVersion>11</ApplicationVersion>
-    <ApplicationDisplayVersion>0.0.11</ApplicationDisplayVersion>
+    <ApplicationVersion>12</ApplicationVersion>
+    <ApplicationDisplayVersion>0.1.0</ApplicationDisplayVersion>
     <RootNamespace>Inbound.App</RootNamespace>
     <AndroidPackageFormat>apk</AndroidPackageFormat>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -138,6 +138,8 @@
   <ItemGroup>
     <PackageReference Include="Xamarin.Google.Android.Material" Version="1.13.0.2" />
     <PackageReference Include="Xamarin.AndroidX.RecyclerView" Version="1.4.0.5" />
+    <!-- Remote Files pull to refresh (r1-r6 interaction list; audit RF-6, 2026-11-22). -->
+    <PackageReference Include="Xamarin.AndroidX.SwipeRefreshLayout" Version="1.1.0.29" />
   </ItemGroup>
 
   <ItemGroup>

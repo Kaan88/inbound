@@ -1,0 +1,10 @@
+Remote Files is redesigned: two panes side by side, This phone and your locations, with breadcrumbs, sorting, item counts for folders, selection, pull to refresh and a menu for new folders, renaming and deleting.
+Files move both ways between the phone and a location, and a Host that supports it copies straight from one location to another. When names already exist, choose Skip, Replace or Keep both.
+Torrents can be downloaded on the phone, from a magnet link or a .torrent file, with a choice of files. They never use mobile data by default, and seeding runs only on Wi-Fi while charging.
+TorBox can be used from the phone: add a magnet or link, see cached results at once, and follow items in My TorBox and in Downloads.
+Finished archives can be extracted on the phone, with a password sheet, saved passwords and a choice to delete the archive afterwards.
+Import a list adds many links at once from a saved list file.
+Google Drive, OneDrive and Dropbox folders open faster, and a cloud location can use its own client ID.
+The built-in browser catches downloads that start behind a redirect.
+An update that was withdrawn is no longer offered.
+Fewer wake-ups while the phone is idle, and keys and passwords are only sent to this phone or to a Host reached over HTTPS.
