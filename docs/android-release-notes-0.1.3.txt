@@ -1,0 +1,4 @@
+A location that stops answering while a folder opens now shows a message after a minute instead of loading forever.
+Copying from one location to another uses the same transfer engine as Inbound for Windows. Copies that were started with an earlier version carry on after the update.
+Copying into the folder the files are already in is refused. Choose another folder.
+PuTTY keys (.ppk) are checked the same way when a location is tested and when it is saved.
