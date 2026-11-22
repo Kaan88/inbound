@@ -44,11 +44,10 @@ internal static class TorBoxKeySheet
     public static void Show(MainActivity activity, TorBoxClient client, bool hasKey, string hostName, Action saved)
     {
         var dp = (int d) => Motion.Dp(activity, d);
-        var layout = new TextInputLayout(activity) { Hint = "TorBox API key", EndIconMode = TextInputLayout.EndIconPasswordToggle };
-        var input = new TextInputEditText(activity) { InputType = InputTypes.ClassText | InputTypes.TextVariationPassword, ImeOptions = Android.Views.InputMethods.ImeAction.Done };
-        input.SetSingleLine(true);
-        input.ImportantForAutofill = ImportantForAutofill.No;
-        layout.AddView(input);
+        var layout = (TextInputLayout)Android.Views.LayoutInflater.From(activity)!.Inflate(Resource.Layout.password_field, null, false)!;
+        layout.Hint = "TorBox API key";
+        var input = layout.FindViewById<TextInputEditText>(Resource.Id.password_input)!;
+        input.InputType = InputTypes.ClassText | InputTypes.TextVariationPassword;
         var error = new TextView(activity) { Visibility = ViewStates.Gone, AccessibilityLiveRegion = AccessibilityLiveRegion.Polite };
         error.SetTextColor(new Android.Graphics.Color(Motion.Attr(activity, Resource.Attribute.colorError)));
         var body = new LinearLayout(activity) { Orientation = Orientation.Vertical };

@@ -39,15 +39,9 @@ internal static class SavedPasswordsSheet
         var list = new LinearLayout(activity) { Orientation = Orientation.Vertical };
         root.AddView(list, new LinearLayout.LayoutParams(-1, -2) { TopMargin = dp(12) });
 
-        var layout = new TextInputLayout(activity) { Hint = "Add a password", EndIconMode = TextInputLayout.EndIconPasswordToggle };
-        var input = new TextInputEditText(activity)
-        {
-            InputType = InputTypes.ClassText | InputTypes.TextVariationPassword | InputTypes.TextFlagNoSuggestions,
-            ImeOptions = Android.Views.InputMethods.ImeAction.Done,
-        };
-        input.SetSingleLine(true);
-        input.ImportantForAutofill = ImportantForAutofill.No;
-        layout.AddView(input);
+        var layout = (TextInputLayout)Android.Views.LayoutInflater.From(activity)!.Inflate(Resource.Layout.password_field, null, false)!;
+        layout.Hint = "Add a password";
+        var input = layout.FindViewById<TextInputEditText>(Resource.Id.password_input)!;
         root.AddView(layout, new LinearLayout.LayoutParams(-1, -2) { TopMargin = dp(12) });
 
         var error = new TextView(activity) { Visibility = ViewStates.Gone, AccessibilityLiveRegion = AccessibilityLiveRegion.Polite };

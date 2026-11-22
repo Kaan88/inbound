@@ -2,6 +2,7 @@ using Android.Text;
 using Android.Views;
 using Android.Widget;
 using DownloadManager.Contracts;
+using DownloadManager.Mobile;
 using DownloadManager.Mobile.Archives;
 using Google.Android.Material.BottomSheet;
 using Google.Android.Material.Button;
@@ -37,15 +38,9 @@ internal static class ArchivePasswordSheet
         line.SetTextColor(new Android.Graphics.Color(Attr(Resource.Attribute.colorOnSurfaceVariant)));
         root.AddView(line, new LinearLayout.LayoutParams(-1, -2) { TopMargin = dp(8) });
 
-        var layout = new TextInputLayout(activity) { Hint = "Password", EndIconMode = TextInputLayout.EndIconPasswordToggle };
-        var input = new TextInputEditText(activity)
-        {
-            InputType = InputTypes.ClassText | InputTypes.TextVariationPassword | InputTypes.TextFlagNoSuggestions,
-            ImeOptions = Android.Views.InputMethods.ImeAction.Done,
-        };
-        input.SetSingleLine(true);
-        input.ImportantForAutofill = ImportantForAutofill.No;
-        layout.AddView(input);
+        var layout = (TextInputLayout)Android.Views.LayoutInflater.From(activity)!.Inflate(Resource.Layout.password_field, null, false)!;
+        layout.Hint = "Password";
+        var input = layout.FindViewById<TextInputEditText>(Resource.Id.password_input)!;
         root.AddView(layout, new LinearLayout.LayoutParams(-1, -2) { TopMargin = dp(16) });
 
         // t6: the password joins the Host's saved list (on by default, as drawn), and this set's own delete choice (the setting's by default).
@@ -56,7 +51,10 @@ internal static class ArchivePasswordSheet
 
         if (!string.IsNullOrWhiteSpace(set.Destination))
         {
-            var destination = new TextView(activity) { Text = "Extracts to " + set.Destination.Trim() };
+            // t6: the folder as Save to writes it ("Download/project-files"), one line cut in the middle for a PC's long path.
+            var destination = new TextView(activity) { Text = "Extracts to " + SavePathWords.ForField(set.Destination.Trim()) };
+            destination.SetSingleLine(true);
+            destination.Ellipsize = Android.Text.TextUtils.TruncateAt.Middle;
             destination.SetTextAppearance(Resource.Style.TextAppearance_Material3_BodyMedium);
             destination.SetTextColor(new Android.Graphics.Color(Attr(Resource.Attribute.colorOnSurfaceVariant)));
             root.AddView(destination, new LinearLayout.LayoutParams(-1, -2) { TopMargin = dp(14) });

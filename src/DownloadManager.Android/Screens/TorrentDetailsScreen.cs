@@ -377,6 +377,8 @@ internal sealed class TorrentDetailsScreen
             row.SetPadding(0, Dp(14), 0, Dp(14));
             row.AddView(Label(line.Label, Resource.Attribute.colorOnSurfaceVariant), new LinearLayout.LayoutParams(Dp(96), -2));
             var value = Label(line.Value, Resource.Attribute.colorOnSurface);
+            // t4: a paired PC's long path stays on one line, cut in the middle like Add torrent's Save to.
+            if (line.Label == "Saved to") { value.SetSingleLine(true); value.Ellipsize = Android.Text.TextUtils.TruncateAt.Middle; }
             row.AddView(value, new LinearLayout.LayoutParams(0, -2, 1f));
             row.ContentDescription = line.Label + ", " + line.Value;
             _content.AddView(row);

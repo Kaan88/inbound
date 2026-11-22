@@ -111,12 +111,14 @@ internal sealed class AddTorrentScreen
         {
             if (torrents is null)
             {
-                if (Outside.ClipboardText(_activity) is { Length: > 0 } text) _magnet.Text = text.Trim();
+                if (Outside.ClipboardText(_activity) is { Length: > 0 } text) { _magnet.Text = text.Trim(); _magnet.SetSelection(0); }
                 else _activity.ShowMessage("Nothing on the clipboard");
             }
             else if (!_activity.PickTorrentFile(OnFilePicked)) _activity.ShowMessage("No file chooser is available on this phone.");
         }));
         _magnet.TextChanged += (_, _) => { if (!_settingText) OnMagnet(); };
+        // t1: a long magnet shows its start ("magnet:?xt=urn:btih:…"), not its last tracker, once the field is left.
+        _magnet.FocusChange += (_, e) => { if (!e.HasFocus) _magnet.SetSelection(0); };
         Root.FindViewById<View>(Resource.Id.torrent_close)!.Click += (_, _) => _activity.CloseRowPage(Root);
         Root.FindViewById<View>(Resource.Id.torrent_cancel)!.Click += (_, _) => _activity.CloseRowPage(Root);
         _send.Click += (_, _) => Send();
@@ -309,6 +311,7 @@ internal sealed class AddTorrentScreen
         _error.Visibility = ViewStates.Gone;
         _settingText = true;
         _magnet.Text = name;
+        _magnet.SetSelection(0);
         _settingText = false;
         _phoneMode = true;
         UpdateSegments();
@@ -407,10 +410,26 @@ internal sealed class AddTorrentScreen
         }
 
         ShowFiles(check == TorrentCheck.Found ? phone.Tree : null);
+        if (check == TorrentCheck.Found) ShowMagnetStart();
         if (check == TorrentCheck.Found && phone.SpaceProblem is { } space) { _error.Text = space; _error.Visibility = ViewStates.Visible; }
         // The Host's own torrent folder shows in Save to until a folder is chosen.
         _showSave?.Invoke();
     }
+
+    /// <summary>
+    /// t1: once its answer is in, a long magnet shows its start ("magnet:?xt=urn:btih:…"), not its last tracker. While the field has
+    /// focus only the view scrolls, so the cursor stays where the person is typing. Once per answer, so their own scrolling is left alone.
+    /// </summary>
+    private void ShowMagnetStart()
+    {
+        var text = _magnet.Text ?? "";
+        if (_startShownFor == text) return;
+        _startShownFor = text;
+        if (_magnet.HasFocus) _magnet.Post(() => _magnet.ScrollTo(0, 0));
+        else _magnet.SetSelection(0);
+    }
+
+    private string? _startShownFor;
 
     private string HostWords() => _activity.Capabilities.IsRemote ? _activity.HostName : "this phone";
 
@@ -441,6 +460,7 @@ internal sealed class AddTorrentScreen
         SetStatus(status.Container, status.Title, status.Sub, status.Icon, tint, check == TorBoxCheck.NoKey);
         _missCard.Visibility = check is TorBoxCheck.Hit or TorBoxCheck.Miss or TorBoxCheck.Unknown ? ViewStates.Visible : ViewStates.Gone;
         ShowFiles(tree);
+        if (check is TorBoxCheck.Hit or TorBoxCheck.Miss) ShowMagnetStart();
     }
 
     private void UpdateSend()

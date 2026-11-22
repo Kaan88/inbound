@@ -6,6 +6,31 @@
 the paired-host pass and the side-by-side check), make a new release (after the Fable review), and only then start
 the Remote Files redesign (r1–r6).
 
+## ANDROID.9: t1-t7 side by side with the mockups, 2026-11-22
+
+Each mockup was put next to S24 captures on real data (this phone, and the paired PC from the earlier pass);
+the pairs are in `artifacts/android-app/pairs/android9-torbox-20261121/side-by-side/`. Fixed to the drawings and seen on
+the S24 (captures `tc-t1d`, `tc-t6d`):
+- t1: a long magnet showed its last tracker; once the file list (or TorBox's answer) is in, the field now shows its start
+  ("magnet:?xt=urn:btih:…"). While the field has focus only the view scrolls, so typing isn't moved.
+- t6: the password field was an underline; it is now outlined like Add torrent's fields (also Saved passwords and the
+  TorBox key sheet, from one layout). "Extracts to" read "/storage/emulated/0/Download" and now reads "Download"; a paired
+  PC's long path stays on one line, cut in the middle.
+- t4: "Saved to" stays on one line, cut in the middle, for a paired PC's long path (code only; no paired torrent tried).
+Matches the drawings: t2 (hit, miss, file tree), t3 rows (torrent downloading and seeding, On TorBox with %, needs a
+password with Enter, Extracted with counts), t4 tabs, t5 list and empty state, t7 groups.
+Not seen on real data: t5 rows with Get, Fetching and Failed; t3 Extracting with its bar; a magnet with folders on the phone
+(a folder tree was seen on t2's TorBox hit).
+Open, for the owner (not changed):
+1. t3 draws Downloads without the speed card; a1-a3 and the built screen have it. Kept as built.
+2. t3's On TorBox row: no pause button, no row for "Not sent", rows can't be selected (known since the fix).
+3. t5 on a paired PC: Ready rows have no file count or size (the Host doesn't send them; needs a Host change).
+4. t6: the mockup extracts into a folder named after the archive ("Downloads/Inbound/project-files"); the Host
+   extracts into the download folder itself.
+Incident: during the t1 check a stray tap started the Debian Edu netinst torrent (public ISO) on the phone; it reached
+10 MB of 512 MB and was deleted with its file within a minute. Test zip, its job and the local server were removed and
+the display restored (mode 1, brightness 60, timeout unchanged).
+
 ## ANDROID.9 step 4, torrents on the phone, 2026-11-22
 
 The phone's Host now runs torrents with the libtorrent worker built for Android (`native/torrent-worker/build-android.sh`:
