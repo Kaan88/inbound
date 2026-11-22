@@ -143,8 +143,13 @@ i1 shows the counts, the rows, "1 can't be added" with the FTP reason, Save to "
 rows queued and "Added 4 from the list · 1 skipped · Details", whose dialog reads "Skipped from the list" with the reason;
 i4 opens for the other file and "Choose another file" returns to the picker. Differences from the drawings: the new rows
 read "Queued" without queue or size (the Downloads row's own text, as for any queued link), and the snackbar is gone after
-a few seconds as every snackbar is. The paired view (i2) is built but not yet tried on a PC Host. Test jobs and files were
-deleted afterwards. Known limits: the Host records the source as "android" (the phone's add path sets it), mixed torrent
+a few seconds as every snackbar is. Test jobs and files were deleted afterwards.
+i2 on a paired PC Host (2026-11-22, the repo's test Host over `adb reverse`, paired as "Home PC"; captures `pc-i2`,
+`pc-i3`, `pc-sub2`, `pc-sub3`): "Save to, on Home PC · Each download's own folder", the hint and "Add 4 on Home PC" as
+drawn; the PC kept a list folder it has (`downloads\Lists`) and used its download folder for one it doesn't (`Q:\Nowhere`).
+Found and fixed (ccf6d6d8): on a PC Host a second pick did nothing, because the chooser sends the app to the background,
+the connection is still coming back when the file arrives, and the page only opened when connected. It now opens;
+sending reports a lost connection itself. The pairing was removed and the test Host stopped. Known limits: the Host records the source as "android" (the phone's add path sets it), mixed torrent
 results show placeholder lines, and closing the page mid-send doesn't stop the send.
 
 ## ANDROID.9 build started, 2026-11-21
