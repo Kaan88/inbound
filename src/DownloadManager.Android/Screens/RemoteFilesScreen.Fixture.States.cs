@@ -207,7 +207,7 @@ internal sealed partial class RemoteFilesScreen
                 return true;
             case "x28":
                 FxBase(); _sites[3].SigningIn = true; _sites = [_sites[0], _sites[3]]; Render();
-                FxLater(() => ShowPhoneSignInWait(_sites[3]));
+                FxLater(() => ShowPhoneSignInWait(_sites[1]));
                 return true;
             case "x29":
                 FxBase(paired: true); Render();
