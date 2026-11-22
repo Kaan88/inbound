@@ -82,7 +82,7 @@ public sealed class TorrentAddModel(TorrentClient client)
         // The magnet's job on the Host was only made to find its file list; with the text gone it is nobody's: take it back with TakeStrays.
         if (PendingJobId is { } pending) _strays.Add(pending);
         Input = ""; Check = TorrentCheck.None; Tree = null; Message = null; Name = null; Destination = null; SpaceProblem = null;
-        PendingJobId = null; Peers = 0; _fileBytes = null;
+        PendingJobId = null; Peers = 0; HeldFor = null; _fileBytes = null;
     }
 
     /// <summary>
@@ -95,7 +95,7 @@ public sealed class TorrentAddModel(TorrentClient client)
         var input = TorBoxAddModel.Normalize(text);
         if (PendingJobId is { } previous) _strays.Add(previous);
         Input = input; _fileBytes = null;
-        Tree = null; Message = null; Name = null; PendingJobId = null; Peers = 0; Destination = null; SpaceProblem = null;
+        Tree = null; Message = null; Name = null; PendingJobId = null; Peers = 0; HeldFor = null; Destination = null; SpaceProblem = null;
         if (input.Length == 0) { Check = TorrentCheck.None; return true; }
         if (!TorBoxAddModel.IsMagnet(input)) { Check = TorrentCheck.NotInput; Message = TorrentText.NotInput; return true; }
         Check = TorrentCheck.Checking;
@@ -107,7 +107,9 @@ public sealed class TorrentAddModel(TorrentClient client)
             Name = seen.Name;
             Destination = seen.Destination;
             if (seen.ExistingJobId is not null) { Check = TorrentCheck.Existing; return true; }
-            var added = await client.AddAsync(TorrentClient.MagnetRequest(input, destination), cancellationToken).ConfigureAwait(false);
+            // Not cancelled: once sent, the Host makes a job, and only its reply says which one to take back if the screen
+            // closed meanwhile (Fable A9-8). Reset moved the generation, so the job goes to the strays below.
+            var added = await client.AddAsync(TorrentClient.MagnetRequest(input, destination), CancellationToken.None).ConfigureAwait(false);
             if (generation != _generation)
             {
                 // The text changed while the Host took it: the job it made is nobody's now.
@@ -188,8 +190,16 @@ public sealed class TorrentAddModel(TorrentClient client)
 
     private void Apply(JobDto job)
     {
-        if (job.Torrent is { } torrent) Peers = torrent.Peers;
+        if (job.Torrent is not { } torrent) return;
+        Peers = torrent.Peers;
+        HeldFor = TorrentText.Waiting(torrent);
     }
+
+    /// <summary>
+    /// While <see cref="TorrentCheck.Waiting"/>: why the Host holds the magnet ("Waiting for Wi-Fi"), so no peer is asked for
+    /// its file list yet; null while it looks (Fable A9-5).
+    /// </summary>
+    public string? HeldFor { get; private set; }
 
     /// <summary>
     /// The pending magnet's job as the list now has it (<paramref name="job"/> null: it is gone). Once it has its file list, asks the Host for the
@@ -201,6 +211,7 @@ public sealed class TorrentAddModel(TorrentClient client)
         var generation = _generation;
         if (job is null) { Check = TorrentCheck.Failed; Message = "The torrent was removed from Downloads."; PendingJobId = null; return true; }
         var peers = Peers;
+        var held = HeldFor;
         Apply(job);
         if (job.Torrent is not { HasMetadata: true })
         {
@@ -211,7 +222,7 @@ public sealed class TorrentAddModel(TorrentClient client)
                 return true;
             }
 
-            return peers != Peers;
+            return peers != Peers || held != HeldFor;
         }
 
         try

@@ -243,7 +243,7 @@ internal sealed class AndroidHost : IAsyncDisposable
                 await remote.Jobs.StartAsync().ConfigureAwait(false);
                 remote.Started = true;
             }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 log.Warn("TorBox jobs could not start: " + ex.GetType().Name);
             }

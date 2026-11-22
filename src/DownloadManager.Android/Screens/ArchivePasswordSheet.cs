@@ -42,6 +42,15 @@ internal static class ArchivePasswordSheet
         layout.Hint = "Password";
         var input = layout.FindViewById<TextInputEditText>(Resource.Id.password_input)!;
         root.AddView(layout, new LinearLayout.LayoutParams(-1, -2) { TopMargin = dp(16) });
+        var secure = activity.SecureHostConnection;
+        if (!secure)
+        {
+            input.Enabled = false;
+            var note = new TextView(activity) { Text = MainActivity.SecretNeedsHttps };
+            note.SetTextAppearance(Resource.Style.TextAppearance_Material3_BodyMedium);
+            note.SetTextColor(new Android.Graphics.Color(Attr(Resource.Attribute.colorOnSurfaceVariant)));
+            root.AddView(note, new LinearLayout.LayoutParams(-1, -2) { TopMargin = dp(8) });
+        }
 
         // t6: the password joins the Host's saved list (on by default, as drawn), and this set's own delete choice (the setting's by default).
         // An older paired Host ignores both and doesn't send the set's choice: the boxes would show a wrong state (Fable F1).
@@ -77,18 +86,20 @@ internal static class ArchivePasswordSheet
         root.AddView(buttons, new LinearLayout.LayoutParams(-1, -2) { TopMargin = dp(18) });
         dialog.SetContentView(root);
         dialog.DismissEvent += (_, _) => input.Text = "";
+        MainActivity.KeepSecret(dialog);
+        extract.Enabled = secure;
 
         var busy = false;
         void Fail(string words)
         {
-            busy = false; extract.Enabled = later.Enabled = true; extract.Text = "Extract";
+            busy = false; later.Enabled = true; extract.Enabled = secure; extract.Text = "Extract";
             error.Text = words; error.Visibility = ViewStates.Visible;
         }
 
         later.Click += (_, _) => dialog.Dismiss();
         void Send()
         {
-            if (busy) return;
+            if (busy || !secure) return;
             var password = input.Text ?? "";
             if (password.Length == 0) { Fail("Enter the password first."); return; }
             busy = true; extract.Enabled = later.Enabled = false; extract.Text = "Extracting…"; error.Visibility = ViewStates.Gone;

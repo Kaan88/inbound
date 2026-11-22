@@ -17,10 +17,10 @@ internal static class TorBoxUi
         {
             T result;
             try { result = await work().ConfigureAwait(false); }
-            catch (OperationCanceledException) { return; }
             catch (Exception e)
             {
-                var words = e is InvalidOperationException or InvalidDataException or IOException or TimeoutException or System.Text.Json.JsonException
+                // A request cut by its deadline or a closed connection still says so, or its buttons stay disabled (Fable A9-9).
+                var words = e is OperationCanceledException or InvalidOperationException or InvalidDataException or IOException or TimeoutException or System.Text.Json.JsonException
                     ? Words(e) : "That could not be done.";
                 activity.RunOnUiThread(() => { if (!activity.IsFinishing && !activity.IsDestroyed) failed(words); });
                 return;
@@ -30,7 +30,8 @@ internal static class TorBoxUi
         });
     }
 
-    private static string Words(Exception e) => e is InvalidOperationException ? e.Message : "The Host did not answer. Check the connection and try again.";
+    private static string Words(Exception e) => e is InvalidOperationException and not ObjectDisposedException
+        ? e.Message : "The Host did not answer. Check the connection and try again.";
 }
 
 /// <summary>
@@ -54,6 +55,14 @@ internal static class TorBoxKeySheet
         body.SetPadding(dp(24), dp(8), dp(24), 0);
         body.AddView(layout);
         body.AddView(error);
+        var secure = activity.SecureHostConnection;
+        if (!secure)
+        {
+            input.Enabled = false;
+            var note = new TextView(activity) { Text = MainActivity.SecretNeedsHttps, TextSize = 14 };
+            note.SetTextColor(new Android.Graphics.Color(Motion.Attr(activity, Resource.Attribute.colorOnSurfaceVariant)));
+            body.AddView(note);
+        }
 
         var builder = new MaterialAlertDialogBuilder(activity).SetTitle("TorBox account")!
             .SetMessage(hasKey
@@ -66,7 +75,9 @@ internal static class TorBoxKeySheet
         if (hasKey) builder.SetNeutralButton("Remove key", (IDialogInterfaceOnClickListener?)null);
         var dialog = builder.Create();
         dialog.DismissEvent += (_, _) => input.Text = "";
+        MainActivity.KeepSecret(dialog);
         dialog.Show();
+        if (!secure && dialog.GetButton(-1) is { } send) send.Enabled = false;
 
         var busy = false;
         void Fail(string words)
@@ -78,7 +89,9 @@ internal static class TorBoxKeySheet
 
         void SetEnabled(bool on)
         {
-            foreach (var b in new[] { -1, -2, -3 }) if (dialog.GetButton(b) is { } button) button.Enabled = on;
+            foreach (var b in new[] { -1, -2, -3 }) if (dialog.GetButton(b) is { } button) button.Enabled = on && (b != -1 || secure);
+            // Backing out mid-save would still open the TorBox page on success (Fable A9-12).
+            dialog.SetCancelable(on);
         }
 
         void Done(RemoteAccountDone result, Action<string> fail)
@@ -90,7 +103,7 @@ internal static class TorBoxKeySheet
         dialog.GetButton(-1)!.Click += (_, _) =>
         {
             var key = input.Text?.Trim() ?? "";
-            if (busy) return;
+            if (busy || !secure) return;
             if (key.Length == 0) { Fail("Enter the key first."); return; }
             busy = true; error.Visibility = ViewStates.Gone; SetEnabled(false);
             // The text leaves the field now: only the request holds it, and nothing is logged.

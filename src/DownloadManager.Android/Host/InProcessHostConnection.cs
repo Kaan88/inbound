@@ -175,7 +175,8 @@ internal sealed class InProcessHostConnection(HostCommandDispatcher dispatcher, 
         {
             if (!dispatcher.RejectIfIncompatible(_session, request))
                 await dispatcher.DispatchAsync(_session, request, cancellationToken).ConfigureAwait(false);
-            return await reply.WaitAsync(TimeSpan.FromSeconds(60), cancellationToken).ConfigureAwait(false);
+            return await reply.WaitAsync(DownloadManager.Mobile.Remote.RemoteHostConnection.SlowTypes.Contains(request.Type)
+                ? DownloadManager.Mobile.Remote.RemoteHostConnection.SlowReplyTimeout : TimeSpan.FromSeconds(60), cancellationToken).ConfigureAwait(false);
         }
         catch
         {

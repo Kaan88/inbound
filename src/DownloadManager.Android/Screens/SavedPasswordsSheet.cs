@@ -43,6 +43,14 @@ internal static class SavedPasswordsSheet
         layout.Hint = "Add a password";
         var input = layout.FindViewById<TextInputEditText>(Resource.Id.password_input)!;
         root.AddView(layout, new LinearLayout.LayoutParams(-1, -2) { TopMargin = dp(12) });
+        var secure = activity.SecureHostConnection;
+        if (!secure)
+        {
+            input.Enabled = false;
+            var note = new TextView(activity) { Text = MainActivity.SecretNeedsHttps };
+            note.SetTextColor(Attr(Resource.Attribute.colorOnSurfaceVariant));
+            root.AddView(note, new LinearLayout.LayoutParams(-1, -2) { TopMargin = dp(8) });
+        }
 
         var error = new TextView(activity) { Visibility = ViewStates.Gone, AccessibilityLiveRegion = AccessibilityLiveRegion.Polite };
         error.SetTextColor(Attr(Resource.Attribute.colorError));
@@ -59,17 +67,18 @@ internal static class SavedPasswordsSheet
         scroll.AddView(root);
         dialog.SetContentView(scroll);
         dialog.DismissEvent += (_, _) => input.Text = "";
+        MainActivity.KeepSecret(dialog);
 
         var busy = false;
         void Fail(string words)
         {
-            busy = false; add.Enabled = true;
+            busy = false; add.Enabled = secure;
             error.Text = words; error.Visibility = ViewStates.Visible;
         }
 
         void Shown(ArchiveSavedPasswordsResult result)
         {
-            busy = false; add.Enabled = true;
+            busy = false; add.Enabled = secure;
             if (!result.Ok) Fail(string.IsNullOrWhiteSpace(result.Error) ? "The Host did not accept that." : result.Error.Trim());
             else error.Visibility = ViewStates.Gone;
             Fill(result.Passwords);
@@ -126,7 +135,7 @@ internal static class SavedPasswordsSheet
 
         void Add()
         {
-            if (busy) return;
+            if (busy || !secure) return;
             var password = input.Text ?? "";
             if (password.Length == 0) { Fail("Enter the password first."); return; }
             busy = true; add.Enabled = false; error.Visibility = ViewStates.Gone;

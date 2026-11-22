@@ -35,7 +35,7 @@ internal sealed class TorBoxScreen
     private TorBoxChip _chip = TorBoxChip.All;
     private Java.Lang.IRunnable? _renderLater;
     private Android.App.Dialog? _dialog;
-    private bool _loaded, _disposed;
+    private bool _loaded, _disposed, _visible = true, _dirty;
 
     public TorBoxScreen(MainActivity activity, DownloadsModel host, TorBoxClient client)
     {
@@ -66,6 +66,7 @@ internal sealed class TorBoxScreen
         }
 
         host.RemoteChanged += OnChanged;
+        host.HostHelloChanged += Load; // a reconnected PC: the account's items are asked again
         Load();
         Render();
     }
@@ -76,8 +77,18 @@ internal sealed class TorBoxScreen
     {
         _disposed = true;
         _host.RemoteChanged -= OnChanged;
+        _host.HostHelloChanged -= Load;
         if (_renderLater is not null) _ui.RemoveCallbacks(_renderLater);
         _dialog?.Dismiss();
+    }
+
+    /// <summary>The app went to the background (false) or came back (true): no cards are built while nothing is shown.</summary>
+    public void SetVisible(bool visible)
+    {
+        if (_disposed || _visible == visible) return;
+        _visible = visible;
+        if (visible && _dirty) { Render(); Describe(); }
+        else if (!visible && _renderLater is not null) { _ui.RemoveCallbacks(_renderLater); _renderLater = null; _dirty = true; }
     }
 
     private string Where => _activity.Capabilities.IsRemote ? "on " + _activity.HostName : "on this phone";
@@ -165,6 +176,8 @@ internal sealed class TorBoxScreen
     private void Render()
     {
         if (_disposed) return;
+        if (!_visible) { _dirty = true; return; }
+        _dirty = false;
         var all = _list.Rows(Where);
         foreach (var (chip, view) in _chips) view.Text = TorBoxRows.ChipLabel(all, chip);
         var rows = TorBoxRows.Filter(all, _chip, _search.Text);

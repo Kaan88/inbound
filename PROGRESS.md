@@ -6,6 +6,23 @@
 the paired-host pass and the side-by-side check), make a new release (after the Fable review), and only then start
 the Remote Files redesign (r1–r6).
 
+## Fable review of ANDROID.9 and the fixes, 2026-11-22
+
+Two Fable agents reviewed `772cd2c0..8d26b536` read-only: shared code (7 findings, F1 important; every fix from the
+earlier review holds, S2 incomplete for macOS) and the Android app (19 findings, 6 important, verdict "not ready to
+release"; the worst: a torrent with data kept running on mobile data under Wi-Fi only). All important findings and
+most minor ones are fixed, with the idle wake-ups A1, A2, A8 and S6 left from the earlier review. Shared code in
+`65264734`, Android in the next commit. Findings, fixes, tests and the decisions made while the owner was away:
+[android-review-android9.md](docs/plans/android-review-android9.md).
+
+Checks: Integration (torrent, archive, web, queue, Sites filters) 449 passed; Engine 214 passed; Server protocol 10
+passed; Mobile 661 passed; `check-apk.py --release` passes on the last signed release APK; Android emulator Debug build succeeded (no new warnings).
+Not done: no device run of the fixes; the fixes go back to the same two Fable agents for approval before the release.
+
+Owner, 2026-11-22, on delegation: Opus coordinates, checks every worker diff, owns merges and does risky and important
+changes itself; Haiku mechanical work; Sonnet routine implementation with an outcome, owned files and a check; Fable
+reviews (CLAUDE.md "Delegation and review").
+
 ## ANDROID.9: t1-t7 side by side with the mockups, 2026-11-22
 
 Each mockup was put next to S24 captures on real data (this phone, and the paired PC from the earlier pass);

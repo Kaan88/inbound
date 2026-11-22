@@ -87,8 +87,8 @@ public static class TorrentText
     /// <summary>A finished torrent that does not seed (seeding ended or was stopped): Start seeding applies.</summary>
     public static bool CanStartSeeding(JobDto? job) => job is { State: "completed", Torrent.Seeding: false };
 
-    /// <summary>The torrent may be on the engine now, so peers and trackers can be listed.</summary>
-    public static bool MayBeRunning(JobDto? job) => job?.Torrent is not null && (IsActive(job) || IsSeeding(job));
+    /// <summary>The torrent may be on the engine now, so peers and trackers can be listed. A seeding torrent held for Wi-Fi or charging is not running.</summary>
+    public static bool MayBeRunning(JobDto? job) => job?.Torrent is not null && (IsActive(job) || (IsSeeding(job) && Waiting(job!.Torrent) is null));
 
     public static string Peers(int peers) => peers == 1 ? "1 peer" : $"{peers.ToString(CultureInfo.InvariantCulture)} peers";
 

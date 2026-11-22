@@ -65,4 +65,47 @@ SHA-256 pins; models match their tests.
 
 ## What was done
 
-Pending.
+Fixed in `65264734` (shared code, Opus) and the following commit (Android; Opus for A9-3/4/5/8/9/12/19, Sonnet for
+A9-10/13/14/16/17, each diff read and merged by Opus):
+
+| # | Fix | Tests |
+| --- | --- | --- |
+| A9-1 | A torrent always counts as resumable, so every network or queue rule can send it back to its queue. | `ATorrentThatHasDataAlsoGoesBackToItsQueueWhenWifiIsLost` |
+| F1 / A9-2 | Hosts announce `archiveSavedPasswords` with `archives`; without it the phone hides the save and delete boxes and Saved passwords, and sends neither field. | hello capability tests (web, server) |
+| F2 / A9-6 | A web session can't make a set delete its archives while the Host's setting is off. | none |
+| F3 | An upload whose files-done count moves forgets that site's held listings. | none |
+| F4 | A listing is stamped with the site's revision after a sign-in renewal during the list. | none |
+| F5 | macOS falls back to CreateNew for EINVAL, ENOTSUP and EOPNOTSUPP. | none (no macOS run) |
+| F6 | A "holding" mark covers the worker stop, so its stopped callback can't clear the seeding mark. | none |
+| F7 | The set or package is checked before a password is saved for other archives. | none |
+| A9-3 | The TorBox key, archive password and saved-password fields are disabled, with a note, unless the Host is the phone or reached over HTTPS (the Remote Files rule). | none (UI) |
+| A9-4 | Add torrent's file-list tick stops while the app is hidden, and runs every 5 s while the Host holds the magnet. | none (UI) |
+| A9-5 | A magnet held for Wi-Fi says "Waiting for Wi-Fi" instead of "Finding the file list"; it goes on when the hold ends. | `A_magnet_held_for_wifi_says_so_and_looks_again_when_the_hold_ends` |
+| A9-8 | The magnet's `torrent.add` isn't cancelled by closing the page; the job it made is removed when the reply comes. | `A_screen_closed_while_the_Host_makes_the_magnets_job_still_gets_the_job_back` |
+| A9-9 | A cancelled or disposed TorBox/archive request ends with "The Host did not answer" instead of leaving buttons disabled. | none |
+| A9-10 | The phone's own Host gives `SlowTypes` the paired PC's 6-minute timeout. | none |
+| A9-12 | The key sheet can't be dismissed while a save is in flight. | none |
+| A9-13 | The TorBox page reloads on a new hello and builds no cards while the app is hidden. | none (UI) |
+| A9-14 | A seeding torrent held for Wi-Fi or charging doesn't count as running (no 2 s poll or watch lease). | `A_seeding_torrent_held_for_wifi_or_charging_may_not_be_running` |
+| A9-16 | `check-apk.py`: full hook list (adds `metered_override`, `wifi_only` and 12 more), `--release` implies the bundled checks, every `lib/arm64-v8a/*.so` must have 16 KiB `PT_LOAD` alignment. The last signed release APK passes. | `test-check-apk.py` (5) |
+| A9-17 | Any non-cancellation failure starting TorBox jobs leaves the phone Host running without TorBox. | none |
+| A9-19 | The three secret dialogs use `FLAG_SECURE`. | none |
+| A1, A2, A8, S6 | Earlier review, idle: unchanged power reports do nothing; the queue job is re-armed only when visibility, sessions or the crash guard change; its notification is posted only on a text change; the queue speed cap waits once per chunk (the "16 s after lifting the cap" part didn't hold: the limiter re-reads the cap every 100 ms). | existing engine and integration suites |
+
+Also fixed: `PersistenceJsonContextTests` failed at HEAD because ANDROID.9 registered `ArchiveSavedPasswords` without
+listing it.
+
+**Decisions made while the owner was away (2026-11-22, "do what's best for the app, note decisions"):**
+- F2/A9-6: saved-password add and remove stay open to web sessions. A paired phone reaches the desktop Host as a web
+  session, so refusing them would break t6 on a paired PC; the passwords are never read back.
+- A9-7: kept the AES key file in the app's private folder (as site logins already use; backup and transfer
+  excluded). A Keystore wrap is a follow-up for all secrets together, not this release.
+- A9-15: kept `TEMPORARILY_NOT_METERED` as unmetered (Android's own meaning). Torrents on an unmetered 5G plan are
+  allowed; the label stays. Raise with the owner.
+- A9-18: kept rclone's 3-minute idle on the phone (review P2).
+- Earlier A4 (battery-saver-held queue wakes every 15 min): not changed. Dropping the retry could leave a queue
+  waiting until the app is opened, since nothing wakes a dead process when saver turns off.
+
+**Still open:** A9-11 (a chooser result after the activity is recreated is dropped), the 3 s `PeriodicTimer` in
+`RemoteFilesScreen.cs:480`, earlier A3, A5-A7, S4, S5, S7, S8-S10, T1-T8 and P6/M4. The fixes go back to the same two
+Fable agents for approval.

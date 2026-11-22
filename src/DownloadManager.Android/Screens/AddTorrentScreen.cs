@@ -21,6 +21,8 @@ internal sealed class AddTorrentScreen
 {
     private const int DebounceMs = 600;
     private const int WaitTickMs = 1000;
+    private const int HeldTickMs = 5000;
+    private bool _visible = true;
     private const int MaxTorrentFileBytes = 8 * 1024 * 1024;
     private readonly MainActivity _activity;
     private readonly DownloadsModel _host;
@@ -196,7 +198,8 @@ internal sealed class AddTorrentScreen
             if (TorBoxAddModel.IsMagnet(text) && !_host.Settings.TorrentsEnabled) { _phone.MarkOff(); _checking = false; Render(); return; }
             try { applied = await Task.Run(() => _phone.CheckMagnetAsync(text, _destination, _life.Token)); }
             catch (System.OperationCanceledException) { return; }
-            if (_disposed) return;
+            // Closed while the Host made the magnet's job: Dispose took the strays before the reply named it (Fable A9-8).
+            if (_disposed) { _ = RemoveStraysAsync(); return; }
             if (!applied) { _ = RemoveStraysAsync(); return; }
             _checking = false;
             Render();
@@ -237,7 +240,18 @@ internal sealed class AddTorrentScreen
             if (changed) Render();
             if (phone.Check == TorrentCheck.Waiting) WaitForFileList(absent);
         });
-        _ui.PostDelayed(_waitTick, WaitTickMs);
+        // Only the list this screen already has is read; held for Wi-Fi, nothing changes until the network does.
+        if (_visible) _ui.PostDelayed(_waitTick, phone.HeldFor is null ? WaitTickMs : HeldTickMs);
+        else _waitTick = null;
+    }
+
+    /// <summary>The app went to the background (false) or came back (true): no ticks while nothing is shown (Fable A9-4).</summary>
+    public void SetVisible(bool visible)
+    {
+        if (_disposed || _visible == visible) return;
+        _visible = visible;
+        if (!visible) { if (_waitTick is not null) { _ui.RemoveCallbacks(_waitTick); _waitTick = null; } }
+        else if (_waitTick is null) WaitForFileList();
     }
 
     private Task RemoveStraysAsync()
@@ -384,6 +398,11 @@ internal sealed class AddTorrentScreen
         {
             case TorrentCheck.Checking:
                 SetStatus(surface, "Checking…", "Asking " + HostWords() + " about it", Resource.Drawable.ic_flow_info, variant);
+                break;
+            case TorrentCheck.Waiting when phone.HeldFor is { } held:
+                // Wi-Fi only, on mobile data: the Host asks no peer yet (Fable A9-5).
+                SetStatus(_activity.GetColor(Resource.Color.state_waiting_container), held, "The file list is found once the phone is back on Wi-Fi. Nothing downloads yet.",
+                    Resource.Drawable.ic_flow_info, waiting);
                 break;
             case TorrentCheck.Waiting:
                 SetStatus(surface, "Finding the file list…", phone.Peers > 0 ? $"Asking peers for it · {TorrentText.Peers(phone.Peers)} so far. Nothing downloads yet." : "Asking peers for it. Nothing downloads yet.",

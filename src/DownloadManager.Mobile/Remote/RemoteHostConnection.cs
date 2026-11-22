@@ -83,7 +83,8 @@ public sealed class RemoteHostConnection : IHostConnection, IRemoteStatus
 
     private static readonly TimeSpan HandshakeTimeout = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan DefaultReplyTimeout = TimeSpan.FromSeconds(60);
-    private static readonly TimeSpan SlowReplyTimeout = TimeSpan.FromMinutes(6);
+    /// <summary>How long a <see cref="SlowTypes"/> call may take; the phone's own Host uses it too.</summary>
+    public static readonly TimeSpan SlowReplyTimeout = TimeSpan.FromMinutes(6);
 
     private readonly ServerTarget _target;
     private readonly Connector _connect;

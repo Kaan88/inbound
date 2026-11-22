@@ -494,6 +494,25 @@ public sealed partial class MainActivity : AppCompatActivity
     /// <summary>The shown Host answers archive.* and has an extractor (its hello lists "archives").</summary>
     internal bool HasArchives => DownloadManager.Mobile.Archives.ArchiveClient.Offered(_model?.Hello);
 
+    /// <summary>
+    /// The shown Host is this phone or is reached over HTTPS: a key or password may be sent to it. The rule Remote Files
+    /// applies to site passwords, for the TorBox key and archive passwords too (Fable A9-3).
+    /// </summary>
+    internal bool SecureHostConnection
+    {
+        get
+        {
+            var current = _linkHosts?.Current;
+            return current?.ConnectionStamp == _linkHostStamp && (current?.IsPhone == true || current?.AddressUri?.Scheme == Uri.UriSchemeHttps);
+        }
+    }
+
+    /// <summary>Words under a secret field the phone won't send over an unencrypted Host connection.</summary>
+    internal const string SecretNeedsHttps = "Secrets are only sent to this phone or to a Host reached over HTTPS. Connect to this Host with HTTPS first.";
+
+    /// <summary>Keeps a window that shows a key or password out of screenshots, recordings and the recents thumbnail (Fable A9-19).</summary>
+    internal static void KeepSecret(Android.App.Dialog dialog) => dialog.Window?.AddFlags(Android.Views.WindowManagerFlags.Secure);
+
     /// <summary>The shown Host keeps saved archive passwords and a set's own delete choice (its hello lists "archiveSavedPasswords").</summary>
     internal bool HasArchiveSavedPasswords => DownloadManager.Mobile.Archives.ArchiveClient.SavedPasswordsOffered(_model?.Hello);
 
@@ -703,6 +722,8 @@ public sealed partial class MainActivity : AppCompatActivity
         Updates.AndroidUpdates.OnAppVisible();
         _details?.SetVisible(true);
         _torrentDetails?.SetVisible(true);
+        _torBox?.SetVisible(true);
+        _addTorrent?.SetVisible(true);
     }
 
     protected override void OnStop()
@@ -714,6 +735,8 @@ public sealed partial class MainActivity : AppCompatActivity
         InboundBackground.SetVisible(false);
         _details?.SetVisible(false); // no polling while nothing is shown (findings 11, 15)
         _torrentDetails?.SetVisible(false);
+        _torBox?.SetVisible(false);
+        _addTorrent?.SetVisible(false);
         base.OnStop();
     }
 

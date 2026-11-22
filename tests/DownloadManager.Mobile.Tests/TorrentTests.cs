@@ -76,6 +76,16 @@ public sealed class TorrentTests
     }
 
     [Fact]
+    public void A_seeding_torrent_held_for_wifi_or_charging_may_not_be_running()
+    {
+        var seeding = Torrent("completed", (_, t) => t.Seeding = true);
+        Assert.True(TorrentText.MayBeRunning(seeding));
+        seeding.Torrent!.WaitingFor = "Wi-Fi";
+        Assert.False(TorrentText.MayBeRunning(seeding));
+        Assert.True(TorrentText.MayBeRunning(Torrent("downloading")));
+    }
+
+    [Fact]
     public void The_row_gets_a_Stop_button_while_it_seeds_and_none_while_it_waits_for_files()
     {
         var seeding = Jobs.Row(Torrent("completed", (_, t) => { t.Seeding = true; t.Ratio = 0.5; }));
@@ -332,6 +342,57 @@ public sealed class TorrentTests
         await model.CheckMagnetAsync(Magnet);
         Assert.Equal(TorrentCheck.Failed, model.Check);
         Assert.Equal("That magnet is not valid.", model.Message);
+    }
+
+    [Fact]
+    public async Task A_magnet_held_for_wifi_says_so_and_looks_again_when_the_hold_ends()
+    {
+        // Fable A9-5: on mobile data with Wi-Fi only on, the Host queues the magnet's job and asks no peer.
+        var host = new FakeHostConnection();
+        var jobId = Guid.NewGuid();
+        host.Reply = request => request.Type switch
+        {
+            TorrentMessageTypes.Inspect => Reply(request, TorrentMessageTypes.InspectResult, new TorrentInspectResult { Ok = true, Name = "Debian" }),
+            TorrentMessageTypes.Add => Reply(request, TorrentMessageTypes.AddResult, new TorrentAddResult
+            {
+                Ok = true, Job = new JobDto { Id = jobId, State = "queued", Torrent = new TorrentDto { WaitingFor = "Waiting for Wi-Fi" } },
+            }),
+            _ => throw new InvalidOperationException(request.Type),
+        };
+        var model = Model(host);
+        Assert.True(await model.CheckMagnetAsync(Magnet));
+        Assert.Equal((TorrentCheck.Waiting, "Waiting for Wi-Fi"), (model.Check, model.HeldFor));
+
+        var held = new JobDto { Id = jobId, State = "queued", Torrent = new TorrentDto { WaitingFor = "Waiting for Wi-Fi" } };
+        Assert.False(await model.PollAsync(held));
+        Assert.True(await model.PollAsync(new JobDto { Id = jobId, State = "downloading", Torrent = new TorrentDto() }));
+        Assert.Null(model.HeldFor);
+        Assert.Equal(TorrentCheck.Waiting, model.Check);
+        model.Reset();
+        Assert.Null(model.HeldFor);
+    }
+
+    [Fact]
+    public async Task A_screen_closed_while_the_Host_makes_the_magnets_job_still_gets_the_job_back()
+    {
+        // Fable A9-8: the add itself isn't cancelled, so the job it made is known and taken back.
+        var host = new FakeHostConnection();
+        var model = Model(host);
+        var stray = Guid.NewGuid();
+        using var closing = new CancellationTokenSource();
+        host.Reply = request =>
+        {
+            if (request.Type == TorrentMessageTypes.Inspect)
+            {
+                closing.Cancel();
+                return Reply(request, TorrentMessageTypes.InspectResult, new TorrentInspectResult { Ok = true, Name = "Debian" });
+            }
+
+            model.Reset();
+            return Reply(request, TorrentMessageTypes.AddResult, new TorrentAddResult { Ok = true, Job = new JobDto { Id = stray, Torrent = new TorrentDto() } });
+        };
+        Assert.False(await model.CheckMagnetAsync(Magnet, cancellationToken: closing.Token));
+        Assert.Equal([stray], model.TakeStrays());
     }
 
     [Fact]
