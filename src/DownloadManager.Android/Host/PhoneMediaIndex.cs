@@ -24,7 +24,8 @@ internal sealed class PhoneMediaIndex(SitesCommands sites, Action<string> log)
         {
             // The change lists every batch; forget the ones that were cleared.
             var listed = change.Transfers.Select(t => t.Id).ToHashSet(StringComparer.Ordinal);
-            foreach (var gone in _doneSeen.Keys.Where(id => !listed.Contains(id)).ToList()) { _doneSeen.Remove(gone); _scanned.Remove(gone); }
+            foreach (var gone in _doneSeen.Keys.Where(id => !listed.Contains(id)).ToList()) _doneSeen.Remove(gone);
+            foreach (var gone in _scanned.Keys.Where(id => !listed.Contains(id)).ToList()) _scanned.Remove(gone);
             foreach (var transfer in change.Transfers)
             {
                 if (transfer.Direction != SiteTransferDirections.Download) continue;

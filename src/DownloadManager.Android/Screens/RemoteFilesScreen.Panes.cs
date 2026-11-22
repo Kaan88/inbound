@@ -60,6 +60,8 @@ internal sealed partial class RemoteFilesScreen
     private bool _inFolder;
     private (int Index, string SiteId)? _pendingChoice;
     private int _lastActiveTransfers;
+    // Ticks left in which phone panes are read again after a transfer finished (see RefreshTransfersQuietAsync).
+    private int _phoneSettleTicks;
 
     private Pane Active => _panes[_active];
     private Pane Other => _panes[1 - _active];

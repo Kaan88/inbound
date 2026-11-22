@@ -46,6 +46,20 @@ Owner decisions for the redesign (2026-11-21)
   with files and upload) get mockups first, agreed by the owner, saved in `android-mockups/`, then built.
 - Mockups approved by the owner (2026-11-21, "great mockups, I approve"): `r1-this-phone` to `r6-server-to-server` in `android-mockups/`, from
   `r-remote-files-redesign.html` (same tokens and sizes as c3/c4).
+- r1-r6 on the S24, real data (0.1.0, 2026-11-22; captures in ignored `artifacts/android-app/s24-0.1.0`):
+  - Phone Host with Dropbox (signed in): r1 selection on This phone (check circle, tinted row, "1 selected" bar with
+    select all, "1 file · 6.3 KB / To Dropbox" summary, "To Dropbox" button) matches; the upload landed in Dropbox.
+  - r3 file options sheet on a Dropbox file (header with "On this phone", To this phone · Downloads, Open, Share, Select,
+    Rename, Details, Delete from Dropbox) matches. To this phone over an existing file showed Skip/Replace/Keep both;
+    Keep both wrote "… (2).html".
+  - r4 phone selection state matches (`05b-scrolled`). Folder counts show for Dropbox and This phone.
+  - Found and fixed: the Keep both copy was on disk but not in Android's media index, so This phone never listed it,
+    even after a refresh. The phone's Host now adds the files a location transfer writes to the media index; checked
+    on the S24 (the copy listed at once, `17-keepboth-listed`).
+  - Seen, not app faults: with the paired server (inbound.kweb.ovh) selected, minipc folders show "Folder" with no
+    counts (that server is an older build without counts), and This phone uploads say they need this phone as the Host
+    (as designed). Dropbox kept listing a deleted file for about a minute (its own listing lag; the next listing was
+    right). The phone's Host has not trusted minipc's SSH key; left for the owner.
 
 ANDROID.9 mockups, approved by the owner (2026-11-21, "Approved, build them"): `t1-add-torrent` to `t7-settings` in `android-mockups/`, from
 `t-torrents-torbox-archives.html`. The phone does the work in its own Host; with another host selected the same

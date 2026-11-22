@@ -298,8 +298,9 @@ internal sealed class AndroidHost : IAsyncDisposable
                 var mediaIndex = new PhoneMediaIndex(sites, log.Info);
                 sites.TransfersChanged += (_, change) =>
                 {
-                    mediaIndex.OnTransfersChanged(change);
                     dispatcher.BroadcastSiteTransfersChanged(change);
+                    try { mediaIndex.OnTransfersChanged(change); }
+                    catch (Exception error) { log.Info("Media index: " + error.Message); }
                 };
                 sites.Transfers.ActivityChanged += service.OnSiteTransfersActivityChanged;
                 void RefreshSiteActivity() => activity.SetRemoteFilesActive(sites.Transfers.HasRunningTransfers);

@@ -618,9 +618,18 @@ internal sealed partial class RemoteFilesScreen
             _transfersLoaded = true;
             int active = _transfers.Count(t => t.State is "queued" or "running" or "paused");
             // A transfer that just finished changes a folder on the other side; show it without moving the user.
-            if (_inFolder && !_showTransfers && !_adding && active < _lastActiveTransfers)
-                foreach (var pane in _panes)
-                    if (!pane.Loading && pane.Selected.Count == 0 && pane.Error is null) _ = BrowsePaneAsync(pane, pane.Path, true, keepView: true);
+            if (_inFolder && !_showTransfers && !_adding)
+            {
+                bool finished = active < _lastActiveTransfers;
+                // The phone's Host adds finished files to Android's media index a moment later, and This phone lists from
+                // that index, so phone panes are read again on the next few ticks too (Fable, 2026-11-22).
+                if (finished) _phoneSettleTicks = 3;
+                else if (_phoneSettleTicks > 0) _phoneSettleTicks--;
+                if (finished || _phoneSettleTicks > 0)
+                    foreach (var pane in _panes)
+                        if ((finished || pane.IsPhone) && !pane.Loading && pane.Selected.Count == 0 && pane.Error is null)
+                            _ = BrowsePaneAsync(pane, pane.Path, true, keepView: true);
+            }
             _lastActiveTransfers = active;
         }
         catch (Exception) { /* A missing count must not disturb the folder. */ }

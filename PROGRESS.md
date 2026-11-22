@@ -11,6 +11,15 @@ it, since this branch does not merge into `main` without the owner's say-so.
 
 ## Android 0.1.0: redesign merged, Fable audit, fixes, 2026-11-22
 
+- Owner, 2026-11-22, after hearing that Transfers and Add location keep their old look: "ahh I see, make mockups. they
+  look horrible and look nothing like the rest of the app. also when I add a file to download and it says it's in
+  downloads. there needs to be an easy way to get there." So the remaining Remote Files screens (Transfers, Add location
+  and its forms, and the other old-style states) get mockups in the app's own style for the owner's approval, plus an easy
+  way from "added" to the transfer and the finished file. 0.1.0 is not published until those are approved and built.
+- Fable on the media index fix (`f7d4c06f`): approved, with a race (This phone could be read before the index had the
+  file) and three lows. Fixed: phone panes are read again for three ticks after a transfer finishes; the index runs
+  after the client broadcast, inside a try; cleared batches are pruned from both maps. Left as is: a batch cleared within
+  0.4 s of its last file is not indexed (the client can't show Clear before that broadcast).
 - Owner, 2026-11-22: "have an agent look at existing extension adaptability to mobile edge for capturing links, or other
   solutions. non critical or required for release." Research done (sources only, nothing tried on a device):
   - Edge for Android runs extensions only from Microsoft's allowlist (store listing, mobile value, QA test cases, a
@@ -33,6 +42,12 @@ it, since this branch does not merge into `main` without the owner's say-so.
   12). Staged with `prepare-android-release.ps1` in `artifacts/android-app/release-0.1.0`, **not published**: publishing
   waits for the S24 real-data comparison (r1 This phone selection and "To <location>", r3 phone rows, r4 phone selection
   state, Skip/Replace/Keep both), which needs the owner to unlock the phone (locked at 2026-11-22).
+- S24 real-data check done (owner unlocked, display baseline recorded and restored: mode 1, brightness 60, timeout max;
+  the Host selection put back to inbound.kweb.ovh). r1, r3, r4 and Skip/Replace/Keep both match on real Dropbox data
+  (acceptance matrix, "r1-r6 on the S24"). One bug found and fixed (`f7d4c06f`): files a location transfer writes to the
+  phone were not in the media index, so This phone did not list them; checked on the S24 with a new signed build
+  (SHA-256 `1df1e495e7ae8d63655bcda08d23aff345f7c3b760159fb91245342ceed951d7`). Test files removed from the phone and
+  Dropbox.
 - Signed 0.1.0 candidate (clean Release, permanent key, `check-apk.py --release` passes; APK SHA-256
   `509dabbc35dfa01a9e40ab168f01f693536f157a73af888b36734a8beb27f50e`) installed in place on the S24 over 0.0.11.
 - Merged `android-remote-files-redesign` (`6ab63b17`); the two capability-list conflicts resolved as in the trial. Full
