@@ -524,6 +524,14 @@ internal sealed partial class RemoteFilesScreen
         _ = BrowsePaneAsync(pane, null, false);
     }
 
+    /// <summary>Choosing the location the other pane shows swaps the panes, so both stay visible and the chosen one is in tab <paramref name="index"/>.</summary>
+    private void SwapPanesKeepingActive(int index)
+    {
+        (_panes[0], _panes[1]) = (_panes[1], _panes[0]);
+        _active = index;
+        UpdateFolderUi();
+    }
+
     private void SwapPanes()
     {
         (_panes[0], _panes[1]) = (_panes[1], _panes[0]);

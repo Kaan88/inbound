@@ -139,7 +139,8 @@ internal sealed partial class RemoteFilesScreen
             }
             else row.Background = new TypedValueHolder(_activity).SelectableBackground();
             string name = site is null ? "This phone" : RemoteLocationText.DisplayName(site);
-            string subtitle = site is null ? PhoneFreeText() : LocationDescription(site) + (other.Site?.Id == site.Id ? " · in the other pane" : "");
+            bool inOther = site is null ? other.IsPhone : other.Site?.Id == site.Id;
+            string subtitle = (site is null ? PhoneFreeText() : LocationDescription(site, withFree: false)) + (inOther ? " · in the other pane" : "");
             var tile = LocationTile(site is null ? Resource.Drawable.ic_remote_phone : LocationGlyph(site.Kind));
             row.AddView(tile, new LinearLayout.LayoutParams(Dp(40), Dp(40)) { LeftMargin = Dp(current ? 0 : 24), RightMargin = Dp(16) });
             var texts = new LinearLayout(_activity) { Orientation = Orientation.Vertical };
@@ -158,7 +159,13 @@ internal sealed partial class RemoteFilesScreen
                 row.AddView(pill, new LinearLayout.LayoutParams(-2, Dp(40)) { RightMargin = Dp(24) });
             }
             row.ContentDescription = name + ", " + subtitle + (current ? ", shown now" : "");
-            row.Click += (_, _) => { dialog.Dismiss(); if (!current) ChoosePaneLocation(index, site); };
+            row.Click += (_, _) =>
+            {
+                dialog.Dismiss();
+                if (current) return;
+                if (inOther) SwapPanesKeepingActive(index);
+                else ChoosePaneLocation(index, site);
+            };
             content.AddView(row, new LinearLayout.LayoutParams(-1, Dp(current ? 60 : 56)) { LeftMargin = Dp(current ? 12 : 0), RightMargin = Dp(current ? 12 : 0) });
         }
 
@@ -209,7 +216,7 @@ internal sealed partial class RemoteFilesScreen
             _ => fileIcon.Drawable
         });
         if (((FrameLayout)iconTile).GetChildAt(0) is ImageView glyph)
-            glyph.ImageTintList = ColorStateList.ValueOf(new Color(FileIcons.Color(_activity, fileIcon)));
+            glyph.ImageTintList = ColorStateList.ValueOf(new Color(RemoteIconColor(_activity, kind, fileIcon)));
         ((GradientDrawable)iconTile.Background!).SetCornerRadius(Dp(11));
         head.AddView(iconTile, new LinearLayout.LayoutParams(Dp(40), Dp(40)) { RightMargin = Dp(16) });
         var texts = new LinearLayout(_activity) { Orientation = Orientation.Vertical };

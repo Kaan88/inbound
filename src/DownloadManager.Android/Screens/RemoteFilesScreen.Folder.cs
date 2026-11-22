@@ -340,7 +340,7 @@ internal sealed partial class RemoteFilesScreen
             };
             _icon.SetImageResource(drawable);
             int tint = selected ? _s.Attr(Resource.Attribute.colorOnPrimary)
-                : item.IsFolder ? _s.Attr(Resource.Attribute.colorPrimary) : FileIcons.Color(_s._activity, fileIcon);
+                : item.IsFolder ? _s.Attr(Resource.Attribute.colorPrimary) : RemoteIconColor(_s._activity, kind, fileIcon);
             _icon.ImageTintList = ColorStateList.ValueOf(new Color(tint));
             var tile = new GradientDrawable();
             tile.SetCornerRadius(_s.Dp(selected ? 20 : 11));
@@ -412,6 +412,21 @@ internal sealed partial class RemoteFilesScreen
         }
     }
 
+    /// <summary>The mockup's file-type colours (dark theme: image green, video red-pink, zip amber, document blue, audio violet); light theme keeps the app's darker tones, with video red.</summary>
+    internal static int RemoteIconColor(Android.Content.Context context, FileKind kind, (int Drawable, int ColorAttr, int ColorRes) fallback)
+    {
+        bool dark = (context.Resources?.Configuration?.UiMode & Android.Content.Res.UiMode.NightMask) == Android.Content.Res.UiMode.NightYes;
+        return kind switch
+        {
+            FileKind.Image => dark ? Color.ParseColor("#7fc8a9") : Color.ParseColor("#1B7130"),
+            FileKind.Video => dark ? Color.ParseColor("#e88f8f") : Color.ParseColor("#B3261E"),
+            FileKind.Archive => dark ? Color.ParseColor("#e0a93e") : Color.ParseColor("#9A6A00"),
+            FileKind.Document => dark ? Color.ParseColor("#4aa3f0") : FileIcons.Color(context, fallback),
+            FileKind.Audio => dark ? Color.ParseColor("#b79cff") : FileIcons.Color(context, fallback),
+            _ => FileIcons.Color(context, fallback),
+        };
+    }
+
     private void BuildFooter(Pane pane)
     {
         _folderFooter!.RemoveAllViews();
@@ -423,6 +438,8 @@ internal sealed partial class RemoteFilesScreen
         var info = new LinearLayout(_activity) { Orientation = Orientation.Vertical };
         var summary = FolderText(RemoteFileList.Summary(SelectedItems(pane)), 16, Resource.Attribute.colorOnSurface);
         summary.SetTypeface(Typeface.Create("sans-serif-medium", TypefaceStyle.Normal), TypefaceStyle.Normal);
+        summary.SetSingleLine(true);
+        summary.Ellipsize = Android.Text.TextUtils.TruncateAt.End;
         info.AddView(summary);
         var caption = FolderText(plan.Caption, 13, Resource.Attribute.colorOnSurfaceVariant);
         caption.SetSingleLine(true);
@@ -499,7 +516,7 @@ internal sealed partial class RemoteFilesScreen
         Item(Resource.Drawable.ic_remote_selall, "Select all", () => SelectAll(pane));
         int active = _transfers.Count(t => t.State is "queued" or "running" or "paused");
         Item(Resource.Drawable.ic_remote_transfers, "Transfers", OpenTransfers, active > 0 ? active.ToString() : null);
-        popup.ShowAsDropDown(anchor, 0, -Dp(8), GravityFlags.End);
+        popup.ShowAsDropDown(anchor, 0, -anchor.Height, GravityFlags.End);
     }
 
     private bool CanMakeFolder(Pane pane) => pane.IsPhone

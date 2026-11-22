@@ -465,7 +465,7 @@ internal sealed partial class RemoteFilesScreen
         dialog.Show();
     }
 
-    private string LocationDescription(SiteDto site)
+    private string LocationDescription(SiteDto site, bool withFree = true)
     {
         if (SiteKindCatalog.SignsIn(site.Kind))
             return site.SigningIn ? "Waiting for sign-in" : _expiredCloudSites.Contains(site.Id) ? "Sign-in has run out"
@@ -482,7 +482,7 @@ internal sealed partial class RemoteFilesScreen
         string detail = kind;
         if (!string.IsNullOrWhiteSpace(address)) detail += " · " + address;
         long? free = _freeBytes.TryGetValue(site.Id, out var known) ? known : site.FreeBytes;
-        if (site.Kind == SiteKindCatalog.Sftp && free is >= 0) detail += " · " + DownloadManager.Mobile.Fmt.Bytes(free.Value) + " free";
+        if (withFree && site.Kind == SiteKindCatalog.Sftp && free is >= 0) detail += " · " + DownloadManager.Mobile.Fmt.Bytes(free.Value) + " free";
         if (!site.Encrypted) detail += " · Not encrypted";
         return detail;
     }
