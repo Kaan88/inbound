@@ -87,7 +87,9 @@ public sealed partial class MainActivity
         var open = screen is not null && ReferenceEquals(_importList, screen) && _nav.PageOpen ? screen : null;
         if (list is null) { ShowNotAList(name, open); return; }
         if (open is not null) { open.Load(list); return; }
-        if (_nav.PageOpen || !HasImportList) return;
+        // Not HasImportList: the chooser sends the app to the background, and a paired PC's connection is often still
+        // coming back when the file arrives. Sending says so if it hasn't by then.
+        if (_nav.PageOpen || _connection is null) return;
         _importList = new ImportListScreen(this, model, HasTorrents ? NewTorrentClient() : null, list);
         _nav.Open(_importList.Root, null, null, OnPageClosed, "Import a list");
     }
