@@ -155,6 +155,29 @@ public sealed class RemoteFilesClient
             SitesMessageTypes.Result, cancellationToken);
     }
 
+    /// <summary>Connects to a saved location through rclone and lists its start folder (<c>sites.test</c>).</summary>
+    public Task<SiteResultDto> TestAsync(string id, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        return RequestAsync<SiteResultDto>(IpcMessage.Create(SitesMessageTypes.Test, new SiteIdRequest { Id = id }), SitesMessageTypes.Result, cancellationToken);
+    }
+
+    /// <summary>Reads the certificate an FTPS or https location's server shows (<c>sites.certificate</c>).</summary>
+    public Task<SiteCertificateResultDto> ReadCertificateAsync(string id, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        return RequestAsync<SiteCertificateResultDto>(IpcMessage.Create(SitesMessageTypes.Certificate, new SiteIdRequest { Id = id }),
+            SitesMessageTypes.CertificateResult, cancellationToken);
+    }
+
+    /// <summary>Trusts the certificate with this SHA-256 fingerprint for the location; the Host reads it again and refuses a different one.</summary>
+    public Task<SiteResultDto> TrustCertificateAsync(string id, string fingerprint, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        return RequestAsync<SiteResultDto>(IpcMessage.Create(SitesMessageTypes.Trust,
+            new SiteTrustRequest { Id = id, CertificateFingerprint = fingerprint }), SitesMessageTypes.Result, cancellationToken);
+    }
+
     public Task<SiteResultDto> MakeFolderAsync(SiteMakeFolderRequest request, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);

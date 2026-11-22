@@ -50,71 +50,50 @@ internal sealed partial class RemoteFilesScreen
         ShowSftpKeyDialog(site, review, generation, trusted);
     }
 
-    private TextView KeyLines(string heading, IEnumerable<SiteHostKeyDto> keys, int headingColor)
-    {
-        var text = new TextView(_activity) { TextSize = 12 };
-        text.SetTypeface(Typeface.Monospace, TypefaceStyle.Normal);
-        text.SetTextIsSelectable(true);
-        text.SetTextColor(new Color(Attr(Resource.Attribute.colorOnSurface)));
-        text.Text = heading + "\n" + string.Join("\n", keys.Select(key => key.Type + "\n" + SftpKeyReview.FingerprintLines(key.Fingerprint)));
-        text.SetPadding(0, Dp(8), 0, 0);
-        return text;
-    }
+    private static string KeyText(SiteHostKeyDto key) => key.Type + "\n" + SftpKeyReview.FingerprintLines(key.Fingerprint);
 
+    /// <summary>x26, x26b and x27: the key question as a sheet, with copy buttons and the two-step confirmation of a changed key.</summary>
     private void ShowSftpKeyDialog(SiteDto site, SftpKeyReview review, int reviewedGeneration, Action? trusted)
     {
         bool changed = review.Case == SftpKeyCase.Changed;
-        var body = new LinearLayout(_activity) { Orientation = Orientation.Vertical };
-        body.SetPadding(Dp(20), Dp(8), Dp(20), 0);
-        var scroll = new ScrollView(_activity);
-        var column = new LinearLayout(_activity) { Orientation = Orientation.Vertical };
-        scroll.AddView(column);
-        body.AddView(scroll, new LinearLayout.LayoutParams(-1, -2));
-        column.AddView(FolderText($"{site.Name} · {site.Host}:{site.Port}\nHost: {_hostDisplay}", 14, Resource.Attribute.colorOnSurfaceVariant));
+        var dialog = NewSheet(out var column);
+        string title = changed ? "Server key changed"
+            : review.Case == SftpKeyCase.MoreKeys ? "Trust more server keys?"
+            : review.Offered.Count > 1 ? "Trust these server keys?" : "Trust this server key?";
+        SheetTitle(column, title, $"{site.Name} · {site.Host}:{site.Port}", _phoneHost ? "On this phone" : "On " + _hostName);
         if (changed)
         {
-            var warning = FolderText("The server's key is not the one you trusted. This could mean the connection is being intercepted. "
-                + "Only continue if the server's administrator confirms that the key changed.", 14, Resource.Attribute.colorError);
-            warning.SetPadding(0, Dp(10), 0, 0);
-            column.AddView(warning);
-            column.AddView(KeyLines("Trusted before:", review.Trusted, Resource.Attribute.colorOnSurfaceVariant));
-            column.AddView(KeyLines("Offered now:", review.Offered, Resource.Attribute.colorOnSurface));
+            AddInset(column, Banner(BannerKind.Fail, "This is not the key you trusted",
+                "Someone could be intercepting the connection. Only continue if the server's administrator confirms that the key changed.",
+                Resource.Drawable.ic_remote_alert));
+            foreach (var key in review.Trusted) AddInset(column, CopyBox(KeyText(key), "Copy trusted key", "Trusted before"));
+            foreach (var key in review.Offered) AddInset(column, CopyBox(KeyText(key), "Copy offered key", "Offered now"));
         }
         else
         {
             if (review.Case == SftpKeyCase.MoreKeys)
-            {
-                var more = FolderText("The server also offers other key types. Trusting them lets this phone connect whichever one the server uses.", 14, Resource.Attribute.colorOnSurfaceVariant);
-                more.SetPadding(0, Dp(10), 0, 0);
-                column.AddView(more);
-            }
-            column.AddView(KeyLines("Keys the server offers:", review.Offered, Resource.Attribute.colorOnSurface));
-            var compare = FolderText("Compare a fingerprint with the one provided by your server administrator before trusting it.", 14, Resource.Attribute.colorOnSurfaceVariant);
-            compare.SetPadding(0, Dp(10), 0, 0);
-            column.AddView(compare);
+                AddInset(column, FolderText("The server also offers other key types. Trusting them lets this phone connect whichever one the server uses.", 15,
+                    Resource.Attribute.colorOnSurfaceVariant));
+            foreach (var key in review.Offered) AddInset(column, CopyBox(KeyText(key), "Copy key"));
+            AddInset(column, Banner(BannerKind.Info, "Compare a fingerprint with the one from the server's administrator before you trust it.", null,
+                Resource.Drawable.ic_remote_info));
         }
         CheckBox? confirmed = null;
         if (changed)
         {
             confirmed = new CheckBox(_activity) { Text = "I checked the new key with the server's administrator", SaveEnabled = false };
-            body.AddView(confirmed);
+            AddInset(column, confirmed);
         }
-        var dialog = new MaterialAlertDialogBuilder(_activity)
-            .SetTitle(changed ? "SFTP server key changed" : review.Case == SftpKeyCase.MoreKeys ? "Trust more SFTP server keys?" : "Trust this SFTP server key?")!
-            .SetView(body)!
-            .SetNegativeButton("Cancel", (Android.Content.IDialogInterfaceOnClickListener?)null)!
-            .SetPositiveButton(changed ? "Replace trusted keys" : review.Offered.Count > 1 ? "Trust keys" : "Trust key", (_, _) => _ = SaveSftpKeyAsync(site, review, reviewedGeneration, trusted))!
-            .Create();
-        _confirm = dialog;
-        dialog.DismissEvent += (_, _) => { if (ReferenceEquals(_confirm, dialog)) _confirm = null; };
-        dialog.ShowEvent += (_, _) =>
+        string primaryText = changed ? "Replace trusted key" : review.Offered.Count > 1 ? "Trust keys" : "Trust key";
+        var accept = SheetButtons(column, primaryText, Resource.Drawable.ic_settings_site_key,
+            () => _ = SaveSftpKeyAsync(site, review, reviewedGeneration, trusted));
+        if (confirmed is not null)
         {
-            if (confirmed is null) return;
-            var accept = dialog.GetButton((int)Android.Content.DialogButtonType.Positive)!;
             accept.Enabled = false;
             confirmed.CheckedChange += (_, e) => accept.Enabled = e.IsChecked;
-        };
-        dialog.Show();
+        }
+        _confirm = null;
+        ShowSheet(dialog);
     }
 
     private async Task SaveSftpKeyAsync(SiteDto site, SftpKeyReview review, int reviewedGeneration, Action? trusted)
