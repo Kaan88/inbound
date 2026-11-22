@@ -12,6 +12,21 @@ not the Opus findings first, so its read is its own), then compare, act on what 
 Each entry: date; what was reviewed (commit, or files if uncommitted); who reviewed; findings and what was done; what
 Fable should look at.
 
+## Open: fixes released in 0.1.1 without Fable, 41ef14a8..5aa45d0a (2026-11-22)
+
+Owner, 2026-11-22: "no fable, release", then "note needed fable review for later". Fable approved the 0.1.0 code at
+`41ef14a8`; the commits after it shipped in 0.1.1 unreviewed (a Fable review was started and stopped by the owner).
+Review `git diff 41ef14a8..5aa45d0a -- src tools`:
+
+- `2410c669`: crumb text colour per the mockups' --chiptext; `RetryAfterSignIn` retries only a transfer still listed as
+  failed (Fable N1). Check the guard when `_transfers` is stale or not loaded.
+- `c83735f1`: Transfers empty state (x4) placement and colour; `RemoteTransferText` reason trimming; a fixture time.
+- `e50146b7` (found on the S24): `OpenTransfers` now calls `Render()` (the Transfers row did nothing until a redraw);
+  `RefreshGap` tracks the last target per scroll view and cancels the running slide (a quick load left the list 56 dp
+  down). Check `Render()` from the "View transfers" snackbar while a folder or form is open, and the gap fields when the
+  Transfers chrome is rebuilt.
+- `5aa45d0a`: version 0.1.1 (versionCode 13) and `docs/android-release-notes-0.1.1.txt`.
+
 ## Done: ANDROID.9 and the speed fixes, 772cd2c0..8d26b536 (2026-11-22)
 
 Two Fable agents reviewed the range and then approved every fix and follow-up (`65264734`, `82c551c3`, `6a0d25c3`):
