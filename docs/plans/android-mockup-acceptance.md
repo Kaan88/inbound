@@ -62,6 +62,17 @@ Owner decisions for the redesign (2026-11-21)
     counts (that server is an older build without counts), and This phone uploads say they need this phone as the Host
     (as designed). Dropbox kept listing a deleted file for about a minute (its own listing lag; the next listing was
     right). The phone's Host has not trusted minipc's SSH key; left for the owner.
+- x/y screens on the S24, real data (signed 0.1.0 from `e50146b7`, phone Host with Google Drive, Dropbox, OneDrive
+  and minipc, 2026-11-22; captures in the session scratchpad, not kept): x11 locations list, x1 Transfers (10 real
+  transfers), x2 details of a finished Dropbox download, x9 Show in folder (This phone pane scrolled to the file, outlined,
+  Open), x18 Add location, x19 SFTP form with the Password/Key switch, y1b Key with no file, x12b location sheet, x31
+  Edit minipc: all match. minipc's edit form says "Password", not "Saved; type to replace": the Host reports no saved
+  password for it (data, not layout).
+  - Found and fixed (`e50146b7`): tapping the Transfers row did nothing until something else redrew the screen
+    (`OpenTransfers` never drew); and a load ending inside the 150 ms pull-to-refresh slide left the list 56 dp down.
+    Both seen fixed on the S24. The fixtures open Transfers directly, so the emulator never showed either.
+  - Not checked on the phone: choosing a real key file (y1-y3 with the owner's key), x10b from the Downloads tab (no
+    finished download in the list), sign-in and trust flows (x26-x30) on real accounts.
 
 ANDROID.9 mockups, approved by the owner (2026-11-21, "Approved, build them"): `t1-add-torrent` to `t7-settings` in `android-mockups/`, from
 `t-torrents-torbox-archives.html`. The phone does the work in its own Host; with another host selected the same

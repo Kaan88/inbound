@@ -68,6 +68,10 @@ it, since this branch does not merge into `main` without the owner's say-so.
   during a close animation keeps the follow-up until the next close). x1, x2, y2, x10b recaptured. Still open: the S24
   comparison on real data for the x/y screens, the signed build and publishing; three uncommitted worker edits
   (TransfersEmpty layout, RemoteTransferText reason, a fixture time) wait for the owner.
+- Owner, 2026-11-22: "delete, why didn't you merge?" Worker edits committed (`c83735f1`; x4 matches), the nine dated APK
+  build folders (about 5 GB) deleted. Owner unlocked the S24: x/y screens checked on real data (acceptance matrix, "x/y
+  screens on the S24"); two Transfers bugs found and fixed (`e50146b7`). Display baseline (auto brightness, timeout max)
+  recorded, dimmed, restored.
 - Owner, 2026-11-22: "have an agent look at existing extension adaptability to mobile edge for capturing links, or other
   solutions. non critical or required for release." Research done (sources only, nothing tried on a device):
   - Edge for Android runs extensions only from Microsoft's allowlist (store listing, mobile value, QA test cases, a
