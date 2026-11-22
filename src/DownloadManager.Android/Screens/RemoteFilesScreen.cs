@@ -24,7 +24,7 @@ internal sealed partial class RemoteFilesScreen : IDisposable
     private readonly RemoteFilesClient _client;
     private readonly string _hostName;
     private readonly string _hostDisplay;
-    private readonly bool _secureHostConnection;
+    private bool _secureHostConnection; // not readonly: the test-build fixtures (RemoteFilesScreen.Fixture.cs) set it
     private readonly string _hostStamp;
     private readonly bool _phoneHost;
     private volatile bool _hostChanged;
@@ -291,6 +291,7 @@ internal sealed partial class RemoteFilesScreen : IDisposable
         if (_clientSecret is not null) _clientSecret.Text = "";
         _clientSecret = null;
         ClearFormSecrets();
+        ClearKeyState();
     }
 
     private static bool SafeName(string name) =>
