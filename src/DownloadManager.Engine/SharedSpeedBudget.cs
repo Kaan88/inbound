@@ -21,5 +21,6 @@ public sealed class SharedSpeedBudget
     /// <summary>Null or zero takes the cap away. A change reaches transfers already running.</summary>
     public void Update(long? bytesPerSecond) => Volatile.Write(ref _bytesPerSecond, bytesPerSecond is > 0 ? bytesPerSecond.Value : 0);
 
-    internal Task WaitAsync(int bytes, CancellationToken cancellationToken) => _limiter.WaitAsync(bytes, cancellationToken);
+    internal Task WaitAsync(int bytes, CancellationToken cancellationToken, Func<bool>? stillApplies = null)
+        => _limiter.WaitAsync(bytes, cancellationToken, stillApplies);
 }

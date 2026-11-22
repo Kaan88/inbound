@@ -22,6 +22,8 @@ internal static class QueueWorkScheduler
     private static object? _execution;
     private static bool _ready, _posted;
     private static string? _scheduledKey;
+    // The run's notification text last posted; main thread only. Activity ticks about once a second (review A8).
+    private static DownloadManager.Mobile.OngoingText? _runText;
     private static DateTimeOffset _notBefore;
 
     internal static bool Running { get { lock (Gate) return _service is not null; } }
@@ -90,7 +92,7 @@ internal static class QueueWorkScheduler
                 InboundBackground.RefreshTransferPermission();
                 NetworkMonitor.AppVisible(); QueuePowerMonitor.AppVisible();
                 await host.Service.EvaluateSchedulesAsync(DateTimeOffset.Now).ConfigureAwait(false);
-                Main.Post(() => { if (!IsCurrent(service, execution)) return; _ready = true; UpdateRun(); });
+                Main.Post(() => { if (!IsCurrent(service, execution)) return; _ready = true; _runText = null; UpdateRun(); });
             }
             catch (Exception ex)
             {
@@ -113,7 +115,10 @@ internal static class QueueWorkScheduler
         if (service is null || parameters is null || execution is null || _host is not { } host) return;
         var summary = host.Activity.Summary;
         if (!summary.KeepAlive) { Finish(service, parameters, execution); return; }
-        var notification = Notifications.Ongoing(service, DownloadManager.Mobile.NotificationText.Ongoing(summary));
+        var text = DownloadManager.Mobile.NotificationText.Ongoing(summary);
+        if (text == _runText) return;
+        _runText = text;
+        var notification = Notifications.Ongoing(service, text);
         if (OperatingSystem.IsAndroidVersionAtLeast(34)) service.SetNotification(parameters, Notifications.OngoingId, notification, JobEndNotificationPolicy.Remove);
         else Notifications.Notify(service, Notifications.OngoingId, notification);
     }

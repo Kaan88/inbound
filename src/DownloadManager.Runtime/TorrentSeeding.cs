@@ -277,7 +277,7 @@ public sealed partial class DownloadManagerService
         if (_shuttingDown) return;
         lock (_sync)
         {
-            if (reason == TorrentSeedingEnd.Stopped && _seedHeld.Contains(jobId)) return;
+            if (reason == TorrentSeedingEnd.Stopped && (_seedHeld.Contains(jobId) || _seedHolding.Contains(jobId))) return;
         }
 
         if (reason != TorrentSeedingEnd.Stopped) _log?.Invoke($"Torrent job {jobId}: seeding ended ({reason}): {message}");

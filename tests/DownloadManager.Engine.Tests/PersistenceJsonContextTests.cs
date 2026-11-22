@@ -63,6 +63,7 @@ public sealed class PersistenceJsonContextTests : IDisposable
         typeof(DownloadManager.Core.Providers.RemoteJobRecord), typeof(DownloadManager.Core.Providers.RemoteAccountPacing),
         typeof(StoredRemoteAccount), typeof(List<TorrentFile>), typeof(DownloadManager.Core.Archives.ArchiveSettings),
         typeof(DownloadManager.Core.Archives.ArchiveSetRecord), typeof(DownloadManager.Core.Archives.ArchivePackagePassword),
+        typeof(DownloadManager.Core.Archives.ArchiveSavedPasswords),
     ];
 
     [Fact]

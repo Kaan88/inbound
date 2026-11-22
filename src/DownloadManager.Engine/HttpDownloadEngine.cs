@@ -28,27 +28,13 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
     private SharedSpeedBudget? QueueBudget(DownloadJob job)
         => job.IsQueued && _queueBudgets.TryGetValue(job.QueueId, out var budget) ? budget : null;
 
-    private async Task WaitForQueueAsync(DownloadJob job, int bytes, CancellationToken token)
-    {
-        while (QueueBudget(job) is { Limited: true } budget)
-        {
-            using var membership = CancellationTokenSource.CreateLinkedTokenSource(token);
-            var waiting = budget.WaitAsync(bytes, membership.Token);
-            while (!waiting.IsCompleted)
-            {
-                await Task.WhenAny(waiting, Task.Delay(100, token)).ConfigureAwait(false);
-                token.ThrowIfCancellationRequested();
-                if (!ReferenceEquals(QueueBudget(job), budget))
-                {
-                    membership.Cancel();
-                    try { await waiting.ConfigureAwait(false); return; }
-                    catch (OperationCanceledException) when (!token.IsCancellationRequested) { break; }
-                }
-            }
-            if (!waiting.IsCanceled) { await waiting.ConfigureAwait(false); return; }
-            token.ThrowIfCancellationRequested();
-        }
-    }
+    // One wait per chunk with no extra token source or timer (review S6): the limiter re-reads the live cap at least every
+    // 100 ms, so lifting or raising it reaches a waiting chunk at once, and it asks at each step whether the job is still
+    // in this queue, so a move out of it ends the wait (the next chunk then draws on the new queue's budget, if any).
+    private Task WaitForQueueAsync(DownloadJob job, int bytes, CancellationToken token)
+        => QueueBudget(job) is { Limited: true } budget
+            ? budget.WaitAsync(bytes, token, () => ReferenceEquals(QueueBudget(job), budget))
+            : Task.CompletedTask;
 
     private static readonly HashSet<string> RestrictedHeaders = new(StringComparer.OrdinalIgnoreCase)
     {

@@ -221,13 +221,17 @@ dotnet test tests\DownloadManager.TorBox.LiveTests\DownloadManager.TorBox.LiveTe
 
 ## Delegation and review
 
-Delegate routine, bounded work (small changes, diff reviews, documentation and
-encoding checks, evidence wording, coverage spot checks) to a cheaper Claude
-model: Haiku for simple checks, Sonnet for scoped implementation. Opus reviews
-each major addition and rewrites where needed; Fable reviews once at the end of a
-milestone and before a release. Keep concurrency, durability, security, IPC
-protocol and architecture work in the main model. Read and check all delegated
-code yourself; a worker's or reviewer's PASS is input, not acceptance evidence.
+Who does what (owner, 2026-11-22):
+
+- Opus (the main model) coordinates: it checks every diff a worker sends back,
+  owns the merges, and does any change that is risky and important itself
+  (concurrency, durability, security, IPC protocol, architecture).
+- Haiku gets simple, mechanical work.
+- Sonnet gets routine implementation. Each worker gets a user-visible outcome,
+  the files it owns and a focused check to run.
+- Fable reviews: once at the end of a milestone and before a release.
+
+A worker's or reviewer's PASS is input, not acceptance evidence.
 
 ## Known traps
 

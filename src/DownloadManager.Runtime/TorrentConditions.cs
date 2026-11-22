@@ -16,6 +16,8 @@ public sealed partial class DownloadManagerService
 
     /// <summary>Seeding torrents held off the worker by the seeding rule (under <c>_sync</c>); still marked seeding.</summary>
     private readonly HashSet<Guid> _seedHeld = [];
+    // Held torrents whose worker is being stopped right now (HoldSeedingAsync); guarded by _sync.
+    private readonly HashSet<Guid> _seedHolding = [];
 
     /// <summary>Whether a torrent shows a WaitingFor note (under <c>_sync</c>), so the pass that clears it still runs.</summary>
     private bool _torrentWaitingShown;
@@ -106,6 +108,9 @@ public sealed partial class DownloadManagerService
 
             if (_torrentEngine is { } engine && engine.IsSeeding(runtime.Job.Id))
             {
+                // The hold may be lifted while the worker stops (charger in): its "stopped" must still not clear the
+                // seeding mark, or the resume restarts the seeding-hours limit (Fable F6).
+                lock (_sync) _seedHolding.Add(runtime.Job.Id);
                 try
                 {
                     await engine.StopSeedingAsync(runtime.Job.Id).ConfigureAwait(false);
@@ -114,6 +119,10 @@ public sealed partial class DownloadManagerService
                 catch (Exception ex)
                 {
                     _log?.Invoke($"Torrent job {runtime.Job.Id}: holding its seeding failed: {ex.Message}");
+                }
+                finally
+                {
+                    lock (_sync) _seedHolding.Remove(runtime.Job.Id);
                 }
             }
         }

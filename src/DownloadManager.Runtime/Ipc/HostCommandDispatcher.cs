@@ -137,7 +137,13 @@ public sealed partial class HostCommandDispatcher
         if (platform.SupportsCompletionActions) capabilities.Add("completionActions");
         // archive.* is answered (extraction started) and an extractor is there (7-Zip found), as of the hello. A 7-Zip
         // installed later shows on the next connection, or at once in archive.settings.get's tool.
-        if (rights.Archives is { } archives && archives.Coordinator.CanExtract) capabilities.Add("archives");
+        if (rights.Archives is { } archives && archives.Coordinator.CanExtract)
+        {
+            capabilities.Add("archives");
+            // Saved passwords, a set's own delete choice and "save for other archives" (ANDROID.9). A Host without this ignores
+            // those fields, so a client must not offer them (Fable F1, 2026-11-22).
+            capabilities.Add("archiveSavedPasswords");
+        }
         // A .torrent file or a container can be uploaded (POST /api/upload/...) and then named by its reference.
         if (rights.Remote is { AcceptsUploads: true }) capabilities.Add("uploads");
         // T1: torrent.* is answered, whether or not torrents are turned on in Options (the commands then say so).
@@ -1043,9 +1049,13 @@ public sealed partial class HostCommandDispatcher
                     : IpcMessage.Create(ArchiveMessageTypes.ExtractResult, new ArchiveExtractResult { Error = CallerScope.OutsideJobRefused }, message.Id);
             case ArchiveMessageTypes.SetPassword:
                 var password = message.GetPayload<ArchiveSetPasswordRequest>();
-                return password.PackageId is not { } passwordPackage || HoldsAll(null, passwordPackage, caller)
-                    ? null
-                    : IpcMessage.Create(ArchiveMessageTypes.ActionResult, new ArchiveActionResult { Error = CallerScope.OutsideJobRefused }, message.Id);
+                if (password.PackageId is { } passwordPackage && !HoldsAll(null, passwordPackage, caller))
+                    return IpcMessage.Create(ArchiveMessageTypes.ActionResult, new ArchiveActionResult { Error = CallerScope.OutsideJobRefused }, message.Id);
+                // A set's own delete choice can't do what the setting can't (Fable F2). Saved passwords stay open to a web
+                // session: a paired phone is one, and they are never read back.
+                return password.DeleteArchives == true && !archives.Coordinator.GetSettings().Settings.DeleteArchives
+                    ? IpcMessage.Create(ArchiveMessageTypes.ActionResult, new ArchiveActionResult { Error = ExtractionRemovalUnavailable }, message.Id)
+                    : null;
             case ArchiveMessageTypes.SettingsSet:
                 var settings = message.GetPayload<ArchiveSettingsUpdate>();
                 var current = archives.Coordinator.GetSettings();

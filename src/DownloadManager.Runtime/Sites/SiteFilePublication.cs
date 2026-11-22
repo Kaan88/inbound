@@ -38,6 +38,9 @@ internal static class SiteFilePublication
         // this local copy (review S2, 2026-11-21).
         if ((OperatingSystem.IsAndroid() || OperatingSystem.IsLinux()) && error is 22 or 38 or 95)
             return null;
+        // macOS: renamex_np(RENAME_EXCL) on SMB, exFAT and similar volumes (EINVAL, ENOTSUP, EOPNOTSUPP; Fable F5).
+        if (OperatingSystem.IsMacOS() && error is 22 or 45 or 102)
+            return null;
         throw new IOException($"The destination did not accept an exclusive file move (error {error}).");
     }
 

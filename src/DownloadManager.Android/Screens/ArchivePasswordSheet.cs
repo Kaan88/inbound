@@ -44,10 +44,15 @@ internal static class ArchivePasswordSheet
         root.AddView(layout, new LinearLayout.LayoutParams(-1, -2) { TopMargin = dp(16) });
 
         // t6: the password joins the Host's saved list (on by default, as drawn), and this set's own delete choice (the setting's by default).
+        // An older paired Host ignores both and doesn't send the set's choice: the boxes would show a wrong state (Fable F1).
+        var extras = activity.HasArchiveSavedPasswords;
         var save = new MaterialCheckBox(activity) { Text = "Save it for other archives", Checked = true };
-        root.AddView(save, new LinearLayout.LayoutParams(-1, -2) { TopMargin = dp(8) });
         var delete = new MaterialCheckBox(activity) { Text = "Delete the archive after extracting", Checked = set.DeleteArchives };
-        root.AddView(delete, new LinearLayout.LayoutParams(-1, -2));
+        if (extras)
+        {
+            root.AddView(save, new LinearLayout.LayoutParams(-1, -2) { TopMargin = dp(8) });
+            root.AddView(delete, new LinearLayout.LayoutParams(-1, -2));
+        }
 
         if (!string.IsNullOrWhiteSpace(set.Destination))
         {
@@ -89,8 +94,8 @@ internal static class ArchivePasswordSheet
             busy = true; extract.Enabled = later.Enabled = false; extract.Text = "Extracting…"; error.Visibility = ViewStates.Gone;
             // The text leaves the field now: only the request holds it, and nothing is logged.
             input.Text = "";
-            var saveForOthers = save.Checked;
-            var deleteArchives = delete.Checked;
+            var saveForOthers = extras && save.Checked;
+            bool? deleteArchives = extras ? delete.Checked : null;
             ArchiveUi.Run(activity, () => client.SetPasswordAsync(set.Id, password, saveForOthers, deleteArchives), result =>
             {
                 if (result.Ok) { dialog.Dismiss(); applied(result.Set); }

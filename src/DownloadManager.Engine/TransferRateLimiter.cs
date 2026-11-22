@@ -14,7 +14,8 @@ internal sealed class TransferRateLimiter(Func<long?> readLimit)
     /// <summary>Whether a cap is set now (PERF.9: the loops then read in small steps, so the cap stays smooth).</summary>
     public bool Limited => readLimit().GetValueOrDefault() > 0;
 
-    public async Task WaitAsync(int bytes, CancellationToken cancellationToken)
+    /// <param name="stillApplies">Checked at each step of a wait: false ends it at once (the transfer left this budget).</param>
+    public async Task WaitAsync(int bytes, CancellationToken cancellationToken, Func<bool>? stillApplies = null)
     {
         // No cap is the common case: skip the gate, so uncapped transfers never queue behind each other.
         if (readLimit().GetValueOrDefault() <= 0) return;
@@ -25,6 +26,7 @@ internal sealed class TransferRateLimiter(Func<long?> readLimit)
             while (true)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                if (stillApplies?.Invoke() == false) return;
                 var limit = readLimit().GetValueOrDefault();
                 var now = Stopwatch.GetTimestamp();
                 if (limit != _previousLimit || limit <= 0)

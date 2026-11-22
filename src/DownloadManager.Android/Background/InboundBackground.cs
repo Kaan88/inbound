@@ -57,18 +57,27 @@ internal static class InboundBackground
     {
         lock (PermissionGate) { if (ReferenceEquals(_permissionService, service)) _permissionService = null; }
     }
+    // What the queue wake plan reads besides settings and job changes (which re-arm on their own): visibility, sessions and
+    // the crash guard. Every activity tick calls Evaluate; re-arming only on a change avoids a snapshot clone and binder calls
+    // about once a second during transfers (review A2).
+    private static (bool Visible, bool Keep, bool Queue, bool Tripped)? _armedFor;
+
     internal static void RefreshTransferPermission()
     {
+        bool rearm;
         lock (PermissionGate)
         {
             if ((_permissionService ?? _host?.Service) is not { } service) return;
             var allowed = TransferExecutionAllowed;
+            var armState = (Visible, KeepAliveRunning, QueueWorkScheduler.Running, CrashGuardStore.Tripped);
+            rearm = _armedFor != armState;
+            _armedFor = armState;
             _host?.SetRemoteFilesExecutionAllowed(Visible || _keep?.Attached == true || QueueWorkScheduler.Running);
             var update = service.SetPlatformTransfersAllowedAsync(allowed);
             _ = update.ContinueWith(t => Log.Warn(InboundApplication.Tag, "transfer permission: " + t.Exception?.GetBaseException().GetType().Name),
                 CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
         }
-        QueueWorkScheduler.RequestArm();
+        if (rearm) QueueWorkScheduler.RequestArm();
     }
 
     /// <summary>The downloads screen is visible (between MainActivity's OnStart and OnStop).</summary>

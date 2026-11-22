@@ -43,6 +43,30 @@ public sealed partial class HostCommandDispatcherTests
     }
 
     [Fact]
+    public async Task ATorrentThatHasDataAlsoGoesBackToItsQueueWhenWifiIsLost()
+    {
+        // Fable A9-1: only the HTTP engine says whether a download can resume, so a torrent with any bytes used to keep
+        // running on mobile data. A torrent resumes from its pieces.
+        var service = await TorrentServiceAsync(settings: s => s.DownloadOnlyOnUnmeteredNetwork = false);
+        await service.SetNetworkMeteredAsync(false);
+        var dispatcher = Dispatcher(service);
+        var hash = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(20));
+        var job = (await AskAsync(dispatcher, Session(), TorrentMessageTypes.Add, new TorrentAddRequest
+        {
+            Input = $"magnet:?xt=urn:btih:{hash}&dn=Partway", Destination = Path.Combine(_root, "down"),
+        })).GetPayload<TorrentAddResult>().Job!;
+        var worker = await UntilAsync(() => { lock (_torrentWorkers) return _torrentWorkers.FirstOrDefault(w => w.Torrents.Count == 1); });
+        worker.Advance();
+        var partway = await UntilAsync(() => service.GetSnapshot().Jobs.FirstOrDefault(j => j.Id == job.Id && j.ReceivedBytes > 0));
+        Assert.Null(partway.Torrent!.WaitingFor);
+
+        await service.SetNetworkMeteredAsync(true);
+        var back = await UntilAsync(() => service.GetSnapshot().Jobs.FirstOrDefault(j => j.Id == job.Id && j.State == "queued" && j.Torrent!.WaitingFor is not null));
+        Assert.Equal(DownloadManagerService.TorrentWaitingForWifi, back.Torrent!.WaitingFor);
+        Assert.True(back.ReceivedBytes > 0);
+    }
+
+    [Fact]
     public async Task SeedingWaitsForChargingAndWifiStaysMarkedAndGoesOnByItself()
     {
         var (service, dispatcher, job) = await CompletedTorrentAsync();

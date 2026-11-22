@@ -494,6 +494,9 @@ public sealed partial class MainActivity : AppCompatActivity
     /// <summary>The shown Host answers archive.* and has an extractor (its hello lists "archives").</summary>
     internal bool HasArchives => DownloadManager.Mobile.Archives.ArchiveClient.Offered(_model?.Hello);
 
+    /// <summary>The shown Host keeps saved archive passwords and a set's own delete choice (its hello lists "archiveSavedPasswords").</summary>
+    internal bool HasArchiveSavedPasswords => DownloadManager.Mobile.Archives.ArchiveClient.SavedPasswordsOffered(_model?.Hello);
+
     internal DownloadManager.Mobile.Archives.ArchiveClient? NewArchiveClient() =>
         _connection is null ? null : new DownloadManager.Mobile.Archives.ArchiveClient(_connection);
 

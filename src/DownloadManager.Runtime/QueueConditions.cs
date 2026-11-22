@@ -59,20 +59,26 @@ public sealed partial class DownloadManagerService
         Schedule();
     }
 
-    /// <summary>Report before initialization, then on power changes. No platform state is written to disk.</summary>
-    public async Task SetQueuePowerStateAsync(bool charging, bool batterySaver, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Report before initialization, then on power changes. No platform state is written to disk. Returns false when the
+    /// state is unchanged: Android repeats the battery broadcast about once a minute on a charger (review A1).
+    /// </summary>
+    public async Task<bool> SetQueuePowerStateAsync(bool charging, bool batterySaver, CancellationToken cancellationToken = default)
     {
         lock (_sync)
         {
+            if (_platformReportsQueuePower && _queuePowerKnown && _queueCharging == charging && _queueBatterySaver == batterySaver)
+                return false;
             _platformReportsQueuePower = true;
             _queuePowerKnown = true;
             _queueCharging = charging;
             _queueBatterySaver = batterySaver;
-            if (!_initialized) return;
+            if (!_initialized) return true;
         }
         await RequeueExcessAsync(cancellationToken).ConfigureAwait(false);
         // Subscribers re-read the latest state, so a late report cannot publish an older condition snapshot.
         SettingsChanged?.Invoke(this, _settings);
         Schedule();
+        return true;
     }
 }

@@ -362,7 +362,9 @@ public sealed partial class DownloadManagerService
     /// <summary>Null when the job's data so far survives a stop; otherwise why not.</summary>
     private static string? WhyNotResumable(DownloadJob job)
     {
-        if (job.ReceivedBytes == 0)
+        // A torrent resumes from the pieces it has; ResumeSupported is only ever set by the HTTP engine. Without this a
+        // torrent with any data kept running on mobile data under "Wi-Fi only" (Fable A9-1, 2026-11-22).
+        if (job.ReceivedBytes == 0 || job.Torrent is not null)
         {
             return null;
         }

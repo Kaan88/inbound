@@ -265,6 +265,23 @@ public sealed partial class ArchiveCoordinator
     {
         ArgumentNullException.ThrowIfNull(request);
         if (DescribeBadPassword(request.Password) is { } bad) return new ArchiveActionResult { Ok = false, Error = bad };
+        // The target first: a refused request must not leave its password in the saved list (Fable F7).
+        if (request.PackageId is { } namedPackage)
+        {
+            if (!_service.GetDownloadGroups().Any(candidate => candidate.Id == namedPackage))
+                return new ArchiveActionResult { Ok = false, Error = "There is no such package." };
+        }
+        else if (request.SetId is { } namedSet)
+        {
+            bool known;
+            lock (_sync) known = _sets.GetValueOrDefault(namedSet) is { Removed: false };
+            if (!known) return new ArchiveActionResult { Ok = false, Error = "There is no such archive set." };
+        }
+        else if (string.IsNullOrWhiteSpace(request.FilePath))
+        {
+            return new ArchiveActionResult { Ok = false, Error = "Say which set or package the password is for." };
+        }
+
         if (request.SaveForOtherArchives && !string.IsNullOrEmpty(request.Password) &&
             await AddSavedPasswordCoreAsync(request.Password, cancellationToken).ConfigureAwait(false) is { } notSaved)
         {

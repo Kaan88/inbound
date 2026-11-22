@@ -72,6 +72,8 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
 
     // Bumped when a site changes, so a listing read before the change is not kept after it.
     private readonly Dictionary<string, int> _generations = new(StringComparer.Ordinal);
+    // Files done per upload transfer when its listings were last forgotten; guarded by _listings.
+    private readonly Dictionary<string, int> _uploadFilesDone = new(StringComparer.Ordinal);
 
     private SitesConfig _config;
     private string? _configProblem;
@@ -117,7 +119,11 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
         _transfers = new SiteTransfers(stateDirectory, (id, ct) => _sites.GetAsync(id, ct), ct => AcquireAsync(ct),
             () => _config.Enabled, () => _config.TransfersAtOnce, log, _time, transferRetryDelay, sleepPrevention,
             preventSleep, transferExecutionAllowed, afterTransferExclusiveOpen);
-        _transfers.Changed += change => TransfersChanged?.Invoke(this, change);
+        _transfers.Changed += change =>
+        {
+            ForgetListingsAfterUploads(change);
+            TransfersChanged?.Invoke(this, change);
+        };
         if (_config.Enabled)
         {
             StartUpdateLoop();
@@ -867,7 +873,12 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
             var space = request.IncludeFreeSpace && site.Kind == SiteKindCatalog.Sftp
                 ? await TryReadSftpFreeBytesAsync(site, cancellationToken).ConfigureAwait(false) : null;
             timing.SpaceMs = timing.Now - spaceStarted;
-            listing = new Listing(Guid.NewGuid().ToString("N"), path, listed!, _time.GetUtcNow(), site.Revision,
+            // A token renewed during the list saved the site and changed its revision: stamp the listing with the revision
+            // it has now, or the counts request and "load more" never find it (Fable F4). An edit meanwhile changed the
+            // generation, so StoreListing drops this listing then.
+            var revision = SiteKindCatalog.SignsIn(site.Kind) && await _sites.GetAsync(site.Id, cancellationToken).ConfigureAwait(false) is { } now
+                ? now.Revision : site.Revision;
+            listing = new Listing(Guid.NewGuid().ToString("N"), path, listed!, _time.GetUtcNow(), revision,
                 request.ChronologicalFiles, space);
             StoreListing(site.Id, generation, listing);
         }
@@ -1022,6 +1033,32 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
             held.RemoveAll(listing => now - listing.At >= ListingLifetime);
             if (held.Count == 0) _listings.Remove(id);
         }
+    }
+
+    /// <summary>
+    /// An upload that put files on a site makes that site's held listings stale: forget them, so a client that shows the
+    /// folder again reads the server (Fable F3). Keyed by files done, so a progress tick alone forgets nothing.
+    /// </summary>
+    private void ForgetListingsAfterUploads(SiteTransfersDto change)
+    {
+        List<string>? stale = null;
+        lock (_listings)
+        {
+            foreach (var transfer in change.Transfers)
+            {
+                if (transfer.Direction != SiteTransferDirections.Upload) continue;
+                var seen = _uploadFilesDone.GetValueOrDefault(transfer.Id);
+                if (transfer.FilesDone == seen) continue;
+                _uploadFilesDone[transfer.Id] = transfer.FilesDone;
+                (stale ??= []).Add(transfer.SiteId);
+            }
+            if (_uploadFilesDone.Count > 64)
+            {
+                var present = change.Transfers.Select(transfer => transfer.Id).ToHashSet(StringComparer.Ordinal);
+                foreach (var id in _uploadFilesDone.Keys.Where(id => !present.Contains(id)).ToList()) _uploadFilesDone.Remove(id);
+            }
+        }
+        foreach (var siteId in stale?.Distinct(StringComparer.Ordinal) ?? []) ForgetListings(siteId);
     }
 
     private void ForgetListings(string siteId)

@@ -21,6 +21,14 @@ public sealed class ArchiveClient
 
     public static bool Offered(HostHelloDto? hello) => hello?.Capabilities.Contains(Capability) == true;
 
+    /// <summary>
+    /// The Host keeps saved passwords and a set's own delete choice. An older Host ignores <c>saveForOtherArchives</c> and
+    /// <c>deleteArchives</c> and doesn't send the set's choice, so the phone hides those controls there (Fable F1).
+    /// </summary>
+    public const string SavedPasswordsCapability = "archiveSavedPasswords";
+
+    public static bool SavedPasswordsOffered(HostHelloDto? hello) => hello?.Capabilities.Contains(SavedPasswordsCapability) == true;
+
     public Task<ArchiveListResult> ListAsync(CancellationToken cancellationToken = default) =>
         RequestAsync<ArchiveListResult>(IpcMessage.Create(ArchiveMessageTypes.List, new EmptyPayload()), ArchiveMessageTypes.ListResult, cancellationToken);
 

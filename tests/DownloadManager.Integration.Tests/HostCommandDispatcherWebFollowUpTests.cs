@@ -40,7 +40,7 @@ public sealed partial class HostCommandDispatcherTests
         await archives.InitializeAsync();
         var web = await WebAsync(archives: archives, service: service);
 
-        Assert.Equal(["jobs", "settings", "handoff", "tray", "status", "folders", "archives", "browserRefresh", "queueSpeedLimit", "settingsCompareAndSwap", "queueDeleteSchedules", "queueConditionalMove", "queueIdentity", JobQueueRequest.UnqueuedPreconditionCapability, JobActionRequest.StopUnfinishedCapability], web.Session.Frames[0].GetPayload<HostHelloDto>().Capabilities);
+        Assert.Equal(["jobs", "settings", "handoff", "tray", "status", "folders", "archives", "archiveSavedPasswords", "browserRefresh", "queueSpeedLimit", "settingsCompareAndSwap", "queueDeleteSchedules", "queueConditionalMove", "queueIdentity", JobQueueRequest.UnqueuedPreconditionCapability, JobActionRequest.StopUnfinishedCapability], web.Session.Frames[0].GetPayload<HostHelloDto>().Capabilities);
         // This test's dispatcher has no archive commands for the pipe; the Host's own has them.
         Assert.DoesNotContain("archives", web.Pipe.Frames[0].GetPayload<HostHelloDto>().Capabilities);
         var withArchives = new HostCommandDispatcher(service, new FakePlatform(PlatformCapabilities.Desktop, _timeline), new ListLog())

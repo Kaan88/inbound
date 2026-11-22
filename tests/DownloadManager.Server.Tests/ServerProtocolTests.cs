@@ -40,9 +40,10 @@ public sealed class ServerProtocolTests
         // "archives" where a 7-Zip is there to extract with, and "uploads" (it stores the web UI's uploads) beside "remote".
         // SITES.7: Sites is followed by shared browser-refresh, HTTP queue-budget and settings revision capabilities.
         Assert.Equal(["jobs", "settings", "handoff", "status", "folders", SiteTransferStartRequest.SafeSingleDownloadCapability, SiteChangeRequest.DeleteFilesCapability, SiteBrowseRequest.CachedFirstPageCapability, "sites", "browserRefresh", "queueSpeedLimit", "settingsCompareAndSwap", "queueDeleteSchedules", "queueConditionalMove", "queueIdentity", "queueUnqueuedPrecondition", "stopUnfinished"],
-            helloDto.Capabilities.Where(name => name is not ("remote" or "archives" or "uploads")));
+            helloDto.Capabilities.Where(name => name is not ("remote" or "archives" or "archiveSavedPasswords" or "uploads")));
         Assert.Equal(DownloadManager.Archives.SevenZipTool.Find() is not null, helloDto.Capabilities.Contains("archives"));
         Assert.Equal(helloDto.Capabilities.Contains("remote"), helloDto.Capabilities.Contains("uploads"));
+        Assert.Equal(helloDto.Capabilities.Contains("archives"), helloDto.Capabilities.Contains("archiveSavedPasswords"));
         Assert.Equal(HostKinds.Server, helloDto.HostKind);
 
         var snapshot = await client.ReadAsync();

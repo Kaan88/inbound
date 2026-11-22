@@ -246,6 +246,8 @@ internal sealed class TorBoxSettingsPage
         savedRow.Clickable = true;
         savedRow.Focusable = true;
         savedRow.Background = new TypedValueHolder(_activity).SelectableBackground();
+        // An older paired Host has no saved passwords (Fable F1).
+        if (!_activity.HasArchiveSavedPasswords) savedRow.Visibility = ViewStates.Gone;
         savedRow.Click += (_, _) => SavedPasswordsSheet.Show(_activity, _archives!, count => { if (!_disposed) _savedLine!.Text = ArchiveClient.SavedPasswordsLine(count); });
         _extractSwitch.Enabled = _deleteSwitch.Enabled = false;
         _toolNote = new TextView(_activity) { TextSize = 14, Visibility = ViewStates.Gone };
