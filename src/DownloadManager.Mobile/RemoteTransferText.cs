@@ -166,7 +166,7 @@ public static class RemoteTransferText
         if (problem is not null) return (problem, string.IsNullOrWhiteSpace(t.Message) ? null : t.Message, false);
         int missing = Math.Max(NotCopied(t), t.FilesFailed);
         var detail = missing > 0 ? (missing == 1 ? "Retry sends only the file that is missing." : $"Retry sends only the {missing} files that are missing.") : null;
-        return (string.IsNullOrWhiteSpace(t.Message) ? "The transfer stopped" : t.Message!, detail, false);
+        return (string.IsNullOrWhiteSpace(t.Message) ? "The transfer stopped" : t.Message!.TrimEnd().TrimEnd('.'), detail, false); // a banner title has no full stop (x2)
     }
 
     /// <summary>True when the failure needs a sign-in or a trust decision first, so Retry alone would fail again.</summary>

@@ -386,12 +386,12 @@ internal sealed partial class RemoteFilesScreen
     private View TransfersEmpty()
     {
         var box = new LinearLayout(_activity) { Orientation = Orientation.Vertical };
-        box.SetGravity(GravityFlags.Center);
-        box.SetPadding(Dp(32), 0, Dp(32), Dp(96));
+        box.SetGravity(GravityFlags.CenterHorizontal | GravityFlags.Top);
+        box.SetPadding(Dp(32), Dp(150), Dp(32), Dp(96)); // x4 starts the block 150 dp under the bar
         var disc = new FrameLayout(_activity);
         var shape = new GradientDrawable();
         shape.SetShape(ShapeType.Oval);
-        shape.SetColor(new Color(Attr(Resource.Attribute.colorSurfaceContainerHighest)));
+        shape.SetColor(new Color(Attr(IsNight() ? Resource.Attribute.colorSurfaceContainer : Resource.Attribute.colorPrimaryContainer)));
         disc.Background = shape;
         var glyph = new ImageView(_activity) { ImportantForAccessibility = ImportantForAccessibility.No };
         glyph.SetImageResource(Resource.Drawable.ic_remote_transfers);
