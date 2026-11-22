@@ -134,6 +134,8 @@ Open questions for the owner: whether Save to can be changed on the phone (drawn
 skipped entries, and links a TorBox or other provider could take (the desktop asks about those separately; not drawn).
 Owner answer (2026-11-22): "Approve as drawn". With the defaults put to the owner: Save to is a field that can be
 changed, Details lists the skipped entries and why, and links a provider could take are added as ordinary downloads.
+A list file holds no sizes, so the drawn size column can't be built; owner (2026-11-22): "No size column" (rows show the
+icon and the name only).
 
 ## ANDROID.9 build started, 2026-11-21
 
