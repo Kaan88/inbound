@@ -35,6 +35,19 @@ connections; with rclone 1.76.0 Sites integration 110 and Sites unit 228 passed)
 settings, update and schedule integration tests 248 passed; Sites integration tests 75 passed with the 41 real-rclone
 tests skipped (no rclone binary on this PC); Android emulator build succeeded. Not in the staged 0.0.11 APK.
 
+Trial merge of the redesign, 2026-11-22 (throwaway worktree, nothing committed; the real merge waits for the release):
+`origin/android-remote-files-redesign` (`48da7a2f`) into this branch has two conflicts, both capability lists: take the
+redesign's list in `ServerProtocolTests.cs` and add `archiveSavedPasswords` to its exclusion, and regenerate
+`host-pipe-session.txt` with `GOLDEN_FRAMES_UPDATE=1` (it then holds `sitesRemoteCopy` and `archiveSavedPasswords`).
+Server 209, Mobile 694 and Sites 228 passed; the 41 site-transfer and remote-copy tests passed with rclone 1.76.0;
+Android emulator build succeeded. In the full Integration run from the trial folder under `%TEMP%`, about 20 web-session
+and native-host tests failed because `WebSessionProfile` refuses folders under LocalAppData (the same 389 pass from this
+worktree), and a site-transfer test once left a Host and `rclone serve sftp` running, which held the run open; killed,
+it did not come back when those tests ran alone. Rerun the full Integration suite after the real merge, from this worktree.
+Engine: `ReportsHttpDnsTlsAndTimeoutFailureClasses` fails about half the time on this branch with or without the merge
+(3 of 6; line 696, a stalled four-range download finishes); `main` passes it 6 of 6 with its later transfer-loop fixes,
+which arrive when this branch merges into `main`.
+
 Owner, 2026-11-22, on delegation: Opus coordinates, checks every worker diff, owns merges and does risky and important
 changes itself; Haiku mechanical work; Sonnet routine implementation with an outcome, owned files and a check; Fable
 reviews (CLAUDE.md "Delegation and review").
