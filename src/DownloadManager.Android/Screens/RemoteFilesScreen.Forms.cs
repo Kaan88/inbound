@@ -2,6 +2,7 @@ using Android.Text;
 using Android.Views;
 using Android.Widget;
 using DownloadManager.Contracts;
+using DownloadManager.Mobile;
 using Google.Android.Material.Button;
 using Google.Android.Material.Dialog;
 using Google.Android.Material.TextField;
@@ -18,6 +19,8 @@ internal sealed partial class RemoteFilesScreen
 {
     private int _addStep;                 // 0 = type picker, 1 = form
     private SiteDto? _editSite;           // set when editing a saved location
+    private SiteDto? _savedSite;         // the saved location while the form is still open after the save
+    private int _formToken;               // bumped when a form opens, so a late key read is dropped
     private string? _savedId;             // saved by this form but not yet confirmed to connect
     private readonly Dictionary<string, string> _fv = new(StringComparer.Ordinal);
     private bool _allowInsecure, _moreOpen, _ownIdOpen;
@@ -74,14 +77,87 @@ internal sealed partial class RemoteFilesScreen
         foreach (var key in new[] { "password", "secret", "ownSecret" }) _fv.Remove(key);
     }
 
+    // The SFTP key row (y1 to y3). The key text and passphrase live only here, while the form is open: they are dropped when
+    // the form closes or the Host has taken them, and are never logged.
+    private string? _keyText, _keyName, _keyKind, _keyError, _passphraseError;
+
+    /// <summary>Forgets the chosen key and its passphrase (form closed, key sent, or the person removed it).</summary>
+    private void ClearKeyState()
+    {
+        _keyText = _keyName = _keyKind = _keyError = _passphraseError = null;
+        _fv.Remove("keypass");
+    }
+
+    private bool KeyChosen => _keyName is not null;
+
+    /// <summary>Opens Android's file picker (y1b), reads the chosen file and checks it before it is kept (y2b).</summary>
+    private void ChooseKeyFile()
+    {
+        if (!SameHost() || _busy || !_secureHostConnection) return;
+        int token = _formToken;
+        if (!_activity.PickKeyFile(uri => { if (uri is not null) ReadKeyFile(uri, token); }))
+            _activity.ShowMessage("No file chooser is available on this phone.");
+    }
+
+    private void ReadKeyFile(Android.Net.Uri uri, int token)
+    {
+        var resolver = _activity.ContentResolver!;
+        _ = Task.Run(() =>
+        {
+            string name = "key file";
+            string? text = null, failure = null;
+            try
+            {
+                using (var cursor = resolver.Query(uri, [Android.Provider.IOpenableColumns.DisplayName], null, null, null))
+                    if (cursor is not null && cursor.MoveToFirst() && cursor.GetString(0) is { Length: > 0 } shown) name = shown;
+                using var stream = resolver.OpenInputStream(uri) ?? throw new IOException();
+                using var memory = new MemoryStream();
+                var buffer = new byte[4096];
+                int read;
+                while ((read = stream.Read(buffer, 0, buffer.Length)) > 0)
+                {
+                    memory.Write(buffer, 0, read);
+                    if (memory.Length > SftpKeyFile.MostKeyBytes) { failure = SftpKeyFile.TooLargeMessage; break; }
+                }
+                if (failure is null) text = new System.Text.UTF8Encoding(false, false).GetString(memory.GetBuffer(), 0, (int)memory.Length).TrimStart('﻿');
+                System.Security.Cryptography.CryptographicOperations.ZeroMemory(memory.GetBuffer());
+                Array.Clear(buffer);
+            }
+            catch (Exception e) when (e is IOException or Java.Lang.SecurityException or UnauthorizedAccessException or InvalidOperationException)
+            {
+                failure = SftpKeyFile.UnreadableMessage;
+            }
+
+            _activity.RunOnUiThread(() =>
+            {
+                if (_closed || _busy || token != _formToken || !_adding || _addStep != 1 || _addKind != SiteKindCatalog.Sftp) { text = null; return; }
+                _passphraseError = null;
+                _keyName = name;
+                if (text is null) { _keyText = null; _keyKind = "Not a private key"; _keyError = failure ?? SftpKeyFile.UnreadableMessage; }
+                else if (SftpKeyFile.Problem(text) is { } problem) { _keyText = null; _keyKind = SftpKeyFile.Kind(text); _keyError = problem; }
+                else { _keyText = text; _keyKind = SftpKeyFile.Kind(text); _keyError = null; }
+                text = null;
+                Render();
+            });
+        });
+    }
+
+    private void RemoveKeyFile()
+    {
+        _keyText = _keyName = _keyKind = _keyError = _passphraseError = null;
+        _fv.Remove("keypass");
+        Render();
+    }
+
     private void BeginAddLocation()
     {
         if (_busy || _closed) return;
         _adding = true;
         _addStep = 0;
         _editSite = null;
-        _savedId = null;
+        _savedId = null; _savedSite = null; _formToken++;
         _allowInsecure = _moreOpen = _ownIdOpen = false;
+        ClearKeyState();
         _fv.Clear();
         _error = null;
         Render();
@@ -93,7 +169,7 @@ internal sealed partial class RemoteFilesScreen
         _adding = true;
         _addStep = 1;
         _editSite = site;
-        _savedId = null;
+        _savedId = null; _savedSite = null; _formToken++;
         _addKind = site.Kind;
         _allowInsecure = site.Kind == SiteKindCatalog.WebDav && site.Url?.StartsWith("http://", StringComparison.OrdinalIgnoreCase) == true
             || site.Kind == SiteKindCatalog.Ftp && site.Tls == SiteTlsModes.None;
@@ -104,6 +180,8 @@ internal sealed partial class RemoteFilesScreen
         _fv["host"] = site.Host;
         _fv["port"] = site.Port > 0 ? site.Port.ToString() : "";
         _fv["user"] = site.User;
+        ClearKeyState();
+        _fv["auth"] = site.Kind == SiteKindCatalog.Sftp && site.AuthMethod == "key" ? "key" : "password";
         _fv["folder"] = site.RemoteFolder;
         _fv["url"] = site.Url ?? "";
         _fv["endpoint"] = site.Endpoint ?? "";
@@ -125,7 +203,7 @@ internal sealed partial class RemoteFilesScreen
             CancelCurrent();
             ClearPassword();
             _busy = false;
-            _adding = false; _addStep = 0; _editSite = null; _savedId = null;
+            _adding = false; _addStep = 0; _editSite = null; _savedId = null; _savedSite = null;
             _fv.Clear();
             _ = LoadLocationsAsync();
             return;
@@ -133,6 +211,7 @@ internal sealed partial class RemoteFilesScreen
         if (_editSite is null && _addStep == 1 && _savedId is null)
         {
             ClearFormSecrets();
+            ClearKeyState();
             _addStep = 0;
             _error = null;
             Render();
@@ -140,7 +219,7 @@ internal sealed partial class RemoteFilesScreen
         }
         bool saved = _savedId is not null;
         ClearPassword();
-        _adding = false; _addStep = 0; _editSite = null; _savedId = null;
+        _adding = false; _addStep = 0; _editSite = null; _savedId = null; _savedSite = null;
         _fv.Clear();
         CancelCurrent();
         if (saved) _ = LoadLocationsAsync(); else Render();
@@ -156,7 +235,7 @@ internal sealed partial class RemoteFilesScreen
     private Task FinishFormLoad()
     {
         ClearPassword();
-        _adding = false; _addStep = 0; _editSite = null; _savedId = null;
+        _adding = false; _addStep = 0; _editSite = null; _savedId = null; _savedSite = null;
         _fv.Clear();
         _busy = false;
         return LoadLocationsAsync();
@@ -165,7 +244,7 @@ internal sealed partial class RemoteFilesScreen
     private void FinishForm()
     {
         ClearPassword();
-        _adding = false; _addStep = 0; _editSite = null; _savedId = null;
+        _adding = false; _addStep = 0; _editSite = null; _savedId = null; _savedSite = null;
         _fv.Clear();
         _busy = false;
         _ = LoadLocationsAsync();
@@ -386,14 +465,33 @@ internal sealed partial class RemoteFilesScreen
                     if (target is not null && edits.TryGetValue("port", out var portEdit)) portEdit.Text = target;
                 }));
             }
-            bool keyLogin = site?.AuthMethod == "key";
             bool sftpEdit = site is not null && kind == SiteKindCatalog.Sftp;
+            bool keyLogin = kind == SiteKindCatalog.Sftp && V("auth") == "key";
             Add(_content, "user", kind == SiteKindCatalog.Sftp ? "User name" : "User name (optional)");
+            if (kind == SiteKindCatalog.Sftp) AddAuthChoice(keyLogin, secure);
             if (keyLogin)
             {
-                _content.AddView(Hint("This location signs in with a private key, which is managed on the desktop. Its address can't be changed here."));
-                edits["host"].Enabled = false;
-                edits["port"].Enabled = false;
+                // y1 to y3: the private key row, its passphrase, and the note.
+                _content.AddView(FolderText("Private key", 13, Resource.Attribute.colorOnSurfaceVariant), new LinearLayout.LayoutParams(-2, -2) { LeftMargin = Dp(4), BottomMargin = Dp(6) });
+                var keySite = site ?? _savedSite;
+                bool savedKey = !KeyChosen && keySite is { AuthMethod: "key", HasPrivateKey: true };
+                _content.AddView(KeyRow(savedKey, secure));
+                if (_keyError is not null)
+                {
+                    var problem = FolderText(_keyError, 12.5f, Resource.Attribute.colorError);
+                    problem.SetPadding(Dp(16), 0, Dp(16), Dp(10));
+                    _content.AddView(problem);
+                }
+                bool usable = KeyChosen || savedKey;
+                bool replaceSaved = savedKey && keySite!.HasKeyPassphrase;
+                var pass = Add(_content, "keypass", savedKey ? "Key passphrase" : "Key passphrase (if the key has one)", password: true,
+                    placeholder: replaceSaved ? "Saved; type to replace" : null,
+                    changed: _ => { if (_passphraseError is not null && layout0("keypass") is { } l) { _passphraseError = null; SetFieldError(l, null); } });
+                pass.Enabled = secure && usable;
+                if (_passphraseError is not null) SetFieldError(pass, _passphraseError);
+                if (!sftpEdit)
+                    _content.AddView(Hint(_phoneHost ? "OpenSSH and PuTTY (.ppk) keys both work. The key is stored by this phone's Host."
+                        : "OpenSSH and PuTTY (.ppk) keys both work. The key is sent to " + _hostName + " and stored there."));
             }
             else
             {
@@ -526,6 +624,116 @@ internal sealed partial class RemoteFilesScreen
         if (_editSite is null && _savedId is null) name.RequestFocus();
     }
 
+    /// <summary>y1 to y3: "Sign in with" and the Password / Key choice (a 44 dp pill, the chosen half tinted with a check).</summary>
+    private void AddAuthChoice(bool key, bool secure)
+    {
+        var label = FolderText("Sign in with", 13, Resource.Attribute.colorOnSurfaceVariant);
+        label.SetPadding(Dp(4), Dp(2), 0, Dp(6));
+        _content.AddView(label);
+        var group = new MaterialButtonToggleGroup(_activity) { SingleSelection = true, SelectionRequired = true };
+        var ids = new Dictionary<int, string>();
+        int checkedId = 0;
+        foreach (var (mode, text) in new[] { ("password", "Password"), ("key", "Key") })
+        {
+            var button = new MaterialButton(_activity, null, Resource.Attribute.materialButtonOutlinedStyle)
+            { Text = text, Id = View.GenerateViewId(), Enabled = secure && !_busy, ContentDescription = text };
+            button.SetAllCaps(false);
+            button.InsetTop = button.InsetBottom = 0;
+            bool on = mode == (key ? "key" : "password");
+            if (on)
+            {
+                button.SetIconResource(Resource.Drawable.ic_remote_check);
+                button.IconGravity = MaterialButton.IconGravityTextStart;
+                button.IconPadding = Dp(8);
+            }
+            group.AddView(button, new LinearLayout.LayoutParams(0, Dp(44), 1));
+            ids[button.Id] = mode;
+            if (on) checkedId = button.Id;
+        }
+        group.Check(checkedId);
+        group.ContentDescription = "Sign in with";
+        _content.AddView(group, new LinearLayout.LayoutParams(-1, -2) { BottomMargin = Dp(12) });
+        group.AddOnButtonCheckedListener(new ToggleListener((id, isChecked) =>
+        {
+            if (!isChecked || !ids.TryGetValue(id, out var mode) || V("auth") == mode) return;
+            _fv["auth"] = mode;
+            _passphraseError = null;
+            Render();
+        }));
+    }
+
+    private MaterialButton SmallPill(string text, int icon, Action click, bool enabled)
+    {
+        var pill = new MaterialButton(_activity, null, Resource.Attribute.materialButtonTonalStyle) { Text = text, CornerRadius = Dp(18), Enabled = enabled };
+        pill.SetAllCaps(false);
+        pill.InsetTop = pill.InsetBottom = 0;
+        pill.SetIconResource(icon);
+        pill.IconGravity = MaterialButton.IconGravityTextStart;
+        pill.IconPadding = Dp(6);
+        pill.Click += (_, _) => click();
+        return pill;
+    }
+
+    /// <summary>
+    /// The key row: a chosen file (name, kind, Remove), nothing chosen (muted line, Choose key file), a key the Host already holds
+    /// (Key saved, Replace), or a file that cannot be used (red outline).
+    /// </summary>
+    private View KeyRow(bool savedKey, bool secure)
+    {
+        bool bad = KeyChosen && _keyText is null;
+        bool needed = !KeyChosen && !savedKey && _keyError is not null;
+        bool red = bad || needed;
+        var row = new LinearLayout(_activity) { Orientation = Orientation.Horizontal };
+        row.SetGravity(GravityFlags.CenterVertical);
+        var outline = new Android.Graphics.Drawables.GradientDrawable();
+        outline.SetCornerRadius(Dp(8));
+        outline.SetColor(Color.Transparent);
+        outline.SetStroke(red ? Dp(2) : Dp(1), new Color(red ? ResColor(Resource.Color.state_failed) : Attr(Resource.Attribute.colorOutline)));
+        row.Background = outline;
+        row.SetMinimumHeight(Dp(64));
+        row.SetPadding(Dp(14), Dp(9), Dp(8), Dp(9));
+        row.LayoutParameters = new LinearLayout.LayoutParams(-1, -2) { BottomMargin = red ? Dp(4) : Dp(10) };
+
+        if (KeyChosen || savedKey)
+        {
+            var disc = new FrameLayout(_activity) { ImportantForAccessibility = ImportantForAccessibility.No };
+            disc.Background = Rounded(red ? ResColor(Resource.Color.state_failed_container) : Attr(Resource.Attribute.colorSurfaceContainerHighest), Dp(20));
+            var glyph = new ImageView(_activity);
+            glyph.SetImageResource(red ? Resource.Drawable.ic_remote_alert : Resource.Drawable.ic_settings_site_key);
+            glyph.ImageTintList = ColorStateList.ValueOf(new Color(red ? ResColor(Resource.Color.state_failed) : Attr(Resource.Attribute.colorOnSurface)));
+            disc.AddView(glyph, new FrameLayout.LayoutParams(Dp(22), Dp(22), GravityFlags.Center));
+            row.AddView(disc, new LinearLayout.LayoutParams(Dp(40), Dp(40)) { RightMargin = Dp(12) });
+        }
+        var texts = new LinearLayout(_activity) { Orientation = Orientation.Vertical };
+        string name = KeyChosen ? _keyName! : savedKey ? "Key saved" : "No key file chosen";
+        var nameView = FolderText(name, 15.5f, KeyChosen || savedKey ? Resource.Attribute.colorOnSurface : Resource.Attribute.colorOnSurfaceVariant);
+        nameView.SetSingleLine(true);
+        nameView.Ellipsize = Android.Text.TextUtils.TruncateAt.End;
+        texts.AddView(nameView);
+        if (KeyChosen || savedKey)
+        {
+            var sub = FolderText(KeyChosen ? _keyKind ?? "" : "Choose a file to replace it", 12.5f,
+                bad ? Resource.Attribute.colorError : Resource.Attribute.colorOnSurfaceVariant);
+            texts.AddView(sub);
+        }
+        row.AddView(texts, new LinearLayout.LayoutParams(0, -2, 1));
+        row.ContentDescription = KeyChosen ? $"Private key, {_keyName}, {_keyKind}" : savedKey ? "Private key saved" : "No private key file chosen";
+
+        if (KeyChosen)
+        {
+            var remove = new MaterialButton(_activity, null, Resource.Attribute.borderlessButtonStyle) { Text = "Remove", Enabled = !_busy };
+            remove.SetAllCaps(false);
+            remove.SetTextColor(new Color(Attr(Resource.Attribute.colorPrimary)));
+            remove.ContentDescription = "Remove the chosen key file";
+            remove.Click += (_, _) => RemoveKeyFile();
+            row.AddView(remove, new LinearLayout.LayoutParams(-2, Dp(40)));
+        }
+        else
+            row.AddView(SmallPill(savedKey ? "Replace" : "Choose key file", Resource.Drawable.ic_remote_folder, ChooseKeyFile, secure && !_busy),
+                new LinearLayout.LayoutParams(-2, Dp(36)));
+        return row;
+    }
+
     private TextView Hint(string text)
     {
         var view = FolderText(text, 13, Resource.Attribute.colorOnSurfaceVariant);
@@ -589,7 +797,8 @@ internal sealed partial class RemoteFilesScreen
         if (kind == SiteKindCatalog.B2 && (V("user").Trim().Length == 0 || !hasPassword)) Fail("user", B2KeysRequired);
         string ownId = V("ownId").Trim(), ownSecret = V("ownSecret");
         if (cloud && ClientIdProblem(ownId, ownSecret) is { } clientProblem) Fail("ownId", clientProblem);
-        if (_editSite is { HasPassword: true } stored && stored.AuthMethod != "key" && V("password").Length == 0 && !SiteKindCatalog.SignsIn(kind))
+        bool keyLogin = kind == SiteKindCatalog.Sftp && V("auth") == "key", keyFailed = false;
+        if (!keyLogin && _editSite is { HasPassword: true } stored && stored.AuthMethod != "key" && V("password").Length == 0 && !SiteKindCatalog.SignsIn(kind))
         {
             bool moved = kind switch
             {
@@ -600,17 +809,37 @@ internal sealed partial class RemoteFilesScreen
             };
             if (moved) Fail("password", "Enter the password again: it isn't kept for a new address.");
         }
-        if (failed) return;
+        if (keyLogin)
+        {
+            // y1 to y3. A chosen file was checked when it was picked; a saved key stays only for the same server and user name.
+            if (KeyChosen && _keyText is null) failed = keyFailed = true;
+            else if (!KeyChosen)
+            {
+                bool keeps = (_editSite ?? _savedSite) is { AuthMethod: "key", HasPrivateKey: true } held
+                    && string.Equals(held.Host, host, StringComparison.OrdinalIgnoreCase) && held.Port == port && held.User == V("user").Trim();
+                if (!keeps)
+                {
+                    _keyError = (_editSite ?? _savedSite) is { AuthMethod: "key", HasPrivateKey: true }
+                        ? "Choose the key file again: it isn't kept for a new address or user name."
+                        : "Choose the private key file to sign in with.";
+                    failed = keyFailed = true;
+                }
+            }
+            else _keyError = null;
+        }
+        if (failed) { if (keyFailed) Render(); return; }
 
         var edit = _editSite;
         var request = new SiteSaveRequest
         {
             Id = edit?.Id ?? _savedId, Name = name, Kind = kind,
-            AuthMethod = edit?.AuthMethod ?? "password",
+            AuthMethod = keyLogin ? "key" : "password",
+            PrivateKey = keyLogin && _keyText is not null ? SftpKeyFile.Normalize(_keyText) : null,
+            KeyPassphrase = keyLogin && V("keypass").Length > 0 ? V("keypass") : null,
             Host = host, Port = port, RemoteFolder = V("folder").Trim(),
             LocalFolder = string.IsNullOrWhiteSpace(V("local")) ? null : V("local").Trim(),
             User = V("user").Trim(),
-            Password = string.IsNullOrEmpty(V("password")) ? null : V("password"),
+            Password = keyLogin || string.IsNullOrEmpty(V("password")) ? null : V("password"),
             Tls = kind == SiteKindCatalog.Ftp ? V("tls").Length == 0 ? SiteTlsModes.Explicit : V("tls") : null,
             Url = kind == SiteKindCatalog.WebDav ? url : null,
             Vendor = kind == SiteKindCatalog.WebDav ? edit?.Vendor ?? "other" : null,
@@ -629,7 +858,7 @@ internal sealed partial class RemoteFilesScreen
 
     private async Task SaveFormAsync(SiteSaveRequest request, bool addressChanged)
     {
-        if (!SameHost() || _busy || !_secureHostConnection) { request.Password = null; request.ClientSecret = null; return; }
+        if (!SameHost() || _busy || !_secureHostConnection) { request.Password = null; request.ClientSecret = null; request.PrivateKey = null; request.KeyPassphrase = null; return; }
         int generation = ++_generation;
         _busy = true; _error = null;
         Render();
@@ -638,7 +867,8 @@ internal sealed partial class RemoteFilesScreen
         {
             var result = await _client.SaveAsync(request, _life.Token);
             if (_closed || generation != _generation) return;
-            if (!result.Ok) _error = result.Message ?? "The Host could not save this location. Check the details and try again.";
+            if (!result.Ok && request.AuthMethod == "key" && SftpKeyFile.IsPassphraseProblem(result.Message)) _passphraseError = result.Message;
+            else if (!result.Ok) _error = result.Message ?? "The Host could not save this location. Check the details and try again.";
             else saved = result.Site;
             if (result.Ok && saved is null)
             {
@@ -655,10 +885,14 @@ internal sealed partial class RemoteFilesScreen
         {
             request.Password = null;
             request.ClientSecret = null;
+            request.PrivateKey = null;
+            request.KeyPassphrase = null;
             if (!_closed && generation == _generation) { _busy = false; Render(); }
         }
+        if (saved is not null) ClearKeyState(); // the Host holds the key now; the phone keeps no copy
         if (saved is null || !SameHost() || generation != _generation) return;
         _savedId = saved.Id;
+        _savedSite = saved;
         string kind = saved.Kind;
         bool editing = _editSite is not null;
         if (SiteKindCatalog.SignsIn(kind))
@@ -728,7 +962,7 @@ internal sealed partial class RemoteFilesScreen
     // ---------------------------------------------------------------------------------------------------------------
     // x20c
 
-    private async Task ShowCertificateTrustAsync(SiteDto saved)
+    private async Task ShowCertificateTrustAsync(SiteDto saved, Action? trusted = null)
     {
         if (!SameHost() || _busy || _confirm is not null) return;
         int generation = ++_generation;
@@ -742,11 +976,11 @@ internal sealed partial class RemoteFilesScreen
         if (!SameHost() || generation != _generation) return;
         if (read is not { Ok: true, Certificate: { } cert })
         {
-            ShowTestFailed(saved, read?.Message ?? "Could not read the server's certificate.");
+            CertificateFailed(saved, read?.Message ?? "Could not read the server's certificate.", trusted);
             return;
         }
-        if (read.TrustedBySite || cert.TrustedBySystem) { await TestFormLocationAsync(saved, true); return; }
-        if (cert.CannotTrust is { } cannot) { ShowTestFailed(saved, cannot); return; }
+        if (read.TrustedBySite || cert.TrustedBySystem) { if (trusted is not null) trusted(); else await TestFormLocationAsync(saved, true); return; }
+        if (cert.CannotTrust is { } cannot) { CertificateFailed(saved, cannot, trusted); return; }
 
         var dialog = NewSheet(out var column);
         SheetTitle(column, "Trust this server certificate?",
@@ -772,13 +1006,20 @@ internal sealed partial class RemoteFilesScreen
         Row("Valid until", cert.NotAfter.ToLocalTime().ToString("d MMM yyyy"));
         AddInset(column, details);
         AddInset(column, CopyBox(cert.Fingerprint, "Copy fingerprint", "SHA-256"));
-        SheetButtons(column, "Trust certificate", Resource.Drawable.ic_remote_lock, () => _ = TrustCertificateAsync(saved, cert.Fingerprint));
+        SheetButtons(column, "Trust certificate", Resource.Drawable.ic_remote_lock, () => _ = TrustCertificateAsync(saved, cert.Fingerprint, trusted));
         ShowSheet(dialog);
+    }
+
+    /// <summary>A form's certificate review ends in the "Saved, but it did not connect" sheet; one asked for from a transfer only says why.</summary>
+    private void CertificateFailed(SiteDto saved, string message, Action? trusted)
+    {
+        if (trusted is null) ShowTestFailed(saved, message);
+        else if (SameHost()) _activity.ShowMessage(message);
     }
 
     private static string HostOfUrl(string? value) => Uri.TryCreate(value, UriKind.Absolute, out var uri) ? uri.Authority : "";
 
-    private async Task TrustCertificateAsync(SiteDto saved, string fingerprint)
+    private async Task TrustCertificateAsync(SiteDto saved, string fingerprint, Action? trusted = null)
     {
         if (!SameHost() || _busy) return;
         int generation = ++_generation;
@@ -791,7 +1032,8 @@ internal sealed partial class RemoteFilesScreen
         catch (Exception) { failure = "Could not confirm whether the Host trusted the certificate."; }
         finally { if (!_closed && generation == _generation) { _busy = false; Render(); } }
         if (!SameHost() || generation != _generation) return;
-        if (result is not { Ok: true }) { ShowTestFailed(saved, failure ?? result?.Message ?? "The Host did not accept the certificate."); return; }
+        if (result is not { Ok: true }) { CertificateFailed(saved, failure ?? result?.Message ?? "The Host did not accept the certificate.", trusted); return; }
+        if (trusted is not null) { trusted(); return; }
         await TestFormLocationAsync(saved, true);
     }
 }

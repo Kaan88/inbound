@@ -224,8 +224,17 @@ internal sealed partial class RemoteFilesScreen
     private bool ViewingCloudFolder(string siteId) =>
         _inFolder && ShowsSite(siteId) && !_adding && !_showTransfers;
 
+    /// <summary>A failed transfer asked for this sign-in (x2): once it is done, the transfer is retried.</summary>
+    private void RetryAfterSignIn(string siteId)
+    {
+        if (_retryAfterSignIn is not { } retry || retry.SiteId != siteId) return;
+        _retryAfterSignIn = null;
+        _ = TransferActionAsync(retry.TransferId, "retry");
+    }
+
     private async Task VerifyPhoneCloudSignInAsync(string siteId, CancellationToken cancellationToken)
     {
+        RetryAfterSignIn(siteId);
         if (ViewingCloudFolder(siteId))
         {
             await AfterFolderSignInAsync(siteId);
@@ -322,12 +331,14 @@ internal sealed partial class RemoteFilesScreen
     private void RefreshAfterCloudSignIn(string siteId)
     {
         _expiredCloudSites.Remove(siteId);
+        RetryAfterSignIn(siteId);
         if (ViewingCloudFolder(siteId) || _inFolder && _pendingChoice is { } pending && pending.SiteId == siteId) _ = AfterFolderSignInAsync(siteId);
         else if (ViewingCloudLocations) _ = LoadLocationsAsync();
     }
 
     private void CancelCloudSignIn(string siteId)
     {
+        if (_retryAfterSignIn is { } retry && retry.SiteId == siteId) _retryAfterSignIn = null;
         _signInWait?.Cancel();
         _signInDialog?.Dismiss();
         _signInDialog = null;
@@ -359,6 +370,7 @@ internal sealed partial class RemoteFilesScreen
     private void FinishSignInWait(string siteId)
     {
         if (_signInSiteId != siteId) return;
+        if (_retryAfterSignIn is { } stale && stale.SiteId == siteId) _retryAfterSignIn = null;
         _signInSiteId = null;
         _signInAgain = null;
         _signInWait?.Dispose();

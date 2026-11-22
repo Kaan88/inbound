@@ -32,6 +32,8 @@ internal sealed partial class RemoteFilesScreen
         public readonly Dictionary<string, Android.Net.Uri> PhoneUris = new(StringComparer.Ordinal);
         public readonly HashSet<string> Selected = new(StringComparer.Ordinal);
         public string? Listing, Error;
+        /// <summary>The bold line of a pane message (x32); null when the whole message is one line. RestError: the rest of a long folder could not load (a row at the end of the list).</summary>
+        public string? ErrorTitle, RestError;
         public int Total, Generation;
         /// <summary>Changes when the pane shows a different folder or reloads from scratch (not on a quiet refresh); the list scrolls to the top on a change.</summary>
         public int ViewEpoch;
@@ -92,7 +94,7 @@ internal sealed partial class RemoteFilesScreen
         pane.Rows = [];
         pane.PhoneUris.Clear();
         pane.Selected.Clear();
-        pane.Listing = pane.Error = null;
+        pane.Listing = pane.Error = pane.ErrorTitle = pane.RestError = null;
         pane.Total = 0;
         pane.Loading = pane.NeedsSignIn = pane.KeyProblem = false;
         pane.Mark = pane.PillMark = pane.MarkPath = null;
@@ -180,7 +182,7 @@ internal sealed partial class RemoteFilesScreen
         int generation = ++pane.Generation;
         var site = pane.Site;
         pane.Loading = true;
-        pane.Error = null;
+        pane.Error = pane.ErrorTitle = pane.RestError = null;
         pane.NeedsSignIn = pane.KeyProblem = false;
         if (!keepView)
         {
@@ -229,13 +231,20 @@ internal sealed partial class RemoteFilesScreen
                 {
                     _expiredCloudSites.Add(site.Id);
                     pane.NeedsSignIn = true;
-                    pane.Error = "Sign-in has run out. Sign in again to browse this location.";
+                    pane.ErrorTitle = "Sign-in has run out";
+                    pane.Error = "Sign in again to browse this location.";
                     return;
                 }
                 if (result.Problem is SiteProblems.HostKeyNotAccepted or SiteProblems.HostKeyChanged)
                 {
                     _changedSftpKeys.Add(site.Id);
                     pane.KeyProblem = true;
+                    pane.ErrorTitle = "Review the server key";
+                    if (string.IsNullOrWhiteSpace(result.Message))
+                    {
+                        pane.Error = result.Problem == SiteProblems.HostKeyChanged ? "The server's key is not the one you trusted." : "This server's key has not been trusted yet.";
+                        return;
+                    }
                 }
                 pane.Error = string.IsNullOrWhiteSpace(result.Message) ? "Could not browse this location." : result.Message;
                 return;
@@ -275,7 +284,7 @@ internal sealed partial class RemoteFilesScreen
         catch (OperationCanceledException) when (request.IsCancellationRequested) { return; }
         catch (Exception)
         {
-            if (!_closed && generation == pane.Generation && !keepView) pane.Error = "Could not load this folder. Check the connection and try again.";
+            if (!_closed && generation == pane.Generation && !keepView) { pane.ErrorTitle = "Could not load this folder"; pane.Error = "Check the connection and try again."; }
         }
         finally
         {
@@ -316,7 +325,7 @@ internal sealed partial class RemoteFilesScreen
                 if (!result.Ok || result.Offset != offset || result.Listing != listing || result.Items.Count == 0)
                 {
                     pane.Total = pane.Items.Count;
-                    if (!result.Ok && result.Problem != SiteProblems.ListingChanged) pane.Error = result.Message ?? "Could not load the rest of this folder.";
+                    if (!result.Ok && result.Problem != SiteProblems.ListingChanged) pane.RestError = "Could not load the rest of this folder.";
                     break;
                 }
                 pane.Items.AddRange(result.Items);
@@ -327,7 +336,10 @@ internal sealed partial class RemoteFilesScreen
             }
         }
         catch (OperationCanceledException) { }
-        catch (Exception) { if (generation == pane.Generation) pane.Total = pane.Items.Count; }
+        catch (Exception)
+        {
+            if (generation == pane.Generation) { pane.Total = pane.Items.Count; pane.RestError = "Could not load the rest of this folder."; }
+        }
         if (!_closed && generation == pane.Generation) UpdateFolderUi();
     }
 
@@ -380,6 +392,7 @@ internal sealed partial class RemoteFilesScreen
     // ---------------------------------------------------------------------------------------------------------------
     // The phone's side: Android's scoped Download folder, with the phone's own sizes and dates.
 
+    internal const string FolderNotAvailable = "This folder is not available.";
     private sealed record PhoneFolder(IReadOnlyList<SiteItemDto> Items, IReadOnlyDictionary<string, Android.Net.Uri> Uris, string? Error);
 
     /// <summary>
@@ -392,7 +405,7 @@ internal sealed partial class RemoteFilesScreen
         if (phonePath.Length == 0)
             return new PhoneFolder([new SiteItemDto { Name = "Download", IsFolder = true }], none, null);
         if (RemoteTransfers.DownloadRelative(phonePath) is not { } relativePath || !SafeRelativeFolder(relativePath))
-            return new PhoneFolder([], none, "This folder is not available.");
+            return new PhoneFolder([], none, FolderNotAvailable);
 
         var files = new Dictionary<string, SiteItemDto>(StringComparer.Ordinal);
         var uris = new Dictionary<string, Android.Net.Uri>(StringComparer.Ordinal);
@@ -537,6 +550,7 @@ internal sealed partial class RemoteFilesScreen
             }
             // The key review needs a secure connection to the Host: show the pane on this site with the reason instead of doing nothing.
             ResetPane(pane, site, null);
+            pane.KeyProblem = true;
             pane.Error = "This server's key must be reviewed over a secure connection to the Host.";
             UpdateFolderUi();
             return;

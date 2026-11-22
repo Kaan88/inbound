@@ -243,40 +243,121 @@ internal sealed partial class RemoteFilesScreen
 
         _folderMessage!.RemoveAllViews();
         string? message = pane.Error;
-        if (message is null && !pane.Loading && pane.Rows.Count == 0) message = "This folder is empty.";
+        bool empty = message is null && !pane.Loading && pane.Rows.Count == 0;
+        if (empty) message = "This folder is empty.";
         if (message is null) { _folderMessage.Visibility = ViewStates.Gone; return; }
         _folderMessage.Visibility = ViewStates.Visible;
-        _folderMessage.AddView(FolderText(message, 14, Resource.Attribute.colorOnSurfaceVariant));
-        if (pane.Error is null) return;
+
+        // x32 to x32d: round icon, title, text, and a tonal 36 dp pill for the action. A message of one line is the title.
+        string title = empty || pane.ErrorTitle is null ? message : pane.ErrorTitle;
+        string? text = empty || pane.ErrorTitle is null ? null : message;
+        int icon = Resource.Drawable.ic_remote_alert, disc = Attr(Resource.Attribute.colorSurfaceContainerHighest), tint = ResColor(Resource.Color.state_failed);
+        if (empty || pane.IsPhone && pane.Error == FolderNotAvailable)
+        {
+            icon = Resource.Drawable.ic_remote_folder; tint = Attr(Resource.Attribute.colorOnSurfaceVariant);
+        }
+        else if (pane.NeedsSignIn)
+        {
+            icon = Resource.Drawable.ic_remote_lock; tint = Attr(Resource.Attribute.colorPrimary);
+        }
+        else if (pane.KeyProblem)
+        {
+            icon = Resource.Drawable.ic_settings_site_key;
+            if (pane.ErrorTitle is not null) { disc = ResColor(Resource.Color.state_waiting_container); tint = ResColor(Resource.Color.state_waiting); }
+            else tint = Attr(Resource.Attribute.colorPrimary);
+        }
+        else disc = ResColor(Resource.Color.state_failed_container);
+        AddPaneMessage(icon, disc, tint, title, text);
+        if (empty || pane.Error is null) return;
         if (pane.NeedsSignIn && pane.Site is { } signIn)
         {
-            if (CanSignIn(signIn)) AddMessageAction("Sign in", () => { _pendingChoice = (_panes.ToList().IndexOf(pane), signIn.Id); BeginCloudSignIn(signIn); });
+            if (CanSignIn(signIn)) AddMessageAction("Sign in", Resource.Drawable.ic_open, () => { _pendingChoice = (_panes.ToList().IndexOf(pane), signIn.Id); BeginCloudSignIn(signIn); });
         }
         else if (pane.KeyProblem && pane.Site is { } sftp)
         {
-            if (_secureHostConnection) AddMessageAction("Review server key", () =>
+            if (_secureHostConnection) AddMessageAction("Review server key", Resource.Drawable.ic_settings_site_key, () =>
                 _ = ReviewSftpKeyAsync(FreshSite(sftp.Id) ?? sftp, () => _ = BrowsePaneAsync(pane, null, true)));
         }
-        else if (!pane.Loading) AddMessageAction("Try again", () => _ = BrowsePaneAsync(pane, pane.Path, true));
+        else if (!pane.Loading && !(pane.IsPhone && pane.Error == FolderNotAvailable))
+            AddMessageAction("Try again", Resource.Drawable.ic_refresh, () => _ = BrowsePaneAsync(pane, pane.Path, true));
     }
 
-    private void AddMessageAction(string text, Action action)
+    private void AddPaneMessage(int icon, int discColor, int tint, string title, string? text)
     {
-        var button = new MaterialButton(_activity, null, Resource.Attribute.materialButtonOutlinedStyle) { Text = text };
+        var holder = _folderMessage!;
+        holder.SetGravity(GravityFlags.CenterHorizontal);
+        holder.SetPadding(Dp(32), Dp(56), Dp(32), 0);
+        var circle = new FrameLayout(_activity) { ImportantForAccessibility = ImportantForAccessibility.No };
+        circle.Background = Rounded(discColor, Dp(44));
+        var glyph = new ImageView(_activity);
+        glyph.SetImageResource(icon);
+        glyph.ImageTintList = ColorStateList.ValueOf(new Color(tint));
+        circle.AddView(glyph, new FrameLayout.LayoutParams(Dp(40), Dp(40), GravityFlags.Center));
+        holder.AddView(circle, new LinearLayout.LayoutParams(Dp(88), Dp(88)) { Gravity = GravityFlags.CenterHorizontal, BottomMargin = Dp(20) });
+        var heading = FolderText(title, 20, Resource.Attribute.colorOnSurface);
+        heading.Gravity = GravityFlags.Center;
+        holder.AddView(heading, new LinearLayout.LayoutParams(-1, -2));
+        if (text is not null)
+        {
+            var body = FolderText(text, 14, Resource.Attribute.colorOnSurfaceVariant);
+            body.Gravity = GravityFlags.Center;
+            body.SetLineSpacing(Dp(2), 1f);
+            holder.AddView(body, new LinearLayout.LayoutParams(-1, -2) { TopMargin = Dp(8) });
+        }
+    }
+
+    /// <summary>The tonal 36 dp pill under a pane message (the filled 56 dp pill is for the one main action of a screen).</summary>
+    private void AddMessageAction(string text, int icon, Action action)
+    {
+        var button = new MaterialButton(_activity, null, Resource.Attribute.materialButtonTonalStyle) { Text = text, CornerRadius = Dp(18) };
         button.SetAllCaps(false);
+        button.InsetTop = button.InsetBottom = 0;
+        button.SetIconResource(icon);
+        button.IconGravity = MaterialButton.IconGravityTextStart;
+        button.IconPadding = Dp(8);
         button.Click += (_, _) => action();
-        _folderMessage!.AddView(button, new LinearLayout.LayoutParams(-2, -2) { TopMargin = Dp(12) });
+        _folderMessage!.AddView(button, new LinearLayout.LayoutParams(-2, Dp(36)) { Gravity = GravityFlags.CenterHorizontal, TopMargin = Dp(20) });
     }
 
     private sealed class FolderAdapter(RemoteFilesScreen screen) : RecyclerView.Adapter
     {
-        public override int ItemCount => screen.Active.Rows.Count;
+        // A failed later page is one more row at the end of the list ("Could not load the rest of this folder." with Try again).
+        public override int ItemCount => screen.Active.Rows.Count + (screen.Active.RestError is null ? 0 : 1);
 
-        public override RecyclerView.ViewHolder OnCreateViewHolder(ViewGroup parent, int viewType) => new RowHolder(screen);
+        public override int GetItemViewType(int position) => position >= screen.Active.Rows.Count ? 1 : 0;
 
-        public override void OnBindViewHolder(RecyclerView.ViewHolder holder, int position) =>
-            ((RowHolder)holder).Bind(screen.Active.Rows[position]);
+        public override RecyclerView.ViewHolder OnCreateViewHolder(ViewGroup parent, int viewType) =>
+            viewType == 1 ? screen.NewRestErrorHolder() : new RowHolder(screen);
+
+        public override void OnBindViewHolder(RecyclerView.ViewHolder holder, int position)
+        {
+            if (holder is RowHolder row && position < screen.Active.Rows.Count) row.Bind(screen.Active.Rows[position]);
+        }
     }
+
+    private RecyclerView.ViewHolder NewRestErrorHolder()
+    {
+        var row = new LinearLayout(_activity) { Orientation = Orientation.Horizontal };
+        row.SetGravity(GravityFlags.CenterVertical);
+        row.SetPadding(Dp(16), 0, Dp(8), 0);
+        var layout = new RecyclerView.LayoutParams(-1, Dp(56));
+        layout.SetMargins(Dp(16), 0, Dp(16), 0);
+        row.LayoutParameters = layout;
+        var glyph = new ImageView(_activity) { ImportantForAccessibility = ImportantForAccessibility.No };
+        glyph.SetImageResource(Resource.Drawable.ic_remote_alert);
+        glyph.ImageTintList = ColorStateList.ValueOf(new Color(ResColor(Resource.Color.state_failed)));
+        row.AddView(glyph, new LinearLayout.LayoutParams(Dp(24), Dp(24)) { RightMargin = Dp(16) });
+        var text = FolderText("Could not load the rest of this folder.", 14, Resource.Attribute.colorOnSurfaceVariant);
+        row.AddView(text, new LinearLayout.LayoutParams(0, -2, 1));
+        var retry = new MaterialButton(_activity, null, Resource.Attribute.borderlessButtonStyle) { Text = "Try again" };
+        retry.SetAllCaps(false);
+        retry.SetTextColor(new Color(Attr(Resource.Attribute.colorPrimary)));
+        retry.Click += (_, _) => { if (SameHost() && !Active.Loading) _ = BrowsePaneAsync(Active, Active.Path, true); };
+        row.AddView(retry, new LinearLayout.LayoutParams(-2, Dp(40)));
+        return new SimpleHolder(row);
+    }
+
+    private sealed class SimpleHolder(View view) : RecyclerView.ViewHolder(view);
 
     private sealed class RowHolder : RecyclerView.ViewHolder
     {

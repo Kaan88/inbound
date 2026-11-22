@@ -424,11 +424,59 @@ internal sealed partial class RemoteFilesScreen
             "running" => (Resource.Drawable.ic_pause, "Pause " + title, true, () => _ = TransferActionAsync(t.Id, "pause")),
             "paused" => (Resource.Drawable.ic_play, "Resume " + title, false, () => _ = TransferActionAsync(t.Id, "resume")),
             "failed" when !RemoteTransferText.NeedsAttention(t) => (Resource.Drawable.ic_refresh, "Retry " + title, false, () => _ = TransferActionAsync(t.Id, "retry")),
+            "failed" => AttentionCardAction(t, title),
             "queued" => (Resource.Drawable.ic_close, "Cancel " + title, false, () => ConfirmCancelTransfer(t)),
             "done" when CanShowTransferFolder(t) => (Resource.Drawable.ic_remote_folder, "Show " + title + " in folder", false, () => ShowTransferFolder(t, null)),
             _ => null,
         };
     }
+
+    private static int AttentionIcon(TransferAttention attention) => attention switch
+    {
+        TransferAttention.SignIn => Resource.Drawable.ic_open,
+        TransferAttention.ReviewKey => Resource.Drawable.ic_settings_site_key,
+        _ => Resource.Drawable.ic_remote_lock,
+    };
+
+    /// <summary>A failed transfer that needs a sign-in or a trust decision first: that action takes the place of Retry.</summary>
+    private (int Icon, string Description, bool Primary, Action Click)? AttentionCardAction(SiteTransferDto t, string title)
+    {
+        var attention = RemoteTransferText.AttentionOf(t);
+        if (attention == TransferAttention.None) return (Resource.Drawable.ic_refresh, "Retry " + title, false, () => _ = TransferActionAsync(t.Id, "retry"));
+        return (AttentionIcon(attention), RemoteTransferText.AttentionLabel(attention) + ": " + title, false, () => RunAttention(t));
+    }
+
+    /// <summary>Runs the existing sign-in or trust flow for the location of <paramref name="t"/>, then retries the transfer.</summary>
+    private void RunAttention(SiteTransferDto t)
+    {
+        if (!SameHost() || _busy || _confirm is not null) return;
+        var attention = RemoteTransferText.AttentionOf(t);
+        if (FreshSite(t.SiteId) is not { } site)
+        {
+            _activity.ShowMessage("Open Remote Files again and refresh the locations first.");
+            return;
+        }
+        void Retry() { if (SameHost()) _ = TransferActionAsync(t.Id, "retry"); }
+        switch (attention)
+        {
+            case TransferAttention.SignIn:
+                _expiredCloudSites.Add(site.Id); // the Host says the sign-in lapsed, whatever the location list still shows
+                if (!CanSignIn(site)) { _activity.ShowMessage("Sign in to " + site.Name + " from the Host."); return; }
+                BeginCloudSignIn(site, again: true);
+                if (_signInWait is not null && _signInSiteId == site.Id) _retryAfterSignIn = (site.Id, t.Id);
+                break;
+            case TransferAttention.ReviewKey:
+                if (!_secureHostConnection) { _activity.ShowMessage("The server key must be reviewed over a secure connection to the Host."); return; }
+                _ = ReviewSftpKeyAsync(site, Retry);
+                break;
+            case TransferAttention.ReviewCertificate:
+                if (!_secureHostConnection) { _activity.ShowMessage("The certificate must be reviewed over a secure connection to the Host."); return; }
+                _ = ShowCertificateTrustAsync(site, Retry);
+                break;
+        }
+    }
+
+    private (string SiteId, string TransferId)? _retryAfterSignIn;
 
     private View RoundAction(int icon, string description, bool primary, bool enabled, Action click)
     {
@@ -679,6 +727,8 @@ internal sealed partial class RemoteFilesScreen
         var pills = new LinearLayout(_activity) { Orientation = Orientation.Horizontal };
         pills.SetPadding(Dp(24), 0, Dp(24), Dp(12));
         if (t.State == "failed" && !RemoteTransferText.NeedsAttention(t)) pills.AddView(SheetPill("Retry", Resource.Drawable.ic_refresh, () => _ = TransferActionAsync(t.Id, "retry")), new LinearLayout.LayoutParams(-2, Dp(40)) { RightMargin = Dp(8) });
+        if (RemoteTransferText.AttentionOf(t) is var attention && attention != TransferAttention.None)
+            pills.AddView(SheetPill(RemoteTransferText.AttentionLabel(attention), AttentionIcon(attention), () => RunAttention(t)), new LinearLayout.LayoutParams(-2, Dp(40)) { RightMargin = Dp(8) });
         if (t.State == "paused") pills.AddView(SheetPill("Resume", Resource.Drawable.ic_play, () => _ = TransferActionAsync(t.Id, "resume")), new LinearLayout.LayoutParams(-2, Dp(40)) { RightMargin = Dp(8) });
         if (t.State == "running") pills.AddView(SheetPill("Pause", Resource.Drawable.ic_pause, () => _ = TransferActionAsync(t.Id, "pause")), new LinearLayout.LayoutParams(-2, Dp(40)) { RightMargin = Dp(8) });
         if (CanShowTransferFolder(t))

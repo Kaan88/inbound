@@ -595,6 +595,7 @@ public sealed partial class MainActivity : AppCompatActivity
             if (outcome.Data?.Data is not { } uri) return;
             if (kind == "list") owner.ReadImportList(uri, null);
             else if (kind == "torrent") owner.ShowMessage("Android restarted Inbound while the file was chosen. Choose the torrent file again.");
+            else if (kind == "sshkey") owner.ShowMessage("Android restarted Inbound while the file was chosen. Choose the key file again.");
         }
     }
 

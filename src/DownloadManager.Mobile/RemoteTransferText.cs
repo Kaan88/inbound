@@ -5,6 +5,9 @@ namespace DownloadManager.Mobile;
 /// <summary>The kind of status a Transfers card shows, which decides its colour (x1 to x6).</summary>
 public enum TransferTone { Neutral, Running, Paused, Done, Failed, Canceled }
 
+/// <summary>What a failed transfer needs before it can be retried.</summary>
+public enum TransferAttention { None, SignIn, ReviewKey, ReviewCertificate }
+
 /// <summary>Plain words for the Transfers screen (mockups x1 to x6): titles, status lines and routes without raw IDs or phone roots.</summary>
 public static class RemoteTransferText
 {
@@ -165,6 +168,27 @@ public static class RemoteTransferText
 
     /// <summary>True when the failure needs a sign-in or a trust decision first, so Retry alone would fail again.</summary>
     public static bool NeedsAttention(SiteTransferDto t) => ProblemText(t) is not null;
+
+    /// <summary>
+    /// The action a failed transfer shows in place of Retry when Retry alone would fail again: the same sign-in or trust flow
+    /// as in the folder view. None when Retry is the right action.
+    /// </summary>
+    public static TransferAttention AttentionOf(SiteTransferDto t) => t.State != "failed" ? TransferAttention.None : t.Problem switch
+    {
+        SiteProblems.SignInNeeded => TransferAttention.SignIn,
+        SiteProblems.HostKeyChanged or SiteProblems.HostKeyNotAccepted => TransferAttention.ReviewKey,
+        SiteProblems.CertificateNotTrusted => TransferAttention.ReviewCertificate,
+        _ => TransferAttention.None,
+    };
+
+    /// <summary>The words of the action for <paramref name="attention"/>.</summary>
+    public static string AttentionLabel(TransferAttention attention) => attention switch
+    {
+        TransferAttention.SignIn => "Sign in again",
+        TransferAttention.ReviewCertificate => "Review certificate",
+        TransferAttention.ReviewKey => "Review server key",
+        _ => "",
+    };
 
     private static string? ProblemText(SiteTransferDto t) => t.Problem switch
     {

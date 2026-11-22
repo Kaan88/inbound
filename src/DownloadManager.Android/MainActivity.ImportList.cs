@@ -45,6 +45,19 @@ public sealed partial class MainActivity
         return true;
     }
 
+    /// <summary>Opens the system's file picker for an SFTP private key (y1b): any file, because key files have no common type (.ppk, no ending, OpenSSH).</summary>
+    internal bool PickKeyFile(Action<Android.Net.Uri?> picked)
+    {
+        if (_torrentPicker is null) return false;
+        var intent = new Intent(Intent.ActionOpenDocument);
+        intent.AddCategory(Intent.CategoryOpenable);
+        intent.SetType("*/*");
+        _torrentPicked = picked; _pickKind = "sshkey";
+        try { _torrentPicker.Launch(intent); }
+        catch (ActivityNotFoundException) { _torrentPicked = null; _pickKind = null; return false; }
+        return true;
+    }
+
     private void ReadImportList(Android.Net.Uri uri, ImportListScreen? screen)
     {
         var resolver = ContentResolver!;
