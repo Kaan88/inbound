@@ -72,6 +72,13 @@ it, since this branch does not merge into `main` without the owner's say-so.
   build folders (about 5 GB) deleted. Owner unlocked the S24: x/y screens checked on real data (acceptance matrix, "x/y
   screens on the S24"); two Transfers bugs found and fixed (`e50146b7`). Display baseline (auto brightness, timeout max)
   recorded, dimmed, restored.
+- Owner, 2026-11-22: "release as 0.1.1, so I can see the new changelog window", then "no fable, release" and "note
+  needed fable review for later" (entry in `docs/plans/android-fable-review-queue.md`). Published
+  [Android 0.1.1](https://github.com/Kaan88/inbound/releases/tag/android-v0.1.1) (versionCode 13) from `26283795`,
+  latest=false: APK SHA-256 `55decaba7ce37805d3b2a596ea1d71596d330dd9648464570aeb517d6d0f9cbe`, manifest SHA-256
+  `9c7163eb4c123a467ffe0f8b9c1a044ad1521d62b8d315647de558952c32548b`; the downloaded APK and manifest, and the
+  `android-latest` manifest, match the staged files. Desktop latest stays `v0.9.0`. 0.1.0 was never published. The S24
+  has 0.1.0, so it should offer 0.1.1 through the updater.
 - Owner, 2026-11-22: "have an agent look at existing extension adaptability to mobile edge for capturing links, or other
   solutions. non critical or required for release." Research done (sources only, nothing tried on a device):
   - Edge for Android runs extensions only from Microsoft's allowlist (store listing, mobile value, QA test cases, a
