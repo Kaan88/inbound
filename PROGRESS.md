@@ -9,6 +9,30 @@ the redesign and of the release, then one release. Decision (owner away from the
 Android **0.1.0** (versionCode 12), the first minor-version step on the Android line; the desktop line is not part of
 it, since this branch does not merge into `main` without the owner's say-so.
 
+## Android 0.1.0: redesign merged, Fable audit, fixes, 2026-11-22
+
+- Merged `android-remote-files-redesign` (`6ab63b17`); the two capability-list conflicts resolved as in the trial. Full
+  suites on the merge: Server 209, Mobile 706, Sites 228, Engine 214, Integration 2,154 of 2,166 (two timing tests failed
+  once and passed twice alone; no hang).
+- A9-15 (`59a19003`, then `1bf9909f`): torrents never use mobile data, unmetered or not; one network report carries metered
+  and mobile data. A6 (`42921130`): a staged update the signed feed no longer offers is withdrawn.
+- Fable audit (four Fable reviewers by lens, each finding checked by a Sonnet skeptic; 21 agents): shared code and Android
+  delta "ready"; the redesign "not ready" with 8 important and 10 minor confirmed findings. All fixed (`d9e4bc10` by a
+  Sonnet worker, reviewed; `1bf9909f` by Opus: delete race, Keep both of a folder into its own folder, pull to refresh,
+  redirect window, one network report). Not taken: refusing a redirect when any sub-frame request follows the source (real
+  pages keep loading resources after a click).
+- r1-r6 on the emulator with real data on two SFTP servers through a PC Host (a Sonnet worker; screenshots in
+  `artifacts/android-app/redesign-r1-r6/`, ignored): r4 and r6 match apart from minor items; r2 and r5 have minor
+  deviations (free space on site rows, a duplicate This phone pane, the selection summary wrapping, the menu's position,
+  the video icon colour), now being fixed. r1, r3's phone rows and r4's phone state can't run on the x86_64 emulator (no
+  x86_64 rclone library); they are checked on the S24. The header sits about 1-2% lower and further left than the
+  mockups (density); not changed.
+- Not in r1-r6, so not changed (owner to decide later): the Transfers screen and the Add location form keep their older
+  look.
+- Incident: the comparison worker's cleanup stopped one rclone process it could not identify (PID 33524), possibly
+  another session's.
+- Version 0.1.0 (versionCode 12) with notes `docs/android-release-notes-0.1.0.txt` (`31b6ce17`).
+
 ## Owner: release after feature parity, before the redesign, 2026-11-21
 
 "after feature parity, before ui work. make a new release": once ANDROID.9 is complete (torrents on the phone, then
