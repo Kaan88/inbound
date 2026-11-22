@@ -439,7 +439,7 @@ public sealed partial class MainActivity : AppCompatActivity
                 else if (background is Android.Graphics.Drawables.GradientDrawable gradient)
                     gradient.SetCornerRadius(Motion.Dp(this, 16));
             }
-            else if (_nav?.PageOpen != true) bar.SetAnchorView(navigation);
+            else if (_nav?.PageOpen != true && navigation?.Visibility == ViewStates.Visible) bar.SetAnchorView(navigation);
             if (action is not null && onAction is not null) bar.SetAction(action, _ => onAction());
             bar.Show();
         });
@@ -735,6 +735,7 @@ public sealed partial class MainActivity : AppCompatActivity
         _torBox?.SetVisible(true);
         _addTorrent?.SetVisible(true);
         _remoteFiles?.SetVisible(true);
+        _appVisibleForTracking = true;
     }
 
     protected override void OnStop()
@@ -749,6 +750,7 @@ public sealed partial class MainActivity : AppCompatActivity
         _torBox?.SetVisible(false);
         _addTorrent?.SetVisible(false);
         _remoteFiles?.SetVisible(false);
+        _appVisibleForTracking = false;
         base.OnStop();
     }
 
@@ -771,6 +773,7 @@ public sealed partial class MainActivity : AppCompatActivity
         _downloads?.CloseSelectionWindows();
         _linkLifetime.Cancel();
         _linkPageLifetime?.Cancel();
+        StopTrackingLoop();
         if (_linkHosts is not null) _linkHosts.Changed -= OnLinkHostsChanged;
         base.OnDestroy();
         // An open page goes with the activity: Details stops polling, and no view of this activity is held on to (findings 15, 16).

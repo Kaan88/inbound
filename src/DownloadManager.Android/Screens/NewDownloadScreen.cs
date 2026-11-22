@@ -503,7 +503,11 @@ internal sealed class NewDownloadScreen
                 }
                 // Only this page: if it was closed meanwhile and another one opened, that one stays (finding 18).
                 _activity.CloseRowPage(Root);
-                _activity.ShowMessage(NewDownloadModel.Describe(result));
+                // x10: on this phone the snackbar names the folder and offers Show in folder (the Remote Files tab at that folder).
+                var phoneFolder = _activity.Capabilities.CanOpenFiles && result.Added > 0 ? MainActivity.PhoneFolderOf(saveTo) : null;
+                if (phoneFolder is null) _activity.ShowMessage(NewDownloadModel.Describe(result));
+                else _activity.ShowMessage(NewDownloadModel.Describe(result) + " · saving to " + phoneFolder, "Show in folder",
+                    () => _activity.ShowPhoneFolder(phoneFolder, null));
             });
         });
     }

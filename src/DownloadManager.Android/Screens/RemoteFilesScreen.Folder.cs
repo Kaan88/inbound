@@ -136,6 +136,7 @@ internal sealed partial class RemoteFilesScreen
             title.Selected = true;
             bar.AddView(title, new LinearLayout.LayoutParams(0, -2, 1));
         }
+        if (!selecting) bar.AddView(TransfersButton(), new LinearLayout.LayoutParams(Dp(48), Dp(48)));
         View more = IconButton(Resource.Drawable.ic_more, "More options", () => { });
         more.Click += (_, _) => ShowFolderMenu(more);
         bar.AddView(more, new LinearLayout.LayoutParams(Dp(48), Dp(48)));
@@ -238,6 +239,7 @@ internal sealed partial class RemoteFilesScreen
         _listIdentity = identity;
         _folderAdapter!.NotifyDataSetChanged();
         if (reset) _folderList!.ScrollToPosition(0);
+        ApplyMark(pane);
 
         _folderMessage!.RemoveAllViews();
         string? message = pane.Error;
@@ -283,6 +285,7 @@ internal sealed partial class RemoteFilesScreen
         private readonly ImageView _icon;
         private readonly TextView _name, _detail;
         private SiteItemDto? _item;
+        private readonly MaterialButton _open;
 
         public RowHolder(RemoteFilesScreen screen) : this(screen, new LinearLayout(screen._activity)) { }
 
@@ -314,6 +317,19 @@ internal sealed partial class RemoteFilesScreen
             labels.AddView(_name);
             labels.AddView(_detail);
             root.AddView(labels, new LinearLayout.LayoutParams(0, -2, 1));
+            // The tonal Open pill of a marked file (x9).
+            _open = new MaterialButton(screen._activity) { Text = "Open", CornerRadius = screen.Dp(18), Visibility = ViewStates.Gone };
+            _open.SetAllCaps(false);
+            _open.TextSize = 15;
+            _open.InsetTop = _open.InsetBottom = 0;
+            _open.BackgroundTintList = ColorStateList.ValueOf(new Color(screen.Attr(Resource.Attribute.colorSecondaryContainer)));
+            _open.SetTextColor(new Color(screen.Attr(Resource.Attribute.colorOnSecondaryContainer)));
+            _open.SetIconResource(Resource.Drawable.ic_remote_open);
+            _open.IconTint = ColorStateList.ValueOf(new Color(screen.Attr(Resource.Attribute.colorOnSecondaryContainer)));
+            _open.IconPadding = screen.Dp(8);
+            _open.SetPadding(screen.Dp(16), 0, screen.Dp(18), 0);
+            _open.Click += (_, _) => { if (_item is { } item) _ = screen.OpenOrShareAsync(screen.Active, item, false); };
+            root.AddView(_open, new LinearLayout.LayoutParams(-2, screen.Dp(36)));
             root.Click += (_, _) => { if (_item is { } item) screen.OnRowTapped(item); };
             root.LongClick += (_, _) =>
             {
@@ -349,12 +365,23 @@ internal sealed partial class RemoteFilesScreen
             _name.Text = item.Name;
             string detail = RemoteFileList.Detail(item, DateTimeOffset.Now);
             _detail.Text = detail;
+            bool marked = !selected && pane.Mark == item.Name;
+            _open.Visibility = marked && !item.IsFolder ? ViewStates.Visible : ViewStates.Gone;
             if (selected)
             {
                 var background = new GradientDrawable();
                 background.SetCornerRadius(_s.Dp(16));
                 background.SetColor(new Color(_s.Attr(Resource.Attribute.colorSecondaryContainer)));
                 _root.Background = background;
+            }
+            else if (marked)
+            {
+                // Outline only, not the selection fill (x9).
+                var outline = new GradientDrawable();
+                outline.SetCornerRadius(_s.Dp(16));
+                outline.SetColor(Color.Transparent);
+                outline.SetStroke(_s.Dp(2), new Color(_s.Attr(Resource.Attribute.colorPrimary)));
+                _root.Background = outline;
             }
             else _root.Background = new TypedValueHolder(_s._activity).SelectableBackground();
             _root.ContentDescription = (selected ? "Selected, " : "") + item.Name + ", " + detail + (item.IsFolder ? ". Open folder" : ". File options");

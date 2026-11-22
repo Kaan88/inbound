@@ -124,10 +124,7 @@ internal sealed partial class RemoteFilesScreen : IDisposable
         if (_mutation) return true;
         if (_showTransfers)
         {
-            CancelCurrent();
-            _showTransfers = false;
-            _error = null;
-            Render();
+            CloseTransfers();
             return true;
         }
         if (_adding)
@@ -213,7 +210,7 @@ internal sealed partial class RemoteFilesScreen : IDisposable
         catch (Exception) { if (!_closed && generation == _generation) _error = "Could not load Remote Files from this Host. Check the connection and try again."; }
         finally
         {
-            if (!_closed && generation == _generation) { _busy = false; Render(); }
+            if (!_closed && generation == _generation) { _busy = false; Render(); ApplyPendingShow(); }
         }
     }
 
@@ -221,8 +218,9 @@ internal sealed partial class RemoteFilesScreen : IDisposable
     {
         if (_closed) return;
         bool folder = !_showTransfers && !_adding && _inFolder;
-        SetFolderFullScreen(folder);
-        if (!folder) ResetChrome();
+        bool full = folder || _showTransfers;
+        SetFolderFullScreen(full);
+        if (!full) ResetChrome();
         _content.RemoveAllViews();
         if (_showTransfers) RenderTransfers();
         else if (_adding) RenderAddLocation();
@@ -274,121 +272,18 @@ internal sealed partial class RemoteFilesScreen : IDisposable
             using var timer = new PeriodicTimer(TimeSpan.FromSeconds(3));
             while (await timer.WaitForNextTickAsync(token))
             {
-                if (_busy || _adding || _showTransfers || !_surface.IsShown) continue;
+                if (_showTransfers)
+                {
+                    // Transfers screen: look again only while something is running, so an idle screen wakes nothing.
+                    if (!_transferLoading && _surface.IsShown && _transfers.Any(RemoteTransferText.IsActive)) await LoadTransfersAsync(true);
+                    continue;
+                }
+                if (_busy || _adding || !_surface.IsShown) continue;
                 if (_inFolder) await RefreshTransfersQuietAsync();
                 else await RefreshLocationTransfersAsync(_generation);
             }
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }
-    }
-
-    private void OpenTransfers()
-    {
-        if (!SameHost() || _busy) return;
-        _showTransfers = true;
-        _transfersLoaded = false;
-        _ = LoadTransfersAsync();
-    }
-
-    private async Task LoadTransfersAsync()
-    {
-        if (!SameHost() || _busy) return;
-        int generation = ++_generation;
-        _busy = true; _error = null;
-        Render();
-        try
-        {
-            var result = await _client.ListTransfersAsync(_life.Token);
-            if (!SameHost() || generation != _generation) return;
-            _transfers = result.Transfers;
-            _transfersLoaded = true;
-        }
-        catch (OperationCanceledException) when (_life.IsCancellationRequested) { }
-        catch (Exception)
-        {
-            if (SameHost() && generation == _generation)
-            {
-                _transfersLoaded = false;
-                _error = "Could not refresh transfers. Their current state is unknown.";
-            }
-        }
-        finally { if (!_closed && generation == _generation) { _busy = false; Render(); } }
-    }
-
-    private void RenderTransfers()
-    {
-        AddButton("‹  Back", () => HandleBack());
-        Heading("Transfers");
-        AddText("Host: " + _hostName + " · State as of last refresh", 14, Resource.Attribute.colorOnSurfaceVariant);
-        if (!_busy) AddButton("Refresh transfers", () => _ = LoadTransfersAsync());
-        if (_busy) AddText("Loading or sending…", 16, Resource.Attribute.colorOnSurfaceVariant);
-        if (_error is not null) AddText(_error, 16, Resource.Attribute.colorOnSurfaceVariant);
-        if (!_transfersLoaded) return;
-        if (_transfers.Count == 0) AddText("No transfers on this Host.", 16, Resource.Attribute.colorOnSurfaceVariant);
-        foreach (var transfer in _transfers.OrderByDescending(t => t.CreatedAt))
-        {
-            var detail = transfer.State + " · " + transfer.FilesDone + " copied, " + transfer.FilesSkipped
-                + " skipped, " + transfer.FilesFailed + " failed of " + transfer.Files
-                 + "\n" + (transfer.Direction == "copy"
-                     ? transfer.RemoteFolder + " → " + RemoteFileList.Destination(transfer.DestinationSiteName ?? "", transfer.DestinationFolder ?? "/")
-                     : transfer.RemoteFolder + " ↔ " + transfer.LocalFolder)
-                 + "\nStarted: " + transfer.CreatedAt.ToLocalTime().ToString("g") + " · ID " + transfer.Id;
-            if (transfer.Direction == "download" && transfer.Conflict == "skip" && transfer.FilesSkipped > 0)
-                detail += transfer.FilesSkipped == 1
-                    ? "\nAn item with this name already exists at the destination and was kept."
-                    : "\nItems with these names already exist at the destination and were kept.";
-            if (!string.IsNullOrWhiteSpace(transfer.Message)) detail += "\n" + transfer.Message;
-            if (transfer.State == "paused") detail += "\nUnfinished files restart from the beginning on resume.";
-            _content.AddView(Card(RemoteTransfers.Title(transfer), detail, false));
-            if (_busy) continue;
-            bool canResume = transfer.State == "paused" || transfer.State == "failed"
-                && (transfer.Files - transfer.FilesDone - transfer.FilesSkipped - transfer.FilesFailed - transfer.FilesRunning > 0
-                    || transfer.Problem is not null);
-            if (transfer.State == "running") AddButton("Pause transfer", () => _ = TransferActionAsync(transfer.Id, "pause"));
-            if (canResume) AddButton("Resume transfer", () => _ = TransferActionAsync(transfer.Id, "resume"));
-            if (transfer.State is "running" or "paused" || canResume)
-                 AddButton("Cancel transfer", () => ConfirmCancelTransfer(transfer));
-        }
-    }
-
-    private void ConfirmCancelTransfer(SiteTransferDto transfer)
-    {
-        if (!SameHost() || _busy || _confirm is not null) return;
-        _confirm = new MaterialAlertDialogBuilder(_activity)
-            .SetTitle("Cancel this transfer?")!
-            .SetMessage(transfer.SiteName + " · ID " + transfer.Id + "\nThis batch cannot be resumed after cancellation.")!
-            .SetNegativeButton("Keep transfer", (Android.Content.IDialogInterfaceOnClickListener?)null)!
-            .SetPositiveButton("Cancel transfer", (_, _) => _ = TransferActionAsync(transfer.Id, "cancel"))!
-            .Show();
-        if (_confirm is { } dialog) dialog.DismissEvent += (_, _) => { if (ReferenceEquals(_confirm, dialog)) _confirm = null; };
-    }
-
-    private async Task TransferActionAsync(string id, string action)
-    {
-        if (!SameHost() || _busy) return;
-        int generation = ++_generation;
-        _busy = _mutation = true; _error = null;
-        Render();
-        try
-        {
-            var result = action switch
-            {
-                "pause" => await _client.PauseTransferAsync(id, _life.Token),
-                "resume" => await _client.ResumeTransferAsync(id, _life.Token),
-                _ => await _client.CancelTransferAsync(id, _life.Token)
-            };
-            if (!SameHost() || generation != _generation) return;
-            _transfersLoaded = false;
-            if (!result.Ok) _error = result.Message ?? "The Host did not accept this action. Refresh transfers.";
-            else { _busy = _mutation = false; _ = LoadTransfersAsync(); }
-        }
-        catch (OperationCanceledException) when (_life.IsCancellationRequested) { }
-        catch (Exception)
-        {
-            if (SameHost() && generation == _generation)
-            { _transfersLoaded = false; _error = "Could not confirm the action. Refresh transfers to check its state."; }
-        }
-        finally { if (!_closed && generation == _generation) { _busy = _mutation = false; Render(); } }
     }
 
     private void ClearPassword()

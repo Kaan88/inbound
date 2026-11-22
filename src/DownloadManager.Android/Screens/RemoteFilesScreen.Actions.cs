@@ -546,6 +546,8 @@ internal sealed partial class RemoteFilesScreen
         UpdateFolderUi();
         int batches = 0;
         string? failure = null;
+        // Downloads to this phone that the activity watches, to say "<file> is on this phone" on whichever tab is open (x8, x33).
+        var tracked = new List<(string Id, string Name)>();
         try
         {
             string phoneRoot = AndroidHost.SharedDownloadFolder;
@@ -570,6 +572,7 @@ internal sealed partial class RemoteFilesScreen
                     if (!SameHost()) return;
                     if (!result.Ok || result.Transfer is null) { failure = result.Message ?? "The Host did not start this transfer."; break; }
                     batches++;
+                    if (_phoneHost) tracked.Add((result.Transfer.Id, file.Name));
                 }
                 var folders = items.Where(item => item.IsFolder).ToList();
                 if (failure is null && folders.Count > 0)
@@ -581,7 +584,11 @@ internal sealed partial class RemoteFilesScreen
                     }, _life.Token);
                     if (!SameHost()) return;
                     if (!result.Ok || result.Transfer is null) failure = result.Message ?? "The Host did not start this transfer.";
-                    else batches++;
+                    else
+                    {
+                        batches++;
+                        if (_phoneHost) tracked.Add((result.Transfer.Id, folders.Count == 1 ? folders[0].Name : folders.Count + " folders"));
+                    }
                 }
             }
             else
@@ -602,9 +609,15 @@ internal sealed partial class RemoteFilesScreen
         finally { _mutation = false; }
         if (batches > 0) source.Selected.Clear();
         UpdateFolderUi();
-        string message = failure is null ? (items.Count == 1 ? "Added to Transfers." : $"{items.Count} items added to Transfers.")
+        // x7: "2 files going to Download/Inbound/Music" with View transfers.
+        string place = mode == RemoteTransferMode.Download
+            ? (_phoneHost ? RemoteTransfers.PhoneLabel(target.Path) : _hostName) : TargetPlace(target);
+        string what = items.Count == 1 ? items[0].Name : items.All(item => !item.IsFolder) ? items.Count + " files" : items.Count + " items";
+        string message = failure is null ? what + " going to " + place
             : batches > 0 ? $"{batches} started. {failure}" : failure;
-        Toast.MakeText(_activity, message, ToastLength.Long)?.Show();
+        if (batches > 0) _activity.ShowMessage(message, "View transfers", () => OpenTransfers());
+        else _activity.ShowMessage(message);
+        if (_phoneHost) foreach (var (id, name) in tracked) _activity.TrackPhoneDownload(id, name, RemoteTransfers.DownloadRelative(target.Path) is { } rel ? "Download" + (rel.Length == 0 ? "" : "/" + rel) : "Download");
         if (batches > 0) _ = RefreshTransfersQuietAsync();
     }
 
@@ -632,6 +645,8 @@ internal sealed partial class RemoteFilesScreen
                         if ((finished || pane.IsPhone) && !pane.Loading && pane.Selected.Count == 0 && pane.Error is null)
                             _ = BrowsePaneAsync(pane, pane.Path, true, keepView: true);
             }
+            // The badge of the transfers button follows the count.
+            if (active != _lastActiveTransfers && _inFolder && !_showTransfers && !_adding) UpdateFolderUi();
             _lastActiveTransfers = active;
         }
         catch (Exception) { /* A missing count must not disturb the folder. */ }

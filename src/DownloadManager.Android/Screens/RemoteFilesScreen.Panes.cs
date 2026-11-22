@@ -36,6 +36,9 @@ internal sealed partial class RemoteFilesScreen
         /// <summary>Changes when the pane shows a different folder or reloads from scratch (not on a quiet refresh); the list scrolls to the top on a change.</summary>
         public int ViewEpoch;
         public bool Loading, NeedsSignIn, KeyProblem;
+        /// <summary>A file outlined for a moment with an Open pill (Show in folder, x9); MarkShown once it has been scrolled to.</summary>
+        public string? Mark;
+        public bool MarkShown;
         public RemoteSort Sort = RemoteSort.Name;
         public CancellationTokenSource? Request;
         /// <summary>One token per folder-count request, so a later page's request does not cancel an earlier one; Cancel() ends all of them.</summary>
