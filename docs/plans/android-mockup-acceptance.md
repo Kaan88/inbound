@@ -46,6 +46,8 @@ Owner decisions for the redesign (2026-11-21)
   with files and upload) get mockups first, agreed by the owner, saved in `android-mockups/`, then built.
 - Mockups approved by the owner (2026-11-21, "great mockups, I approve"): `r1-this-phone` to `r6-server-to-server` in `android-mockups/`, from
   `r-remote-files-redesign.html` (same tokens and sizes as c3/c4).
+- Mockups approved by the owner (2026-11-22, "Approve all"): `x1-transfers` to `x33-finished-elsewhere` (dark and light) in
+  `android-mockups/`, from `x-remote-files-rest.html`, with every Proposal in `x-remote-files-rest-notes.md`.
 - r1-r6 on the S24, real data (0.1.0, 2026-11-22; captures in ignored `artifacts/android-app/s24-0.1.0`):
   - Phone Host with Dropbox (signed in): r1 selection on This phone (check circle, tinted row, "1 selected" bar with
     select all, "1 file · 6.3 KB / To Dropbox" summary, "To Dropbox" button) matches; the upload landed in Dropbox.
