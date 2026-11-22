@@ -43,6 +43,15 @@ it, since this branch does not merge into `main` without the owner's say-so.
   and blobs, more secrets zeroed, an empty comment without its space read, conversion for any SFTP save. Tests added: Argon2
   D/I/Id with 2 to 16 lanes against OpenSSL, RSA and ECDSA files, an Ed25519 seed ending in zero, the limits; the 24-key
   run signs again. Not done: the private-to-public check for ECDSA and Ed25519 (the MAC binds both; Fable: no fix needed).
+- Merged x10/x10b (Downloads folder page, `android-x10b-draft`) and x32, y1-y3 and the transfer attention action
+  (`android-xy-draft`), each reviewed and fixed: `5508adb2`. Emulator test build clean, Mobile tests 724/724.
+- **Owner, 2026-11-22: "Approve all"**, for the undrawn behaviours listed to them: x10b's ⋮ with "Show in the Files app",
+  rows and crumbs that open and go up, the fade, the page closing on recreate, TorBox sends not outlined, Show in folder
+  doing nothing while a page other than Details is open; the Password/Key switch on the SFTP password form, the wrong
+  passphrase as a field error, the form scrolling to the top on a switch; the x9 Open pill staying until the folder is
+  left; the existing buttons for a transfer that needs sign-in or trust; "Host connection" opening Settings; the S3
+  provider list dialog; the Host download folder on cloud forms; SFTP "More options" open when it has a value; the "not
+  from a known authority" banner; Material icons where the app has none.
 - **Owner, 2026-11-22: "all mockups are fine."** So y1-y3 (SFTP key login on Android, `y-sftp-key.html`) are approved
   as drawn, with x1-x33.
 - Drafts merged into this branch: Transfers and get-there (x1-x10, x33; `android-x-mockups-draft`, review fixes
