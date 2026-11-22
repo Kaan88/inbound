@@ -20,6 +20,10 @@ it, since this branch does not merge into `main` without the owner's say-so.
   file) and three lows. Fixed: phone panes are read again for three ticks after a transfer finishes; the index runs
   after the client broadcast, inside a try; cleared batches are pruned from both maps. Left as is: a batch cleared within
   0.4 s of its last file is not indexed (the client can't show Clear before that broadcast).
+- Fable on that fix (`277c58d4`): approved for release. Applied its two cheap points: three re-reads after a finish (it was
+  two), and none when a paired Host is selected. Left: the pane's progress bar shows briefly during those quiet reads.
+- Mockups x1-x33 (48 screens, dark and light) for Transfers, getting to the file, the locations list, Add/Edit location
+  and pane messages: `docs/plans/android-mockups/x-*`, `aaa54bfd`; waiting for the owner's approval before anything is built.
 - Owner, 2026-11-22: "have an agent look at existing extension adaptability to mobile edge for capturing links, or other
   solutions. non critical or required for release." Research done (sources only, nothing tried on a device):
   - Edge for Android runs extensions only from Microsoft's allowlist (store listing, mobile value, QA test cases, a

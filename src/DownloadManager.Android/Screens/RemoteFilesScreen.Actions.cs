@@ -623,7 +623,9 @@ internal sealed partial class RemoteFilesScreen
                 bool finished = active < _lastActiveTransfers;
                 // The phone's Host adds finished files to Android's media index a moment later, and This phone lists from
                 // that index, so phone panes are read again on the next few ticks too (Fable, 2026-11-22).
-                if (finished) _phoneSettleTicks = 3;
+                // Set to 4: the finish tick reads every pane, then three more ticks read phone panes on the phone's own Host
+                // (a paired Host doesn't index the phone).
+                if (finished) _phoneSettleTicks = _phoneHost ? 4 : 0;
                 else if (_phoneSettleTicks > 0) _phoneSettleTicks--;
                 if (finished || _phoneSettleTicks > 0)
                     foreach (var pane in _panes)
