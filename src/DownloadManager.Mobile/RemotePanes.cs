@@ -33,6 +33,7 @@ public static class RemoteFileList
     /// <summary>"17 May" in the current year, "21 Dec 2025" in another: a row never hides the year it needs (owner item 9).</summary>
     public static string Date(DateTimeOffset when, DateTimeOffset now, TimeZoneInfo? zone = null)
     {
+        if (now - when is { } age && age >= TimeSpan.Zero && age < TimeSpan.FromMinutes(5)) return "Just now";
         var local = TimeZoneInfo.ConvertTime(when, zone ?? TimeZoneInfo.Local);
         var today = TimeZoneInfo.ConvertTime(now, zone ?? TimeZoneInfo.Local);
         return local.ToString(local.Year == today.Year ? "d MMM" : "d MMM yyyy", CultureInfo.InvariantCulture);

@@ -45,11 +45,11 @@ internal sealed partial class RemoteFilesScreen
             "pane_key" => FixtureKeySite(),
             _ => new SiteDto { Id = "work", Name = "Work files", Kind = SiteKindCatalog.WebDav, Url = "https://files.example.com/dav" },
         };
-        _sites = [site];
+        _sites = FixtureMode == "pane_signin" ? [site, FixtureKeySite()] : [site];
         _inFolder = true;
         _active = 0;
         ResetPane(_panes[0], site, FixtureMode is "pane_error" or "pane_empty" ? "shared" : null);
-        ResetPane(_panes[1], null, "Download");
+        if (FixtureMode == "pane_signin") ResetPane(_panes[1], _sites[1], null); else ResetPane(_panes[1], null, "Download");
         var pane = _panes[0];
         switch (FixtureMode)
         {

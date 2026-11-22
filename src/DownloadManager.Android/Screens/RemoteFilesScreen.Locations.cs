@@ -75,15 +75,16 @@ internal sealed partial class RemoteFilesScreen
         }
         if (_error is not null && !_listLoaded)
         {
-            StateBlock(Resource.Drawable.ic_remote_alert, Resource.Color.state_failed, LoadErrorText, "Try again", () => _ = LoadLocationsAsync(), filled: false);
+            StateBlock(Resource.Drawable.ic_remote_alert, true, "Could not load Remote Files", LoadErrorText, "Try again", Resource.Drawable.ic_remote_retry, () => _ = LoadLocationsAsync(), filled: false);
             return;
         }
         if (!_listLoaded) return;
 
         if (_status is { Enabled: false })
         {
-            StateBlock(Resource.Drawable.ic_remote_power, 0, _phoneHost ? "Remote Files is off" : "Remote Files is off on " + _hostName,
-                _busy ? null : "Turn on Remote Files", () => _ = SetEnabledAsync(true), filled: true);
+            StateBlock(Resource.Drawable.ic_remote_cloud, false, _phoneHost ? "Remote Files is off" : "Remote Files is off on " + _hostName,
+                "Turn it on to browse your servers and cloud storage and move files with them.",
+                _busy ? null : "Turn on Remote Files", Resource.Drawable.ic_remote_power, () => _ = SetEnabledAsync(true), filled: true);
             return;
         }
 
@@ -103,8 +104,9 @@ internal sealed partial class RemoteFilesScreen
             foreach (var site in _sites)
                 AddLocationCard(site);
 
-            _locationNoMatches = Label("No locations match your search.", 15, Resource.Attribute.colorOnSurfaceVariant);
-            _locationNoMatches.SetPadding(0, Motion.Dp(_activity, 12), 0, Motion.Dp(_activity, 12));
+            _locationNoMatches = Label("", 15, Resource.Attribute.colorOnSurfaceVariant);
+            _locationNoMatches.Gravity = GravityFlags.Center;
+            _locationNoMatches.SetPadding(0, Motion.Dp(_activity, 48), 0, Motion.Dp(_activity, 12));
             _content.AddView(_locationNoMatches);
             FilterLocationCards();
         }
@@ -120,30 +122,44 @@ internal sealed partial class RemoteFilesScreen
 
     private string LoadErrorText => "Could not load Remote Files from " + HostPhrase + ". Check the connection and try again.";
 
-    /// <summary>A pane-style message (x14, x16): round icon, text and one pill.</summary>
-    private void StateBlock(int icon, int tintColor, string text, string? button, Action? click, bool filled)
+    /// <summary>A pane-style message (x14, x16): round icon, title, text and one pill.</summary>
+    private void StateBlock(int icon, bool error, string title, string? text, string? button, int buttonIcon, Action? click, bool filled)
     {
         var block = new LinearLayout(_activity) { Orientation = Orientation.Vertical };
         block.SetGravity(GravityFlags.CenterHorizontal);
-        block.SetPadding(Dp(24), Dp(80), Dp(24), 0);
-        var disc = new FrameLayout(_activity);
-        disc.Background = Rounded(Attr(Resource.Attribute.colorSurfaceContainerHighest), Dp(40));
-        var glyph = new ImageView(_activity) { ImportantForAccessibility = ImportantForAccessibility.No };
+        block.SetPadding(Dp(32), Dp(80), Dp(32), 0);
+        var disc = new FrameLayout(_activity) { ImportantForAccessibility = ImportantForAccessibility.No };
+        disc.Background = Rounded(error ? ResColor(Resource.Color.state_failed_container) : Attr(Resource.Attribute.colorSurfaceContainerHighest), Dp(44));
+        var glyph = new ImageView(_activity);
         glyph.SetImageResource(icon);
-        glyph.ImageTintList = ColorStateList.ValueOf(new Color(tintColor == 0 ? Attr(Resource.Attribute.colorOnSurfaceVariant) : ResColor(tintColor)));
-        disc.AddView(glyph, new FrameLayout.LayoutParams(Dp(32), Dp(32), GravityFlags.Center));
-        block.AddView(disc, new LinearLayout.LayoutParams(Dp(80), Dp(80)) { Gravity = GravityFlags.CenterHorizontal });
-        var message = FolderText(text, 18, Resource.Attribute.colorOnSurface);
-        message.Gravity = GravityFlags.Center;
-        message.SetPadding(0, Dp(20), 0, Dp(20));
-        block.AddView(message, new LinearLayout.LayoutParams(-1, -2));
+        glyph.ImageTintList = ColorStateList.ValueOf(new Color(error ? ResColor(Resource.Color.state_failed) : Attr(Resource.Attribute.colorPrimary)));
+        disc.AddView(glyph, new FrameLayout.LayoutParams(Dp(40), Dp(40), GravityFlags.Center));
+        block.AddView(disc, new LinearLayout.LayoutParams(Dp(88), Dp(88)) { Gravity = GravityFlags.CenterHorizontal, BottomMargin = Dp(20) });
+        var heading = FolderText(title, 20, Resource.Attribute.colorOnSurface);
+        heading.Gravity = GravityFlags.Center;
+        block.AddView(heading, new LinearLayout.LayoutParams(-1, -2));
+        if (text is not null)
+        {
+            var body = FolderText(text, 14, Resource.Attribute.colorOnSurfaceVariant);
+            body.Gravity = GravityFlags.Center;
+            body.SetLineSpacing(Dp(2), 1f);
+            block.AddView(body, new LinearLayout.LayoutParams(-1, -2) { TopMargin = Dp(8) });
+        }
         if (button is not null && click is not null)
         {
-            var pill = new MaterialButton(_activity, null, filled ? 0 : Resource.Attribute.materialButtonTonalStyle) { Text = button, CornerRadius = Dp(28) };
-            if (filled) pill.SetIconResource(Resource.Drawable.ic_remote_power);
+            var pill = new MaterialButton(_activity, null, filled ? 0 : Resource.Attribute.materialButtonTonalStyle) { Text = button, CornerRadius = Dp(filled ? 28 : 18) };
             pill.SetAllCaps(false);
+            pill.InsetTop = pill.InsetBottom = 0;
+            pill.SetIconResource(buttonIcon);
+            pill.IconGravity = MaterialButton.IconGravityTextStart;
+            pill.IconPadding = Dp(filled ? 10 : 6);
+            pill.IconSize = Dp(filled ? 20 : 18);
+            pill.SetPadding(Dp(filled ? 24 : 16), 0, Dp(filled ? 24 : 16), 0);
+            pill.SetMinimumHeight(0);
+            pill.Gravity = GravityFlags.Center;
+            pill.SetSingleLine(true);
             pill.Click += (_, _) => click();
-            block.AddView(pill, new LinearLayout.LayoutParams(-2, Dp(filled ? 56 : 40)) { Gravity = GravityFlags.CenterHorizontal });
+            block.AddView(pill, new LinearLayout.LayoutParams(-2, Dp(filled ? 56 : 36)) { Gravity = GravityFlags.CenterHorizontal, TopMargin = Dp(filled ? 22 : 20) });
         }
         _content.AddView(block);
     }
@@ -157,12 +173,18 @@ internal sealed partial class RemoteFilesScreen
             CornerRadius = Motion.Dp(_activity, 18)
         };
         add.SetAllCaps(false);
+        add.SetTextSize(Android.Util.ComplexUnitType.Sp, 16);
+        add.CornerRadius = Motion.Dp(_activity, 16);
+        add.IconSize = Motion.Dp(_activity, 24);
+        add.IconPadding = Motion.Dp(_activity, 10);
+        add.SetPadding(Motion.Dp(_activity, 16), 0, Motion.Dp(_activity, 20), 0);
         add.InsetTop = 0;
         add.InsetBottom = 0;
         add.SetMinimumHeight(Motion.Dp(_activity, 56));
         add.SetIconResource(Resource.Drawable.ic_add);
         add.BackgroundTintList = ColorStateList.ValueOf(new Color(Motion.Attr(_activity, Resource.Attribute.colorPrimary)));
         add.SetTextColor(new Color(Motion.Attr(_activity, Resource.Attribute.colorOnPrimary)));
+        add.Tag = "rf_fab";
         add.Click += (_, _) => BeginAddLocation();
         var addParams = new FrameLayout.LayoutParams(-2, -2, GravityFlags.Bottom | GravityFlags.Right)
         {
@@ -399,6 +421,8 @@ internal sealed partial class RemoteFilesScreen
             if (match) visible++;
         }
         if (_locationNoMatches is not null)
+            _locationNoMatches.Text = "No locations match \"" + query + "\"" + Environment.NewLine + "Search looks at names, types and addresses.";
+        if (_locationNoMatches is not null)
             _locationNoMatches.Visibility = visible == 0 ? ViewStates.Visible : ViewStates.Gone;
     }
 
@@ -429,7 +453,7 @@ internal sealed partial class RemoteFilesScreen
         var nameText = FolderText(RemoteLocationText.DisplayName(site), 18, Resource.Attribute.colorOnSurface);
         nameText.SetTypeface(null, TypefaceStyle.Bold);
         names.AddView(nameText);
-        names.AddView(FolderText(LocationDescription(site, withFree: false), 15, Resource.Attribute.colorOnSurfaceVariant));
+        names.AddView(FolderText(LocationDescription(site, withFree: false) + (site.Kind == SiteKindCatalog.Sftp && site.Port == 22 && !string.IsNullOrWhiteSpace(site.Host) ? ":22" : ""), 15, Resource.Attribute.colorOnSurfaceVariant));
         header.AddView(names, new LinearLayout.LayoutParams(0, -2, 1));
         column.AddView(header);
         SheetRow(column, Resource.Drawable.ic_remote_folder, "Open", null, () => OpenLocation(site));
@@ -437,10 +461,10 @@ internal sealed partial class RemoteFilesScreen
         if (SiteKindCatalog.SignsIn(site.Kind) && _secureHostConnection)
         {
             SheetRow(column, Resource.Drawable.ic_remote_lock, "Sign in again", null, () => BeginCloudSignIn(site, again: true));
-            SheetRow(column, Resource.Drawable.ic_settings_site_key, "Own client ID", "Your own app registration", () => ShowClientIdDialog(site));
+            SheetRow(column, Resource.Drawable.ic_remote_key, "Own client ID", "Your own app registration", () => ShowClientIdDialog(site));
         }
         if (site.Kind == SiteKindCatalog.Sftp && _secureHostConnection)
-            SheetRow(column, Resource.Drawable.ic_settings_site_key, "Review server key", null,
+            SheetRow(column, Resource.Drawable.ic_remote_key, "Review server key", null,
                 () => _ = ReviewSftpKeyAsync(site, () => { _ = LoadLocationsAsync(); }));
         SheetDivider(column);
         SheetRow(column, Resource.Drawable.ic_remote_trash, "Remove location", null, () => ConfirmRemove(site), danger: true);
@@ -456,7 +480,7 @@ internal sealed partial class RemoteFilesScreen
         if (!SameHost() || _busy || _confirm is not null || !_secureHostConnection) return;
         var dialog = NewSheet(out var column);
         SheetTitle(column, "Own client ID");
-        var note = FolderText(OwnClientIdNote + " A new client ID signs this location out; sign in again afterwards.", 14, Resource.Attribute.colorOnSurfaceVariant);
+        var note = FolderText("Your own app registration from the provider's developer console, instead of rclone's shared one. A new client ID signs " + RemoteLocationText.DisplayName(site) + " out; sign in again afterwards.", 14, Resource.Attribute.colorOnSurfaceVariant);
         AddInset(column, note);
         var (idLayout, idEdit) = OutlinedField("Your own client ID (optional)", site.ClientId ?? "", InputTypes.ClassText);
         var (secretLayout, secretEdit) = OutlinedField("Its client secret (optional)", "", InputTypes.ClassText, password: true,
@@ -511,6 +535,7 @@ internal sealed partial class RemoteFilesScreen
             .Create();
         _confirm!.DismissEvent += (_, _) => _confirm = null;
         _confirm.Show();
+        _confirm.GetButton((int)Android.Content.DialogButtonType.Positive)?.SetTextColor(new Color(Attr(Resource.Attribute.colorError)));
     }
 
     private async Task RemoveLocationAsync(string id)

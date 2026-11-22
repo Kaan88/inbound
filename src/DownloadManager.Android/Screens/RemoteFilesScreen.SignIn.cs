@@ -49,7 +49,8 @@ internal sealed partial class RemoteFilesScreen
         var button = new MaterialButton(_activity, null, Resource.Attribute.materialButtonTonalStyle)
         {
             Text = site.SigningIn ? "Waiting" : "Sign in",
-            Enabled = CanSignIn(site)
+            Enabled = CanSignIn(site) || site.SigningIn,
+            Alpha = site.SigningIn ? 0.6f : 1f
         };
         button.SetAllCaps(false);
         button.Click += (_, _) =>
@@ -166,23 +167,25 @@ internal sealed partial class RemoteFilesScreen
         var body = new LinearLayout(_activity) { Orientation = Orientation.Vertical };
         body.SetGravity(GravityFlags.CenterHorizontal);
         body.SetPadding(Dp(24), Dp(24), Dp(24), 0);
-        var spinner = new ProgressBar(_activity) { Indeterminate = true, ContentDescription = "Signing in" };
-        body.AddView(spinner, new LinearLayout.LayoutParams(Dp(48), Dp(48)) { Gravity = GravityFlags.CenterHorizontal });
-        var heading = FolderText($"Signing in to {site.Name}", 24, Resource.Attribute.colorOnSurface);
+        var spinner = new Google.Android.Material.ProgressIndicator.CircularProgressIndicator(_activity)
+        { Indeterminate = true, ContentDescription = "Signing in", IndicatorSize = Dp(36), TrackThickness = Dp(4), TrackColor = Attr(Resource.Attribute.colorOutlineVariant) };
+        spinner.SetIndicatorColor(Attr(Resource.Attribute.colorPrimary));
+        body.AddView(spinner, new LinearLayout.LayoutParams(Dp(44), Dp(44)) { Gravity = GravityFlags.CenterHorizontal });
+        var heading = FolderText($"Signing in to {site.Name}", 22, Resource.Attribute.colorOnSurface);
         heading.Gravity = GravityFlags.Center;
         heading.SetPadding(0, Dp(16), 0, Dp(8));
         body.AddView(heading, new LinearLayout.LayoutParams(-1, -2));
-        var message = FolderText("Finish signing in with the browser. This closes by itself when the phone has the authorization.", 16,
+        var message = FolderText("Finish signing in with the browser. This closes by itself when the phone has the authorization.", 14,
             Resource.Attribute.colorOnSurfaceVariant);
         message.Gravity = GravityFlags.Center;
         body.AddView(message, new LinearLayout.LayoutParams(-1, -2));
         var dialog = new MaterialAlertDialogBuilder(_activity)
             .SetView(body)!
-            .SetNeutralButton("Open browser again", (Android.Content.IDialogInterfaceOnClickListener?)null)!
-            .SetNegativeButton("Cancel", (_, _) => CancelCloudSignIn(site.Id))!
+            .SetNegativeButton("Open browser again", (Android.Content.IDialogInterfaceOnClickListener?)null)!
+            .SetPositiveButton("Cancel", (_, _) => CancelCloudSignIn(site.Id))!
             .Create();
         _phoneWaitDialog = dialog;
-        dialog.ShowEvent += (_, _) => dialog.GetButton((int)Android.Content.DialogButtonType.Neutral)!.Click += (_, _) =>
+        dialog.ShowEvent += (_, _) => dialog.GetButton((int)Android.Content.DialogButtonType.Negative)!.Click += (_, _) =>
         {
             try
             {
@@ -194,7 +197,13 @@ internal sealed partial class RemoteFilesScreen
                 _activity.ShowMessage("No browser could open the sign-in link.");
             }
         };
-        dialog.DismissEvent += (_, _) => { if (ReferenceEquals(_phoneWaitDialog, dialog)) _phoneWaitDialog = null; };
+        var fab = _surface.FindViewWithTag("rf_fab");
+        if (fab is not null) fab.Visibility = ViewStates.Gone; // x28 draws no button behind the dialog
+        dialog.DismissEvent += (_, _) =>
+        {
+            if (fab is not null) fab.Visibility = ViewStates.Visible;
+            if (ReferenceEquals(_phoneWaitDialog, dialog)) _phoneWaitDialog = null;
+        };
         dialog.CancelEvent += (_, _) => CancelCloudSignIn(site.Id);
         dialog.Show();
     }
@@ -275,7 +284,7 @@ internal sealed partial class RemoteFilesScreen
             never.SetPadding(Dp(4), 0, 0, Dp(4));
             AddInset(column, never);
         }
-        var (layout, token) = OutlinedField("Authorization token", "", InputTypes.ClassText, password: true);
+        var (layout, token) = OutlinedField("Authorization token", "", InputTypes.ClassText, password: true, placeholder: "Paste authorization token");
         _signInToken = token;
         token.ImportantForAutofill = ImportantForAutofill.No;
         layout.EndIconMode = TextInputLayout.EndIconCustom;

@@ -140,7 +140,10 @@ public static class RemoteTransferText
         var total = Fmt.Bytes(t.Bytes);
         var done = Fmt.Bytes(Math.Min(t.BytesDone, t.Bytes));
         string unit = total[(total.LastIndexOf(' ') + 1)..];
-        return done.EndsWith(" " + unit, StringComparison.Ordinal) ? done[..^(unit.Length + 1)] + " of " + total : done + " of " + total;
+        if (!done.EndsWith(" " + unit, StringComparison.Ordinal)) return done + " of " + total;
+        var number = done[..^(unit.Length + 1)];
+        if (number.EndsWith(".0", StringComparison.Ordinal)) number = number[..^2];
+        return number + " of " + total;
     }
 
     /// <summary>Filter chips of the Transfers screen.</summary>

@@ -85,7 +85,7 @@ internal sealed partial class RemoteFilesScreen
             AddInset(column, confirmed);
         }
         string primaryText = changed ? "Replace trusted key" : review.Offered.Count > 1 ? "Trust keys" : "Trust key";
-        var accept = SheetButtons(column, primaryText, Resource.Drawable.ic_settings_site_key,
+        var accept = SheetButtons(column, primaryText, Resource.Drawable.ic_remote_key,
             () => _ = SaveSftpKeyAsync(site, review, reviewedGeneration, trusted));
         if (confirmed is not null)
         {

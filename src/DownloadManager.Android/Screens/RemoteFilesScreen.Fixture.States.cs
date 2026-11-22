@@ -130,7 +130,7 @@ internal sealed partial class RemoteFilesScreen
                 return true;
             }
             case "x5": FxRunBase("full"); FxLater(() => FxClick("More options")); return true;
-            case "x5b": FxRunBase("full"); FxLater(() => { if (_tfSwipe is not null) _tfSwipe.Refreshing = true; }); return true;
+            case "x5b": FxRunBase("full"); FxLater(() => { if (_tfSwipe is not null) { _tfSwipe.Refreshing = true; RefreshGap(); } }); return true;
             case "x6": FxPaired(); FxRunBase("error"); return true;
             case "x7": case "x8": case "x9": FxFolder(id); return true;
             case "x33":

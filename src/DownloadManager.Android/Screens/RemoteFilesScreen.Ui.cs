@@ -42,8 +42,8 @@ internal sealed partial class RemoteFilesScreen
                 text = Attr(Resource.Attribute.colorOnPrimaryContainer); break;
         }
         var box = new LinearLayout(_activity) { Orientation = Orientation.Horizontal };
-        box.Background = Rounded(background, Dp(16));
-        box.SetPadding(Dp(16), Dp(14), Dp(16), Dp(14));
+        box.Background = Rounded(background, Dp(12));
+        box.SetPadding(Dp(14), Dp(12), Dp(14), Dp(12));
         if (leading is null)
         {
             var glyph = new ImageView(_activity) { ImportantForAccessibility = ImportantForAccessibility.No };
@@ -54,13 +54,13 @@ internal sealed partial class RemoteFilesScreen
         }
         else box.AddView(leading, new LinearLayout.LayoutParams(-2, -2) { RightMargin = Dp(8) });
         var column = new LinearLayout(_activity) { Orientation = Orientation.Vertical };
-        var heading = new TextView(_activity) { Text = title, TextSize = 16 };
+        var heading = new TextView(_activity) { Text = title, TextSize = body is null ? 14 : 14.5f };
         heading.SetTextColor(new Color(text));
-        heading.SetTypeface(null, Android.Graphics.TypefaceStyle.Bold);
+        if (body is not null) heading.SetTypeface(Android.Graphics.Typeface.Create("sans-serif-medium", Android.Graphics.TypefaceStyle.Normal), Android.Graphics.TypefaceStyle.Normal);
         column.AddView(heading);
         if (body is not null)
         {
-            var detail = new TextView(_activity) { Text = body, TextSize = 14 };
+            var detail = new TextView(_activity) { Text = body, TextSize = 12.5f };
             detail.SetTextColor(new Color(text));
             column.AddView(detail);
         }
@@ -146,14 +146,21 @@ internal sealed partial class RemoteFilesScreen
         var layout = (TextInputLayout)LayoutInflater.From(_activity)!.Inflate(Resource.Layout.remote_field, null, false)!;
         var edit = (TextInputEditText)layout.EditText!;
         layout.Hint = label;
+        layout.ExpandedHintEnabled = false;
         edit.SaveEnabled = false;
+        layout.SetBoxBackgroundColorStateList(ColorStateList.ValueOf(Color.Transparent));
+        layout.Background = FieldBox(false, false);
+        edit.FocusChange += (_, e) => layout.Background = FieldBox(layout.Error is not null, e.HasFocus);
+        edit.SetTextSize(Android.Util.ComplexUnitType.Sp, 15.5f);
         edit.InputType = type;
         edit.ContentDescription = label;
-        if (placeholder is not null) edit.Hint = placeholder;
+        if (placeholder is not null) layout.PlaceholderText = placeholder;
         if (password)
         {
             edit.InputType = InputTypes.ClassText | InputTypes.TextVariationPassword;
             layout.EndIconMode = TextInputLayout.EndIconPasswordToggle;
+            layout.EndIconDrawable = AndroidX.AppCompat.Content.Res.AppCompatResources.GetDrawable(_activity, Resource.Drawable.ic_remote_eye);
+            layout.SetEndIconTintList(ColorStateList.ValueOf(new Color(Attr(Resource.Attribute.colorOnSurfaceVariant))));
             layout.EndIconContentDescription = "Show or hide " + label.ToLowerInvariant();
         }
         edit.Text = text;
@@ -162,10 +169,22 @@ internal sealed partial class RemoteFilesScreen
         return (layout, edit);
     }
 
-    private static void SetFieldError(TextInputLayout layout, string? message)
+    /// <summary>The mockup's field: an 8 dp outline (1 dp, 2 dp blue when focused, 2 dp red on error) around the small label and the value.</summary>
+    private Android.Graphics.Drawables.Drawable FieldBox(bool error, bool focused)
+    {
+        var box = new Android.Graphics.Drawables.GradientDrawable();
+        box.SetColor(Color.Transparent);
+        box.SetCornerRadius(Dp(8));
+        box.SetStroke(error || focused ? Dp(2) : Dp(1),
+            error ? new Color(Attr(Resource.Attribute.colorError)) : focused ? new Color(Attr(Resource.Attribute.colorPrimary)) : Color.Argb(0x99, Color.GetRedComponent(Attr(Resource.Attribute.colorOnSurfaceVariant)), Color.GetGreenComponent(Attr(Resource.Attribute.colorOnSurfaceVariant)), Color.GetBlueComponent(Attr(Resource.Attribute.colorOnSurfaceVariant))));
+        return box;
+    }
+
+    private void SetFieldError(TextInputLayout layout, string? message)
     {
         layout.Error = message;
         layout.ErrorEnabled = message is not null;
+        layout.Background = FieldBox(message is not null, layout.EditText?.HasFocus == true);
     }
 
     private View HostPill()
@@ -240,12 +259,12 @@ internal sealed partial class RemoteFilesScreen
 
     private TextView SheetTitle(LinearLayout parent, string title, params string[] lines)
     {
-        var heading = FolderText(title, 26, Resource.Attribute.colorOnSurface);
+        var heading = FolderText(title, 22, Resource.Attribute.colorOnSurface);
         heading.SetPadding(Dp(24), 0, Dp(24), Dp(6));
         parent.AddView(heading);
         foreach (var line in lines)
         {
-            var sub = FolderText(line, 16, Resource.Attribute.colorOnSurfaceVariant);
+            var sub = FolderText(line, 14, Resource.Attribute.colorOnSurfaceVariant);
             sub.SetPadding(Dp(24), Dp(2), Dp(24), Dp(2));
             parent.AddView(sub);
         }

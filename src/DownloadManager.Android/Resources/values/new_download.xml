@@ -7,4 +7,13 @@
     <item name="boxCornerRadiusBottomStart">@dimen/new_download_field_radius</item>
     <item name="boxCornerRadiusBottomEnd">@dimen/new_download_field_radius</item>
   </style>
+  <style name="Widget.Inbound.RemoteField" parent="Widget.Material3.TextInputLayout.FilledBox">
+    <item name="boxBackgroundColor">@android:color/transparent</item>
+    <item name="boxStrokeWidth">0dp</item>
+    <item name="boxStrokeWidthFocused">0dp</item>
+    <item name="boxCornerRadiusTopStart">8dp</item>
+    <item name="boxCornerRadiusTopEnd">8dp</item>
+    <item name="boxCornerRadiusBottomStart">8dp</item>
+    <item name="boxCornerRadiusBottomEnd">8dp</item>
+  </style>
 </resources>

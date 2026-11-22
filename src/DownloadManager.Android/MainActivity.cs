@@ -441,15 +441,17 @@ public sealed partial class MainActivity : AppCompatActivity
             if (RemoteFilesScreen.FixtureMode is not null || Intent?.GetStringExtra("x10_fixture") is not null) length = Google.Android.Material.Snackbar.Snackbar.LengthIndefinite; // so a capture can see it
 #endif
             var bar = Google.Android.Material.Snackbar.Snackbar.Make(parent, text, length)!;
-            if (withinDownloads)
             {
                 var view = bar.View;
-                bar.SetGestureInsetBottomIgnored(true);
-                ViewCompat.SetOnApplyWindowInsetsListener(view, new InsetsListener((_, insets) => insets));
+                if (withinDownloads)
+                {
+                    bar.SetGestureInsetBottomIgnored(true);
+                    ViewCompat.SetOnApplyWindowInsetsListener(view, new InsetsListener((_, insets) => insets));
+                }
                 if (view.LayoutParameters is ViewGroup.MarginLayoutParams margins)
                 {
                     margins.LeftMargin = margins.RightMargin = Motion.Dp(this, 16);
-                    margins.BottomMargin = Motion.Dp(this, 12);
+                    if (withinDownloads) margins.BottomMargin = Motion.Dp(this, 12);
                     view.LayoutParameters = margins;
                 }
                 // Change only the existing themed drawable's shape; retain its color and tint.
@@ -458,8 +460,14 @@ public sealed partial class MainActivity : AppCompatActivity
                     shape.ShapeAppearanceModel = shape.ShapeAppearanceModel.ToBuilder().SetAllCornerSizes(Motion.Dp(this, 16)).Build();
                 else if (background is Android.Graphics.Drawables.GradientDrawable gradient)
                     gradient.SetCornerRadius(Motion.Dp(this, 16));
+                // Remote Files: lift the Add location button above the snackbar (x33).
+                if (_onRemoteFiles && FindViewById<View>(Resource.Id.root)?.FindViewWithTag("rf_fab") is { } fab)
+                {
+                    view.Post(() => fab.Animate()?.TranslationY(-(view.Height + Motion.Dp(this, 12)))?.SetDuration(150)?.Start());
+                    view.ViewDetachedFromWindow += (_, _) => fab.Animate()?.TranslationY(0)?.SetDuration(150)?.Start();
+                }
             }
-            else if (_nav?.PageOpen != true && navigation?.Visibility == ViewStates.Visible) bar.SetAnchorView(navigation);
+            if (!withinDownloads && _nav?.PageOpen != true && navigation?.Visibility == ViewStates.Visible) bar.SetAnchorView(navigation);
             if (action is not null && onAction is not null) bar.SetAction(action, _ => onAction());
             bar.Show();
         });

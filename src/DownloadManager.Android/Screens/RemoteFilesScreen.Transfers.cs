@@ -179,8 +179,9 @@ internal sealed partial class RemoteFilesScreen
         _tfSwipe.SetProgressBackgroundColorSchemeColor(Attr(Resource.Attribute.colorSurfaceContainer));
         _tfSwipe.Refresh += (_, _) =>
         {
-            if (_transferLoading || !SameHost()) { _tfSwipe.Refreshing = _transferLoading && !_transferQuiet; return; }
+            if (_transferLoading || !SameHost()) { _tfSwipe.Refreshing = _transferLoading && !_transferQuiet; RefreshGap(); return; }
             _ = LoadTransfersAsync();
+            RefreshGap();
         };
         _tfSwipe.AddView(scroll, new ViewGroup.LayoutParams(-1, -1));
         _tfShell.AddView(_tfSwipe, new LinearLayout.LayoutParams(-1, 0, 1));
@@ -196,6 +197,15 @@ internal sealed partial class RemoteFilesScreen
         BuildTransferList();
         bool spinning = _transferLoading && !_transferQuiet;
         if (_tfSwipe!.Refreshing != spinning) _tfSwipe.Refreshing = spinning;
+        RefreshGap();
+    }
+
+    /// <summary>x5b: the pull-to-refresh spinner sits in its own gap and the list is pushed down.</summary>
+    private void RefreshGap()
+    {
+        if (_tfList?.Parent is not View scroll || _tfSwipe is null) return;
+        float target = _tfSwipe.Refreshing ? Dp(56) : 0;
+        if (Math.Abs(scroll.TranslationY - target) > 0.5f) scroll.Animate()?.TranslationY(target)?.SetDuration(150)?.Start();
     }
 
     private string? _bannerSig;
@@ -252,11 +262,11 @@ internal sealed partial class RemoteFilesScreen
     private void BuildTransferChips()
     {
         bool any = _transfers.Count > 0;
-        string sig = any ? _transferFilter + "|" + string.Join(",", TransferFilters.Select(f => _transfers.Count(t => RemoteTransferText.InFilter(t, f.Key)))) : "";
+        string sig = _transferErrorTitle + "|" + (any ? _transferFilter + "|" + string.Join(",", TransferFilters.Select(f => _transfers.Count(t => RemoteTransferText.InFilter(t, f.Key)))) : "");
         if (sig == _chipsSig) return;
         _chipsSig = sig;
         _tfChips!.RemoveAllViews();
-        _tfChipScroll!.Visibility = any ? ViewStates.Visible : ViewStates.Gone;
+        _tfChipScroll!.Visibility = any && _transferErrorTitle is null ? ViewStates.Visible : ViewStates.Gone;
         if (!any) return;
         foreach (var (key, label) in TransferFilters)
         {
@@ -359,17 +369,17 @@ internal sealed partial class RemoteFilesScreen
         var disc = new FrameLayout(_activity);
         var shape = new GradientDrawable();
         shape.SetShape(ShapeType.Oval);
-        shape.SetColor(new Color(Attr(Resource.Attribute.colorSecondaryContainer)));
+        shape.SetColor(new Color(Attr(Resource.Attribute.colorSurfaceContainerHighest)));
         disc.Background = shape;
         var glyph = new ImageView(_activity) { ImportantForAccessibility = ImportantForAccessibility.No };
         glyph.SetImageResource(Resource.Drawable.ic_remote_transfers);
         glyph.ImageTintList = ColorStateList.ValueOf(new Color(Attr(Resource.Attribute.colorPrimary)));
-        disc.AddView(glyph, new FrameLayout.LayoutParams(Dp(32), Dp(32), GravityFlags.Center));
+        disc.AddView(glyph, new FrameLayout.LayoutParams(Dp(40), Dp(40), GravityFlags.Center));
         box.AddView(disc, new LinearLayout.LayoutParams(Dp(88), Dp(88)));
-        var title = FolderText(_phoneHost ? "No transfers on this phone" : "No transfers on " + _hostName, 22, Resource.Attribute.colorOnSurface);
+        var title = FolderText(_phoneHost ? "No transfers on this phone" : "No transfers on " + _hostName, 20, Resource.Attribute.colorOnSurface);
         title.Gravity = GravityFlags.Center;
         box.AddView(title, new LinearLayout.LayoutParams(-2, -2) { TopMargin = Dp(24) });
-        var text = FolderText("Files you move with Remote Files show up here with their progress.", 15, Resource.Attribute.colorOnSurfaceVariant);
+        var text = FolderText("Files you move with Remote Files show up here with their progress.", 14, Resource.Attribute.colorOnSurfaceVariant);
         text.Gravity = GravityFlags.Center;
         box.AddView(text, new LinearLayout.LayoutParams(-2, -2) { TopMargin = Dp(8) });
         return box;
@@ -434,7 +444,7 @@ internal sealed partial class RemoteFilesScreen
     private static int AttentionIcon(TransferAttention attention) => attention switch
     {
         TransferAttention.SignIn => Resource.Drawable.ic_open,
-        TransferAttention.ReviewKey => Resource.Drawable.ic_settings_site_key,
+        TransferAttention.ReviewKey => Resource.Drawable.ic_remote_key,
         _ => Resource.Drawable.ic_remote_lock,
     };
 
@@ -553,13 +563,13 @@ internal sealed partial class RemoteFilesScreen
     {
         var row = new LinearLayout(_activity) { Orientation = Orientation.Horizontal };
         row.SetGravity(GravityFlags.CenterVertical);
-        var from = FolderText(source, 14, Resource.Attribute.colorOnSurfaceVariant);
+        var from = FolderText(source, 13, Resource.Attribute.colorOnSurfaceVariant);
         from.SetSingleLine(true);
         from.Ellipsize = TextUtils.TruncateAt.End;
         var arrow = new ImageView(_activity) { ImportantForAccessibility = ImportantForAccessibility.No };
         arrow.SetImageResource(Resource.Drawable.ic_remote_arrow);
         arrow.ImageTintList = ColorStateList.ValueOf(new Color(Attr(Resource.Attribute.colorOnSurfaceVariant)));
-        var to = FolderText(destination, 14, Resource.Attribute.colorOnSurfaceVariant);
+        var to = FolderText(destination, 13, Resource.Attribute.colorOnSurfaceVariant);
         to.SetSingleLine(true);
         to.Ellipsize = TextUtils.TruncateAt.End;
         row.AddView(from, new LinearLayout.LayoutParams(-2, -2));

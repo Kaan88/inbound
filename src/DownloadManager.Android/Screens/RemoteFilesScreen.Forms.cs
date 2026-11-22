@@ -426,6 +426,8 @@ internal sealed partial class RemoteFilesScreen
             }
 
             View? noneBanner = null;
+            var noneHidden = new List<View>();
+            void ApplyNone() { foreach (var v in noneHidden) v.Visibility = V("tls") == SiteTlsModes.None ? ViewStates.Gone : ViewStates.Visible; }
             if (kind == SiteKindCatalog.Ftp)
             {
                 var label = FolderText("Encryption", 14, Resource.Attribute.colorOnSurfaceVariant);
@@ -440,11 +442,26 @@ internal sealed partial class RemoteFilesScreen
                     var button = new MaterialButton(_activity, null, Resource.Attribute.materialButtonOutlinedStyle)
                     { Text = text, Id = View.GenerateViewId(), Enabled = secure };
                     button.SetAllCaps(false);
+                    button.SetTextSize(Android.Util.ComplexUnitType.Sp, 12);
+                    button.SetPadding(Dp(2), 0, Dp(2), 0);
+                    button.SetSingleLine(true);
+                    button.IconPadding = Dp(4);
+                    button.IconSize = Dp(16);
                     group.AddView(button, new LinearLayout.LayoutParams(0, Dp(56), 1));
                     ids[button.Id] = mode;
                     if (V("tls") == mode || V("tls").Length == 0 && mode == SiteTlsModes.Explicit) checkedId = button.Id;
                 }
+                void Ticks()
+                {
+                    for (int i = 0; i < group.ChildCount; i++)
+                        if (group.GetChildAt(i) is MaterialButton mb)
+                        {
+                            if (mb.Checked) mb.SetIconResource(Resource.Drawable.ic_check); else mb.Icon = null;
+                        }
+                }
+                group.AddOnButtonCheckedListener(new ToggleListener((_, _) => Ticks()));
                 if (checkedId != 0) group.Check(checkedId);
+                Ticks();
                 group.ContentDescription = "Encryption";
                 _content.AddView(group, new LinearLayout.LayoutParams(-1, -2) { BottomMargin = Dp(12) });
 
@@ -460,6 +477,7 @@ internal sealed partial class RemoteFilesScreen
                     string previous = V("tls");
                     _fv["tls"] = mode;
                     noneBanner.Visibility = mode == SiteTlsModes.None ? ViewStates.Visible : ViewStates.Gone;
+                    ApplyNone();
                     if (mode != SiteTlsModes.None) { _allowInsecure = false; tick.Checked = false; }
                     // Implicit FTPS uses 990: change the port unless the user typed their own.
                     string port = V("port").Trim();
@@ -500,13 +518,16 @@ internal sealed partial class RemoteFilesScreen
             {
                 Add(_content, "password", sftpEdit ? "Password" : "Password (optional)", password: true,
                     placeholder: site?.HasPassword == true ? "Saved; type to replace" : null);
-                if (!sftpEdit)
+                if (!sftpEdit && kind != SiteKindCatalog.Ftp)
                     _content.AddView(Hint(_phoneHost ? "Credentials are stored by this phone's Host." : "Credentials are sent to " + _hostName + " and stored there."));
             }
             if (kind == SiteKindCatalog.Ftp)
             {
-                Add(_content, "folder", "Starting folder (optional)", placeholder: "/");
-                _content.AddView(Hint("Implicit FTPS uses port 990. If the server's certificate isn't from a known authority, you are asked to trust it after Add location."));
+                noneHidden.Add(Add(_content, "folder", "Starting folder (optional)", placeholder: "/"));
+                var implicitHint = Hint("Implicit FTPS uses port 990. If the server's certificate isn't from a known authority, you are asked to trust it after Add location.");
+                noneHidden.Add(implicitHint);
+                _content.AddView(implicitHint);
+                ApplyNone();
             }
             else
             {
@@ -514,7 +535,7 @@ internal sealed partial class RemoteFilesScreen
                 {
                     Add(_content, "folder", "Starting folder (optional)", placeholder: "/");
                     newAddressBanner = Banner(BannerKind.Warn, "New address or port", "You are asked to trust the server key again when you save.",
-                        Resource.Drawable.ic_settings_site_key);
+                        Resource.Drawable.ic_remote_key);
                     newAddressBanner.Visibility = ViewStates.Gone;
                     _content.AddView(newAddressBanner);
                 }
@@ -702,7 +723,7 @@ internal sealed partial class RemoteFilesScreen
             var disc = new FrameLayout(_activity) { ImportantForAccessibility = ImportantForAccessibility.No };
             disc.Background = Rounded(red ? ResColor(Resource.Color.state_failed_container) : Attr(Resource.Attribute.colorSurfaceContainerHighest), Dp(20));
             var glyph = new ImageView(_activity);
-            glyph.SetImageResource(red ? Resource.Drawable.ic_remote_alert : Resource.Drawable.ic_settings_site_key);
+            glyph.SetImageResource(red ? Resource.Drawable.ic_remote_alert : Resource.Drawable.ic_remote_key);
             glyph.ImageTintList = ColorStateList.ValueOf(new Color(red ? ResColor(Resource.Color.state_failed) : Attr(Resource.Attribute.colorOnSurface)));
             disc.AddView(glyph, new FrameLayout.LayoutParams(Dp(22), Dp(22), GravityFlags.Center));
             row.AddView(disc, new LinearLayout.LayoutParams(Dp(40), Dp(40)) { RightMargin = Dp(12) });

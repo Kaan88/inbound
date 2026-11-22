@@ -147,7 +147,7 @@ internal sealed partial class RemoteFilesScreen
         tabs.AddView(CreateTab(1), new LinearLayout.LayoutParams(0, Dp(46), 1));
         _folderHeader.AddView(tabs);
 
-        _folderHeader.AddView(CreateCrumbs(pane));
+        if (!pane.NeedsSignIn && !pane.KeyProblem) _folderHeader.AddView(CreateCrumbs(pane));
         var progress = new LinearProgressIndicator(_activity) { Indeterminate = true, TrackThickness = Dp(3) };
         progress.Visibility = pane.Loading ? ViewStates.Visible : ViewStates.Invisible;
         progress.ContentDescription = "Loading this folder";
@@ -262,7 +262,7 @@ internal sealed partial class RemoteFilesScreen
         }
         else if (pane.KeyProblem)
         {
-            icon = Resource.Drawable.ic_settings_site_key;
+            icon = Resource.Drawable.ic_remote_key;
             if (pane.ErrorTitle is not null) { disc = ResColor(Resource.Color.state_waiting_container); tint = ResColor(Resource.Color.state_waiting); }
             else tint = Attr(Resource.Attribute.colorPrimary);
         }
@@ -275,11 +275,11 @@ internal sealed partial class RemoteFilesScreen
         }
         else if (pane.KeyProblem && pane.Site is { } sftp)
         {
-            if (_secureHostConnection) AddMessageAction("Review server key", Resource.Drawable.ic_settings_site_key, () =>
+            if (_secureHostConnection) AddMessageAction("Review server key", Resource.Drawable.ic_remote_key, () =>
                 _ = ReviewSftpKeyAsync(FreshSite(sftp.Id) ?? sftp, () => _ = BrowsePaneAsync(pane, null, true)));
         }
         else if (!pane.Loading && !(pane.IsPhone && pane.Error == FolderNotAvailable))
-            AddMessageAction("Try again", Resource.Drawable.ic_refresh, () => _ = BrowsePaneAsync(pane, pane.Path, true));
+            AddMessageAction("Try again", Resource.Drawable.ic_remote_retry, () => _ = BrowsePaneAsync(pane, pane.Path, true));
     }
 
     private void AddPaneMessage(int icon, int discColor, int tint, string title, string? text)
