@@ -37,9 +37,10 @@ Updated 2026-11-22 (after the Fable review). Claude leads the Android work again
    asleep and said not to count on the phone. Then publish per `docs/android-updates.md`: APK and manifest on
    `android-v0.0.11`, the same manifest on `android-latest`, `latest=false` on both.
 2. **Merge the redesign branch** after the release, then compare r1-r6 on real data and on the owner's phone.
-3. Open from the reviews (the rest were fixed or decided on 2026-11-22, see
-   [the earlier review](android-review-49f5663c-c745317f.md#step-6-and-the-remaining-items-2026-11-22)): P6 (needs its own design);
-   ANDROID.5/.6 real-account capture and deep Doze (ANDROID.14); expanded accessibility is optional (ANDROID.13).
+3. Every review finding is fixed or decided (2026-11-22, see
+   [the earlier review](android-review-49f5663c-c745317f.md#step-6-and-the-remaining-items-2026-11-22)); the A6 and A9-15
+   answers are the owner's. Later work: ANDROID.5/.6 real-account capture and deep Doze (ANDROID.14); expanded
+   accessibility is optional (ANDROID.13).
 
 ## Ask the owner
 

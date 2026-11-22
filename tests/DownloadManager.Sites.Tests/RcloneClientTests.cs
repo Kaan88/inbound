@@ -216,6 +216,36 @@ public sealed class RcloneClientTests
     private sealed record Sent(string Method, string Path, string? ContentType, AuthenticationHeaderValue? Authorization, string Body);
 
     /// <summary>Records each request (copied out before the handler returns) and answers with <paramref name="respond"/>.</summary>
+    [Fact]
+    public async Task A_password_is_obscured_once_until_a_call_fails_then_obscured_anew()
+    {
+        // P6: the same obscured form gives rclone the same fs string, so it reuses its connection; after a failure a new
+        // form makes it build a fresh backend instead of one still retrying a server that went away.
+        var obscures = 0;
+        var fail = false;
+        var handler = new FakeHandler(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (path.EndsWith("core/obscure")) return Reply(HttpStatusCode.OK, "{\"obscured\":\"form" + ++obscures + "\"}");
+            if (path.EndsWith("job/status")) return Reply(HttpStatusCode.OK, fail ? "{\"error\":\"connection refused\"}" : "{\"error\":\"\"}");
+            return Reply(HttpStatusCode.InternalServerError, "{\"error\":\"dial tcp: connection refused\"}");
+        });
+        using var client = new RcloneClient(Base, User, RcPassword, handler: handler);
+
+        Assert.Equal("form1", await client.ObscureAsync("site-password"));
+        Assert.Equal("form1", await client.ObscureAsync("site-password"));
+        await client.CallAsync("job/status", new System.Text.Json.Nodes.JsonObject());
+        Assert.Equal("form1", await client.ObscureAsync("site-password"));
+
+        await Assert.ThrowsAsync<RcloneCallException>(() => client.CallAsync("operations/list"));
+        Assert.Equal("form2", await client.ObscureAsync("site-password"));
+
+        fail = true;
+        await client.CallAsync("job/status", new System.Text.Json.Nodes.JsonObject());
+        Assert.Equal("form3", await client.ObscureAsync("site-password"));
+        Assert.Equal(3, obscures);
+    }
+
     private sealed class FakeHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> respond) : HttpMessageHandler
     {
         public FakeHandler(Func<HttpRequestMessage, HttpResponseMessage> respond)

@@ -29,7 +29,8 @@ the phone; no device run of the fixes yet).
 Remaining review items of the earlier range, 2026-11-22 (owner away; decisions noted): A5, A7, S9, T1 and the F3
 note fixed, S4 partly fixed (a skipped update version changes the settings revision); S5, S7, S8, S10 and M4 kept with
 reasons; A3 fixed (downloads behind a redirect in the built-in browser; checked on the inbound33 emulator with the
-fixture's new redirect links, hashes match); P6 open; A6 goes to the owner. Details:
+fixture's new redirect links, hashes match); P6 fixed (one obscured form per password until a call fails, so rclone reuses SFTP/FTP/WebDAV
+connections; with rclone 1.76.0 Sites integration 110 and Sites unit 228 passed); A6 goes to the owner. Details:
 [the review](docs/plans/android-review-49f5663c-c745317f.md#step-6-and-the-remaining-items-2026-11-22). Checks: queue,
 settings, update and schedule integration tests 248 passed; Sites integration tests 75 passed with the 41 real-rclone
 tests skipped (no rclone binary on this PC); Android emulator build succeeded. Not in the staged 0.0.11 APK.

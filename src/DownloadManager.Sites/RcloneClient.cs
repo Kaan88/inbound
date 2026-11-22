@@ -34,6 +34,10 @@ public sealed class RcloneClient : IDisposable
     private readonly Func<bool> _exited;
     private readonly object _secretsLock = new();
     private string[] _secrets;
+    // P6: one obscured form per password, so the same site builds the same fs string and rclone reuses its cached
+    // backend (one SSH or TLS handshake, not one per call). Forgotten after any failed call: a cached backend whose server
+    // went away would otherwise keep retrying slowly, where a new one fails at once.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _obscured = new(StringComparer.Ordinal);
 
     public RcloneClient(Uri baseAddress, string user, string password, Func<bool>? exited = null, HttpMessageHandler? handler = null)
     {
@@ -155,7 +159,11 @@ public sealed class RcloneClient : IDisposable
             {
                 try
                 {
-                    return JsonNode.Parse(body) as JsonObject ?? throw new JsonException("not an object");
+                    var answer = JsonNode.Parse(body) as JsonObject ?? throw new JsonException("not an object");
+                    // An async job (a transfer) reports its failure here, not as an error answer.
+                    if (command == "job/status" && answer["error"] is JsonValue failed && failed.TryGetValue<string>(out var text) && text.Length > 0)
+                        ForgetObscured();
+                    return answer;
                 }
                 catch (JsonException)
                 {
@@ -163,11 +171,15 @@ public sealed class RcloneClient : IDisposable
                 }
             }
 
+            ForgetObscured();
             if (response.StatusCode == HttpStatusCode.Unauthorized)
                 throw new RcloneCallException(command, 401, "rclone refused the Host's credentials.");
             throw new RcloneCallException(command, (int)response.StatusCode, Redact(ErrorText(body)));
         }
     }
+
+    /// <summary>P6: the next build obscures passwords again, so rclone makes a new backend instead of its cached one.</summary>
+    public void ForgetObscured() => _obscured.Clear();
 
     /// <summary>
     /// SITES.7: a file of the named remote <paramref name="remoteName"/>, as rclone serves it (<c>--rc-serve</c>). The caller
@@ -188,6 +200,7 @@ public sealed class RcloneClient : IDisposable
         }
 
         if (response.IsSuccessStatusCode) return response;
+        ForgetObscured();
         using (response)
         {
             var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
@@ -244,6 +257,7 @@ public sealed class RcloneClient : IDisposable
         using (response)
         {
             if (response.IsSuccessStatusCode) return;
+            ForgetObscured();
             var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
             throw new RcloneCallException("operations/uploadfile", (int)response.StatusCode, Redact(ErrorText(body)));
         }
@@ -253,11 +267,13 @@ public sealed class RcloneClient : IDisposable
     public async Task<string> ObscureAsync(string clear, CancellationToken cancellationToken = default)
     {
         AddSecret(clear);
+        if (_obscured.TryGetValue(clear, out var known)) return known;
         var result = await CallAsync("core/obscure", new JsonObject { ["clear"] = clear }, cancellationToken).ConfigureAwait(false);
         var obscured = result["obscured"]?.GetValue<string>() ?? throw new RcloneCallException("core/obscure", 200, "no obscured value in the answer.");
         // The obscured form is reversible, so it is as secret as the password.
         AddSecret(obscured);
-        return obscured;
+        // A form obscured by a call that started before a failure may be stored after it; the next failure clears it again.
+        return _obscured.GetOrAdd(clear, obscured);
     }
 
     private static string ErrorText(string body)
