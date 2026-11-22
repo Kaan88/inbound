@@ -45,8 +45,6 @@ Updated 2026-11-22 (after the Fable review). Claude leads the Android work again
 
 ## Ask the owner
 
-- A6: a downloaded update stays offered even if the signed feed later points back to an older version (a pulled
-  release). Keep offering it, or withdraw it?
 - The decisions in [the review](android-review-android9.md#what-was-done) made while the owner was away (A9-6, A9-7,
   A9-15, A9-18, earlier A4) and in [the earlier review](android-review-49f5663c-c745317f.md#step-6-and-the-remaining-items-2026-11-22) (S4, S5, S7, S8, S10, M4).
 
