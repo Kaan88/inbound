@@ -436,7 +436,11 @@ public sealed partial class MainActivity : AppCompatActivity
             bool withinDownloads = downloadsFeedback && navigation?.Visibility == ViewStates.Visible &&
                 !_onSettings && !_onQueues && !_onRemoteFiles && _nav?.PageOpen != true && _folderPage is null;
             var parent = FindViewById<View>(withinDownloads ? Resource.Id.downloads_root : Resource.Id.root)!;
-            var bar = Google.Android.Material.Snackbar.Snackbar.Make(parent, text, Google.Android.Material.Snackbar.Snackbar.LengthLong)!;
+            int length = Google.Android.Material.Snackbar.Snackbar.LengthLong;
+#if INBOUND_TEST_BUILD
+            if (RemoteFilesScreen.FixtureMode is not null || Intent?.GetStringExtra("x10_fixture") is not null) length = Google.Android.Material.Snackbar.Snackbar.LengthIndefinite; // so a capture can see it
+#endif
+            var bar = Google.Android.Material.Snackbar.Snackbar.Make(parent, text, length)!;
             if (withinDownloads)
             {
                 var view = bar.View;

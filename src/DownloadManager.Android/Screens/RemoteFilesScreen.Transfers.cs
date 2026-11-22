@@ -788,7 +788,7 @@ internal sealed partial class RemoteFilesScreen
         try
         {
 #if INBOUND_TEST_BUILD
-            var result = FixtureMode is null ? await _client.GetTransferAsync(t.Id, _life.Token) : new SiteTransferResultDto { Ok = true, Items = FixtureItems(t.Id) };
+            var result = FixtureMode is null ? await _client.GetTransferAsync(t.Id, _life.Token) : await FixtureTransferAsync(t.Id);
 #else
             var result = await _client.GetTransferAsync(t.Id, _life.Token);
 #endif

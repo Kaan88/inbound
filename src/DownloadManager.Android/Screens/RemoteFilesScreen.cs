@@ -22,11 +22,11 @@ internal sealed partial class RemoteFilesScreen : IDisposable
     private const int PageSize = 100;
     private readonly MainActivity _activity;
     private readonly RemoteFilesClient _client;
-    private readonly string _hostName;
+    private string _hostName; // not readonly: the test-build fixtures set them
     private readonly string _hostDisplay;
     private bool _secureHostConnection; // not readonly: the test-build fixtures (RemoteFilesScreen.Fixture.cs) set it
     private readonly string _hostStamp;
-    private readonly bool _phoneHost;
+    private bool _phoneHost;
     private volatile bool _hostChanged;
     private readonly CancellationTokenSource _life = new();
     private readonly Func<bool> _safeDownloads;

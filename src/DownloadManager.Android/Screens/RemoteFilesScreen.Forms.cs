@@ -363,6 +363,9 @@ internal sealed partial class RemoteFilesScreen
         if (_error is not null) _content.AddView(Banner(BannerKind.Fail, _error, null, Resource.Drawable.ic_remote_alert));
 
         var layouts = new Dictionary<string, TextInputLayout>(StringComparer.Ordinal);
+#if INBOUND_TEST_BUILD
+        _fxLayouts = layouts;
+#endif
         var edits = new Dictionary<string, TextInputEditText>(StringComparer.Ordinal);
         TextInputLayout Add(LinearLayout parent, string key, string label, InputTypes type = InputTypes.ClassText, bool password = false,
             string? placeholder = null, Action<string>? changed = null, bool wrapBottom = true)
@@ -982,6 +985,11 @@ internal sealed partial class RemoteFilesScreen
         if (read.TrustedBySite || cert.TrustedBySystem) { if (trusted is not null) trusted(); else await TestFormLocationAsync(saved, true); return; }
         if (cert.CannotTrust is { } cannot) { CertificateFailed(saved, cannot, trusted); return; }
 
+        ShowCertificateSheet(saved, cert, trusted);
+    }
+
+    private void ShowCertificateSheet(SiteDto saved, SiteCertificateDto cert, Action? trusted)
+    {
         var dialog = NewSheet(out var column);
         SheetTitle(column, "Trust this server certificate?",
             $"{saved.Name} · {(string.IsNullOrEmpty(saved.Host) ? HostOfUrl(saved.Url) : saved.Host + (saved.Port > 0 ? ":" + saved.Port : ""))}",

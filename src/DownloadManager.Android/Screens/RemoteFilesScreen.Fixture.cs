@@ -17,11 +17,11 @@ internal sealed partial class RemoteFilesScreen
         long bytes, long bytesDone, long speed, int minutesAgo, string? message = null, int failed = 0, int skipped = 0, string? destSite = null, string? destFolder = null)
         => new()
         {
-            Id = id, State = state, Direction = direction, SiteId = site, SiteName = site == "home" ? "Home NAS" : "Google Drive",
+            Id = id, State = state, Direction = direction, SiteId = site, SiteName = site switch { "home" => "Home NAS", "work" => "Work files", "dropbox" => "Dropbox", "backups" => "Backups", _ => "Google Drive" },
             RemoteFolder = remote, LocalFolder = local, Files = files, FilesDone = done, FilesFailed = failed, FilesSkipped = skipped,
             Bytes = bytes, BytesDone = bytesDone, Speed = speed, Message = message,
             CreatedAt = DateTimeOffset.Now.AddMinutes(-minutesAgo), FinishedAt = state is "done" or "failed" or "canceled" ? DateTimeOffset.Now.AddMinutes(-minutesAgo + 2) : null,
-            DestinationSiteId = destSite, DestinationSiteName = destSite is null ? null : "Home NAS", DestinationFolder = destFolder,
+            DestinationSiteId = destSite, DestinationSiteName = destSite switch { null => null, "backups" => "Backups", _ => "Home NAS" }, DestinationFolder = destFolder,
         };
 
     private static SiteDto FixtureKeySite() => new()
@@ -109,6 +109,7 @@ internal sealed partial class RemoteFilesScreen
 
     private void StartFixture()
     {
+        if (StartStateFixture()) return;
         if (FixtureMode is not null && FixtureMode.StartsWith("pane_", StringComparison.Ordinal)) { StartPaneFixture(); return; }
         if (FixtureMode is not null && FixtureMode.StartsWith("form_key", StringComparison.Ordinal)) { StartKeyFormFixture(); return; }
         _listLoaded = true;
@@ -117,31 +118,33 @@ internal sealed partial class RemoteFilesScreen
         _transfers = FixtureMode == "empty" ? [] :
         [
             Fx("t1", "running", "download", "home", "/music", "/storage/emulated/0/Download/Inbound/Music", 1, 0, 455_000_000, 212_000_000, 9_800_000, 1),
-            Fx("t2", "running", "copy", "drive", "/Wedding", "", 640, 212, 4_100_000_000, 1_300_000_000, 12_000_000, 4, destSite: "home", destFolder: "/photos"),
-            Fx("t3", "paused", "upload", "home", "/backup", "/storage/emulated/0/Download/Inbound", 1, 0, 80_000_000, 20_000_000, 0, 20),
-            Fx("t4", "done", "download", "home", "/music", "/storage/emulated/0/Download/Inbound/Music", 1, 1, 8_400_000, 8_400_000, 0, 60),
-            Fx("t5", "done", "copy", "drive", "/Wedding", "", 14, 12, 120_000_000, 120_000_000, 0, 90, skipped: 2, destSite: "home", destFolder: "/photos"),
-            Fx("t6", "failed", "upload", "home", "/docs", "/storage/emulated/0/Download/Inbound", 24, 21, 300_000_000, 270_000_000, 0, 120, "The connection to Home NAS was lost.", failed: 3),
-            Fx("t7", "canceled", "download", "home", "/video", "/storage/emulated/0/Download/Inbound", 1, 0, 700_000_000, 10_000_000, 0, 200),
+            Fx("t2", "running", "copy", "drive", "/Wedding", "", 640, 118, 6_400_000_000, 1_200_000_000, 4_100_000, 4, destSite: "home", destFolder: "/photos"),
+            Fx("t3", "queued", "upload", "work", "/shared", "/storage/emulated/0/Download/Scans", 1, 0, 3_000_000, 0, 0, 5),
+            Fx("t4", "paused", "download", "home", "/media/rehearsals", "/storage/emulated/0/Download/Inbound/Video", 1, 0, 1_400_000_000, 310_000_000, 0, 20),
+            Fx("t5", "failed", "upload", "home", "/backup", "/storage/emulated/0/Download/Photos 2025", 24, 21, 112_000_000, 96_000_000, 0, 120, "The connection to Home NAS was lost.", failed: 3),
+            Fx("t6", "done", "download", "work", "/", "/storage/emulated/0/Download", 1, 1, 220_000, 220_000, 0, 50),
+            Fx("t7", "done", "copy", "dropbox", "/Invoices", "", 14, 12, 120_000_000, 120_000_000, 0, 90, skipped: 2, destSite: "backups", destFolder: "/invoices"),
+            Fx("t8", "canceled", "download", "home", "/video", "/storage/emulated/0/Download/Inbound", 1, 0, 700_000_000, 10_000_000, 0, 200),
         ];
         _transferPaths["t1"] = ["session-0503.flac"];
         _transferPaths["t2"] = ["Wedding/a.jpg", "Wedding/b.jpg"];
-        _transferPaths["t3"] = ["backup.zip"];
-        _transferPaths["t4"] = ["track.mp3"];
-        _transferPaths["t5"] = ["Wedding/a.jpg", "Wedding/b.jpg"];
-        _transferPaths["t6"] = ["docs/a.pdf", "docs/b.pdf"];
-        _transferPaths["t7"] = ["movie.mkv"];
+        _transferPaths["t3"] = ["cover-scan.jpg"];
+        _transferPaths["t4"] = ["rehearsal-take-3.mp4"];
+        _transferPaths["t5"] = ["Photos 2025/IMG_2201.jpg", "Photos 2025/IMG_2202.jpg"];
+        _transferPaths["t6"] = ["setlist.pdf"];
+        _transferPaths["t7"] = ["Invoices/a.pdf", "Invoices/b.pdf"];
+        _transferPaths["t8"] = ["movie.mkv"];
         if (FixtureMode == "attention")
         {
             // A failed transfer that needs a sign-in, a server key review or a certificate review shows that action in place of Retry.
-            var signIn = Fx("t8", "failed", "download", "drive", "/Wedding", "/storage/emulated/0/Download/Inbound", 1, 0, 50_000_000, 0, 0, 5, "Sign-in has run out.");
+            var signIn = Fx("a8", "failed", "download", "drive", "/Wedding", "/storage/emulated/0/Download/Inbound", 1, 0, 50_000_000, 0, 0, 5, "Sign-in has run out.");
             signIn.Problem = SiteProblems.SignInNeeded;
-            var key = Fx("t9", "failed", "upload", "home", "/docs", "/storage/emulated/0/Download/Inbound", 1, 0, 50_000_000, 0, 0, 6, "The server key changed.");
+            var key = Fx("a9", "failed", "upload", "home", "/docs", "/storage/emulated/0/Download/Inbound", 1, 0, 50_000_000, 0, 0, 6, "The server key changed.");
             key.Problem = SiteProblems.HostKeyChanged;
-            var cert = Fx("t10", "failed", "download", "home", "/music", "/storage/emulated/0/Download/Inbound/Music", 1, 0, 50_000_000, 0, 0, 7, "The certificate is not trusted.");
+            var cert = Fx("a10", "failed", "download", "home", "/music", "/storage/emulated/0/Download/Inbound/Music", 1, 0, 50_000_000, 0, 0, 7, "The certificate is not trusted.");
             cert.Problem = SiteProblems.CertificateNotTrusted;
             _transfers = [signIn, key, cert, .. _transfers];
-            _transferPaths["t8"] = ["a.zip"]; _transferPaths["t9"] = ["b.pdf"]; _transferPaths["t10"] = ["c.mp3"];
+            _transferPaths["a8"] = ["a.zip"]; _transferPaths["a9"] = ["b.pdf"]; _transferPaths["a10"] = ["c.mp3"];
         }
         if (FixtureMode == "error")
         {
@@ -153,14 +156,27 @@ internal sealed partial class RemoteFilesScreen
         Render();
     }
 
+    private static async Task<SiteTransferResultDto> FixtureTransferAsync(string id)
+    {
+        await Task.Delay(500); // the sheet is shown before the answer arrives, as with a real Host
+        return new SiteTransferResultDto { Ok = true, Items = FixtureItems(id) };
+    }
+
     private static List<SiteTransferItemDto> FixtureItems(string id) => id switch
     {
-        "t5" or "t2" =>
+        "t2" =>
         [
             new() { Path = "Wedding/IMG_2291.jpg", State = "done", Size = 4_200_000 },
             new() { Path = "Wedding/IMG_2292.jpg", State = "skipped", Size = 4_100_000 },
             new() { Path = "Wedding/IMG_2293.jpg", State = "failed", Size = 4_000_000, Error = "Timed out" },
             new() { Path = "Wedding/IMG_2294.jpg", State = "done", Size = 3_900_000 },
+        ],
+        "94bbf4e07a3c4d51b8e2f60c19d7c21a" =>
+        [
+            new() { Path = "Photos 2025/IMG_2291.jpg", State = "failed", Size = 4_200_000, Error = "Connection lost" },
+            new() { Path = "Photos 2025/IMG_2292.jpg", State = "failed", Size = 4_100_000, Error = "Connection lost" },
+            new() { Path = "Photos 2025/IMG_2293.jpg", State = "failed", Size = 4_000_000, Error = "Connection lost" },
+            new() { Path = "Photos 2025/IMG_2201.jpg", State = "done", Size = 4_100_000 },
         ],
         _ => [new() { Path = "session-0503.flac", State = "done", Size = 8_400_000 }],
     };

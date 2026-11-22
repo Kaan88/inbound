@@ -295,7 +295,11 @@ public sealed partial class MainActivity
         if (intent?.GetStringExtra("x10_fixture") == "added")
         {
             ShowMessage("Download added · saving to Download/Inbound", "Show in folder", () => ShowDownloadsFolder("Download/Inbound", null), downloadsFeedback: true);
-            if (_model?.Rows.FirstOrDefault() is { } newest) _downloads?.MarkNew(newest);
+            if (_model?.Rows.FirstOrDefault() is { } newest)
+            {
+                // The outline fades after about 3 s; mark again every second so a capture finds it.
+                for (int i = 0; i < 40; i++) FindViewById<Android.Views.View>(Resource.Id.root)?.PostDelayed(() => _downloads?.MarkNew(newest), i * 1000);
+            }
         }
 
         var mode = intent?.GetStringExtra("x10b_fixture");
