@@ -7,7 +7,8 @@ by the app or this documentation.
 `/page` links to `/files/a.zip`, `/files/b.pdf`, `/files/c.jpg`, the same-origin
 cookie-protected `/auth.zip`, a cross-origin 127.0.0.1 auth sentinel, an expired
 link and `/files/slow.zip`. `/signin` sets the invented `inbound_test=yes`
-HttpOnly cookie and redirects to `/page`; `/auth.zip` returns 403 without it.
+HttpOnly cookie and redirects to `/page`; `/go/a.zip` redirects (302) to
+`/files/a.zip` and `/go/cross.zip` to `http://127.0.0.1:47612/files/c.jpg` (review A3); `/auth.zip` returns 403 without it.
 `/expired.zip?token=old` returns 403; `token=gone` returns 410 on GET and
 HEAD for explicit expiry; `token=new` serves the fixture payload, and
 `&slow=1` throttles its body. `/files/slow.zip` delays HEAD by six seconds.

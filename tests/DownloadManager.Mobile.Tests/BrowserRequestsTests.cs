@@ -58,6 +58,43 @@ public sealed class BrowserRequestsTests
         var observation = requests.Take(File); Assert.NotNull(observation);
         Assert.True(observation.Ambiguous); Assert.True(observation.KnownNonGet);
     }
+    [Fact] public void A_download_at_the_end_of_a_redirect_takes_the_one_open_main_frame_get()
+    {
+        var requests = new BrowserRequests(); requests.CommitPage(Page);
+        requests.Observe(File, "GET", true, Page);
+        requests.Observe("https://example.test/style.css", "GET", false, Page);
+        var observation = requests.Take("https://cdn.example.test/signed/file.zip?t=1");
+        Assert.NotNull(observation); Assert.True(observation.Redirected); Assert.False(observation.Ambiguous);
+        Assert.Equal(Page, observation.PageUrl);
+        // Cross-origin hop: only the origin goes on as the referrer.
+        Assert.Equal("https://example.test/", observation.Referrer);
+        Assert.Null(requests.Take("https://cdn.example.test/other.zip"));
+    }
+    [Fact] public void A_same_origin_redirect_keeps_the_full_referrer()
+    {
+        var requests = new BrowserRequests(); requests.CommitPage(Page);
+        requests.Observe(File, "GET", true, Page);
+        var observation = requests.Take("https://example.test/files/real.zip");
+        Assert.NotNull(observation); Assert.Equal(Page, observation.Referrer);
+    }
+    [Fact] public void An_unobserved_download_with_two_open_main_frame_requests_stays_unknown()
+    {
+        var requests = new BrowserRequests(); requests.CommitPage(Page);
+        requests.Observe(File, "GET", true, Page); requests.Observe("https://example.test/other.zip", "GET", true, Page);
+        Assert.Null(requests.Take("https://cdn.example.test/file.zip"));
+    }
+    [Fact] public void An_unobserved_download_after_a_main_frame_post_stays_unknown()
+    {
+        var requests = new BrowserRequests(); requests.CommitPage(Page);
+        requests.Observe(File, "POST", true, Page);
+        Assert.Null(requests.Take("https://cdn.example.test/file.zip"));
+    }
+    [Fact] public void An_unobserved_download_from_an_older_document_stays_unknown()
+    {
+        var requests = new BrowserRequests(); requests.CommitPage(Page);
+        requests.Observe(File, "GET", true, Page); requests.CommitPage("https://example.test/next");
+        Assert.Null(requests.Take("https://cdn.example.test/file.zip"));
+    }
     [Theory]
     [InlineData(null)] [InlineData("{")] [InlineData("42")] [InlineData("{}")]
     [InlineData("\"{bad\"")] [InlineData("\"{}\"")]

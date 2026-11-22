@@ -114,6 +114,10 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header('Content-Length', str(len(page))); self.end_headers()
             if body: self.wfile.write(page)
             return
+        # Review A3: a download behind a redirect, same-origin and to the cross-origin 127.0.0.1 address.
+        if path in ('/go/a.zip', '/go/cross.zip'):
+            target = '/files/a.zip' if path == '/go/a.zip' else 'http://127.0.0.1:47612/files/c.jpg'
+            self.send_response(302); self.send_header('Location', target); self.send_header('Content-Length', '0'); self.end_headers(); return
         if route == 'unknown': self.empty(404); return
         if route == 'auth' and not present: self.empty(403); return
         if route == 'expired':
