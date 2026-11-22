@@ -70,6 +70,7 @@ public sealed partial class MainActivity : AppCompatActivity
         var appearance = new Appearance(_prefs);
 #if INBOUND_TEST_BUILD
         if (Intent?.GetBooleanExtra("skip_first_run", false) == true) _prefs.SetBool(FirstRunKey, true);
+        RemoteFilesScreen.FixtureMode = Intent?.GetStringExtra("x_fixture"); // canned Transfers screen, see RemoteFilesScreen.Fixture.cs
 #endif
 
         // --- Step 6 (ANDROID.7) hook: the connection is the shown host's (this phone, or a paired Inbound), and the host
@@ -115,6 +116,9 @@ public sealed partial class MainActivity : AppCompatActivity
         _model.HostHelloChanged += () =>
         {
             var offered = _model.Hello?.Capabilities.Contains("sites") == true;
+#if INBOUND_TEST_BUILD
+            offered |= RemoteFilesScreen.FixtureMode is not null;
+#endif
             if (!offered && _onRemoteFiles) bottom.SelectedItemId = Resource.Id.nav_downloads;
             bottom.Menu.FindItem(Resource.Id.nav_remote_files)!.SetVisible(offered);
         };
@@ -137,6 +141,13 @@ public sealed partial class MainActivity : AppCompatActivity
         _model.FirstSnapshotShown += () =>
         {
             var remoteFilesOffered = _model.Hello?.Capabilities.Contains("sites") == true;
+#if INBOUND_TEST_BUILD
+            if (RemoteFilesScreen.FixtureMode is not null)
+            {
+                bottom.Menu.FindItem(Resource.Id.nav_remote_files)!.SetVisible(true);
+                bottom.SelectedItemId = Resource.Id.nav_remote_files;
+            }
+#endif
             if (remoteFilesOffered && savedInstanceState?.GetBoolean("on_remote_files") == true)
                 bottom.SelectedItemId = Resource.Id.nav_remote_files;
             foreach (var r in _model.Rows) WatchForFinish(r);
@@ -439,7 +450,7 @@ public sealed partial class MainActivity : AppCompatActivity
                 else if (background is Android.Graphics.Drawables.GradientDrawable gradient)
                     gradient.SetCornerRadius(Motion.Dp(this, 16));
             }
-            else if (_nav?.PageOpen != true) bar.SetAnchorView(navigation);
+            else if (_nav?.PageOpen != true && navigation?.Visibility == ViewStates.Visible) bar.SetAnchorView(navigation);
             if (action is not null && onAction is not null) bar.SetAction(action, _ => onAction());
             bar.Show();
         });
@@ -735,6 +746,7 @@ public sealed partial class MainActivity : AppCompatActivity
         _torBox?.SetVisible(true);
         _addTorrent?.SetVisible(true);
         _remoteFiles?.SetVisible(true);
+        ResumeTracking();
     }
 
     protected override void OnStop()
@@ -749,6 +761,7 @@ public sealed partial class MainActivity : AppCompatActivity
         _torBox?.SetVisible(false);
         _addTorrent?.SetVisible(false);
         _remoteFiles?.SetVisible(false);
+        StopTrackingLoop();
         base.OnStop();
     }
 
@@ -771,6 +784,7 @@ public sealed partial class MainActivity : AppCompatActivity
         _downloads?.CloseSelectionWindows();
         _linkLifetime.Cancel();
         _linkPageLifetime?.Cancel();
+        StopTrackingLoop();
         if (_linkHosts is not null) _linkHosts.Changed -= OnLinkHostsChanged;
         base.OnDestroy();
         // An open page goes with the activity: Details stops polling, and no view of this activity is held on to (findings 15, 16).

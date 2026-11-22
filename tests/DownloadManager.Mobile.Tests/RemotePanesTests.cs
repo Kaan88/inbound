@@ -156,8 +156,8 @@ public sealed class RemotePanesTests
         Assert.Equal("", RemoteTransfers.DownloadRelative("Download"));
         Assert.Equal("Inbound/Music", RemoteTransfers.DownloadRelative("Download/Inbound/Music"));
         Assert.Null(RemoteTransfers.DownloadRelative("DCIM/Camera"));
-        Assert.Equal("Downloads/Inbound/Music", RemoteTransfers.PhoneLabel("Download/Inbound/Music"));
-        Assert.Equal("Downloads", RemoteTransfers.PhoneLabel("Download"));
+        Assert.Equal("Download/Inbound/Music", RemoteTransfers.PhoneLabel("Download/Inbound/Music"));
+        Assert.Equal("Download", RemoteTransfers.PhoneLabel("Download"));
     }
 
     private static SiteHostKeyDto Key(string type, string fingerprint) => new() { Type = type, Fingerprint = fingerprint, Entry = type + " " + fingerprint };

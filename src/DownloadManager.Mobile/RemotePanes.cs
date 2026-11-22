@@ -231,11 +231,11 @@ public static class RemoteTransfers
         transfer.Direction + " · " + transfer.SiteName
         + (transfer.Direction == "copy" && !string.IsNullOrEmpty(transfer.DestinationSiteName) ? " → " + transfer.DestinationSiteName : "");
 
-    /// <summary>The caption under a phone destination, "Downloads/Inbound/Music".</summary>
+    /// <summary>The caption under a phone destination, "Download/Inbound/Music".</summary>
     public static string PhoneLabel(string phonePath)
     {
         var relative = DownloadRelative(phonePath);
-        return relative is null ? "Phone" : relative.Length == 0 ? "Downloads" : "Downloads/" + relative;
+        return relative is null ? "Phone" : relative.Length == 0 ? "Download" : "Download/" + relative;
     }
 }
 
