@@ -27,6 +27,8 @@ Open, for the owner (not changed):
 3. t5 on a paired PC: Ready rows have no file count or size (the Host doesn't send them; needs a Host change).
 4. t6: the mockup extracts into a folder named after the archive ("Downloads/Inbound/project-files"); the Host
    extracts into the download folder itself.
+Owner (2026-11-22): "remind me about them later, keep as built for now". The four stay as built; raise them again
+after the release (handoff, "Remind the owner").
 Incident: during the t1 check a stray tap started the Debian Edu netinst torrent (public ISO) on the phone; it reached
 10 MB of 512 MB and was deleted with its file within a minute. Test zip, its job and the local server were removed and
 the display restored (mode 1, brightness 60, timeout unchanged).

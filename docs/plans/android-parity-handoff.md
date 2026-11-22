@@ -1,53 +1,65 @@
 # Android handoff
 
-Updated 2026-11-21. Claude leads the Android work again. Read `CLAUDE.md`, then
+Updated 2026-11-22. Claude leads the Android work again. Read `CLAUDE.md`, then
 `GOAL.md`, `ROADMAP.md` and `PROGRESS.md`, then the
 [operating notes](../android-operating-notes.md).
 
 ## Where things stand
 
-- **Branch:** `android-remote-files-parity`, pushed and even with origin at `c745317f`
-  before the 2026-11-21 reorganization. Worktree:
+- **Branch:** `android-remote-files-parity`, pushed and even with origin at the
+  commit that carries this handoff. Worktree (the working folder):
   `C:/Users/kaank/.local/share/opencode/worktree/08edba/android-remote-files-parity`.
-- **Releases:** the last public Android release is 0.0.9 (`d053242e`, recorded at
-  `03572c06`). 0.0.10 (`5c12a1af`, Remote Files browse cancellation on the phone) was
-  installed on the owner's S24 FE but not published.
-- **Against `main`:** the branches split at `cb07f7b6` (2026-11-15). `main` has 192
-  commits not here (desktop 0.9.0 and later, plus one unpushed local commit
-  `470fbb86`); this branch has 235 Android commits not on `main`. No merge without
-  the owner's say-so.
-- **`android-app` working copy** (`C:/Users/kaank/Downloads Archive/2026-11-20/Projects/Inbound/idm-android-trial`,
-  branch `android-app` at `5e8261eb`, one commit past origin): uncommitted ANDROID.9
-  work (TorBox, paired torrents, paired archives screens and clients with tests, a
-  TorBox runbook and fixture, `docs/plans/android-host-tools.md`) plus edits to
-  `AddSheet`, `MainActivity`, `Navigator` and the tracking files. Not reviewed. Read
-  it before reusing any of it; do not copy files blindly.
-- **Local state here:** `MainActivity.cs` and `SiteTransferDtos.cs` show as modified
-  with no content change (line endings). `.cortexkit/` and `__pycache__/` are
-  untracked local state. Leave them alone.
-- **Unreviewed range:** `49f5663c..c745317f` was made outside Claude sessions. Its
-  earlier review verdicts are input only; it is the first open entry in the
-  [Fable review queue](android-fable-review-queue.md).
+  Never switch the branch of the shared `idm` checkout.
+- **ANDROID.9 is built and checked (2026-11-22):** torrents on the phone (Wi-Fi only,
+  seeding on Wi-Fi while charging), TorBox (add, cache hit and miss, My TorBox, "On
+  TorBox" rows in Downloads), archives (password sheet, saved passwords, per-archive
+  delete), Import a list (i1-i4, approved mockups), the paired-PC pass with its five
+  findings fixed, and the t1-t7 side-by-side check. PROGRESS has each step, the
+  matrix has the case results.
+- **Releases:** the last public Android release is 0.0.9. 0.0.10 was installed on the
+  owner's S24 but not published. The newest APK is a local test build, not a release.
+- **Redesign:** Remote Files r1-r6 were built on `android-remote-files-redesign`
+  (pushed, kept apart). It merges only after the release (owner, 2026-11-21).
+- **Against `main`:** no merge without the owner's say-so.
+- **Local state here:** `SiteTransferDtos.cs` shows as modified with no content change
+  (line endings) and `.cortexkit/` is untracked. Never stage either.
+- **`android-app` working copy** (`C:/Users/kaank/Downloads Archive/2026-11-20/Projects/Inbound/idm-android-trial`):
+  older uncommitted ANDROID.9 attempt. ANDROID.9 was built here instead; don't copy from it.
 
 ## Next work, in order
 
-1. **Remote Files redesign (ANDROID.8 reopened, owner 2026-11-21).** The owner:
-   "remote files mockups do not match, remote files tab look, design and usage is
-   not acceptable." The earlier pass compared emulator captures of fixtures that
-   copied the mockup's names and folders (`media/recordings/2026`, a WebDAV
-   "C3 mixed fixture" on a paired Host), so it never showed the tab as the owner
-   uses it. The real tab was captured on the owner's phone on 2026-11-21 and the
-   [15 differences](android-mockup-acceptance.md) are listed in the matrix.
-   The [review](android-review-49f5663c-c745317f.md) (Opus, then Fable) sets the
-   order: (a) timing logs and one cold and one warm open on the S24; (b) Host-side
-   speed fixes P1, P5, P2, P4, M4, P6, P3; (c) the redesign against c3/c4
-   with R1/M1, R3 and the owner's call on upload (R4); compare on real data and on
-   the phone; Fable review before release. Then shared regressions (S1, S2, S3, M2,
-   M3) and idle wake-ups (A1, A2, A4, A8, S6).
-2. Inventory the `android-app` working copy, then continue ANDROID.9 under its plan.
-3. Separate follow-ups: ANDROID.5/.6 real-account capture and natural deep Doze are
-   deferred to ANDROID.14; expanded accessibility is optional (ANDROID.13);
-   production phone-originated Remote Files upload is its own feature.
+1. **Fable review** of ANDROID.9 and of the unreviewed range `49f5663c..c745317f`
+   (first entry in the [Fable review queue](android-fable-review-queue.md)). Fix the
+   findings first.
+2. **Release** the next Android version with all three store uploads once Fable
+   approves (run `tools/AndroidApp/check-apk.py` and one device start before it goes out).
+3. **Merge the redesign branch**, then compare r1-r6 on real data and on the owner's phone.
+4. Separate follow-ups: ANDROID.5/.6 real-account capture and deep Doze (ANDROID.14);
+   expanded accessibility is optional (ANDROID.13).
+
+## Remind the owner (after the release)
+
+The owner kept these as built on 2026-11-22 and asked to be reminded later:
+1. t3 draws Downloads without the speed card; the app keeps it (as a1-a3).
+2. t3's On TorBox row has no pause button, no row for "Not sent", and can't be selected.
+3. t5 on a paired PC: Ready rows have no file count or size (needs the PC Host to send them).
+4. t6: the mockup extracts into a folder named after the archive; the Host extracts into
+   the download folder itself.
+Also known, not yet raised as decisions: Import a list records the source as "android",
+mixed torrent results show "A torrent in the list", and closing the page mid-send doesn't
+stop the send. Not seen on real data: t5 Get/Fetching/Failed rows, t3 Extracting, a magnet
+with folders on the phone.
+
+## Phone QA on the S24 (quick reference)
+
+Record the display baseline first (mode 1, brightness about 60, timeout never: don't
+change it), set mode 0 and brightness 1 for the check, restore and verify after. Ask
+the owner to unlock; never bypass the keyguard. Never touch other apps (banking,
+camera, Bitwarden) or the owner's own server in the host list; delete any capture
+showing a notification or a password. Get tap targets from `uiautomator dump` bounds:
+blind coordinates have already started a download by mistake. The paired test Host is
+`tools/AndroidApp/paired-host-parity-fixture.py` over `adb reverse`; remove the pairing
+afterwards.
 
 ## Where the evidence lives
 
