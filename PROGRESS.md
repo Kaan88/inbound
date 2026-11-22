@@ -28,6 +28,11 @@ it, since this branch does not merge into `main` without the owner's say-so.
   counts carry over a refresh by name and a refresh only asks for missing ones; a paused or failed torrent no longer holds
   back the network report (test added); a folder whose count the server refused is skipped for that listing, and the app
   allows one empty counting round. Mobile 709, Integration torrent/Sites/browse 371 pass (real rclone), emulator build OK.
+- Final signed 0.1.0 (after the minors; clean Release, `check-apk.py --release` passes): APK SHA-256
+  `6cbb368ab38b92b5453d71787bc2c1aaa584e264152509512173fffe6ec0bd7f`, installed in place on the S24 (0.1.0, versionCode
+  12). Staged with `prepare-android-release.ps1` in `artifacts/android-app/release-0.1.0`, **not published**: publishing
+  waits for the S24 real-data comparison (r1 This phone selection and "To <location>", r3 phone rows, r4 phone selection
+  state, Skip/Replace/Keep both), which needs the owner to unlock the phone (locked at 2026-11-22).
 - Signed 0.1.0 candidate (clean Release, permanent key, `check-apk.py --release` passes; APK SHA-256
   `509dabbc35dfa01a9e40ab168f01f693536f157a73af888b36734a8beb27f50e`) installed in place on the S24 over 0.0.11.
 - Merged `android-remote-files-redesign` (`6ab63b17`); the two capability-list conflicts resolved as in the trial. Full
