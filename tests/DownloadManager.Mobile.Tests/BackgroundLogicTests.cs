@@ -219,6 +219,15 @@ public class BackgroundLogicTests
         Assert.Equal(expected, MeteredPolicy.IsMetered(notMetered, temporarily));
 
     [Theory]
+    [InlineData(true, false, false, true)]
+    [InlineData(true, true, false, false)]
+    [InlineData(true, false, true, false)]
+    [InlineData(false, true, false, false)]
+    [InlineData(false, false, false, false)]
+    public void Mobile_data_is_cellular_without_wifi_or_ethernet(bool cellular, bool wifi, bool ethernet, bool expected) =>
+        Assert.Equal(expected, MeteredPolicy.IsMobileData(cellular, wifi, ethernet));
+
+    [Theory]
     [InlineData(false, true, false)]  // unlocked and the screen on: the user is there, keep going and warn
     [InlineData(true, true, true)]    // locked, screen on: stop at once
     [InlineData(true, false, true)]   // locked, screen off

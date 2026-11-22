@@ -215,6 +215,7 @@ internal sealed class AndroidHost : IAsyncDisposable
             // Before InitializeAsync: only stored there, and the first Schedule after reconcile is already held.
             Background.InboundBackground.RegisterStartingService(service);
             await service.SetNetworkMeteredAsync(networkMetered, ct).ConfigureAwait(false);
+            await service.SetNetworkCellularAsync(Background.NetworkMonitor.CurrentMobileData, ct).ConfigureAwait(false);
             var power = Background.QueuePowerMonitor.Read(Android.App.Application.Context);
             await service.SetQueuePowerStateAsync(power.Charging, power.BatterySaver, ct).ConfigureAwait(false);
             await service.InitializeAsync(lastRunStoppedByUser, ct).ConfigureAwait(false);

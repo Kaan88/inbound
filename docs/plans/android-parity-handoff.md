@@ -45,8 +45,6 @@ Updated 2026-11-22 (after the Fable review). Claude leads the Android work again
 
 ## Ask the owner
 
-- A9-15: on an unmetered 5G plan Android reports the network as not metered, so torrents run there although the
-  subtitle says "Peers never use mobile data". Keep the behaviour and reword the subtitle, or require Wi-Fi?
 - A6: a downloaded update stays offered even if the signed feed later points back to an older version (a pulled
   release). Keep offering it, or withdraw it?
 - The decisions in [the review](android-review-android9.md#what-was-done) made while the owner was away (A9-6, A9-7,

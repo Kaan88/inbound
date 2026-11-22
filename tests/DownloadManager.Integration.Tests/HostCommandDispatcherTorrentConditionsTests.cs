@@ -112,6 +112,51 @@ public sealed partial class HostCommandDispatcherTests
     }
 
     [Fact]
+    public async Task OnUnmeteredMobileDataATorrentStillWaitsForWifiAndSeedingIsHeld()
+    {
+        // Review A9-15 (2026-11-22): an unmetered 5G plan is not metered, but "Peers never use mobile data".
+        var service = await TorrentServiceAsync(settings: s => s.DownloadOnlyOnUnmeteredNetwork = false);
+        await service.SetNetworkMeteredAsync(false);
+        Assert.True(await service.SetNetworkCellularAsync(true));
+        Assert.False(await service.SetNetworkCellularAsync(true));
+        var dispatcher = Dispatcher(service);
+        var hash = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(20));
+        var job = (await AskAsync(dispatcher, Session(), TorrentMessageTypes.Add, new TorrentAddRequest
+        {
+            Input = $"magnet:?xt=urn:btih:{hash}&dn=OnMobileData", Destination = Path.Combine(_root, "down"),
+        })).GetPayload<TorrentAddResult>().Job!;
+        var waiting = await UntilAsync(() => service.GetSnapshot().Jobs.FirstOrDefault(j => j.Id == job.Id && j.Torrent!.WaitingFor is not null));
+        Assert.Equal(("queued", DownloadManagerService.TorrentWaitingForWifi), (waiting.State, waiting.Torrent!.WaitingFor));
+        await Task.Delay(200);
+        lock (_torrentWorkers) Assert.DoesNotContain(_torrentWorkers, w => w.Torrents.Count > 0);
+
+        await service.SetNetworkCellularAsync(false);
+        var running = await UntilAsync(() => service.GetSnapshot().Jobs.FirstOrDefault(j => j.Id == job.Id && j.State is "connecting" or "downloading"));
+        Assert.Null(running.Torrent!.WaitingFor);
+
+        await service.SetNetworkCellularAsync(true);
+        var back = await UntilAsync(() => service.GetSnapshot().Jobs.FirstOrDefault(j => j.Id == job.Id && j.State == "queued" && j.Torrent!.WaitingFor is not null));
+        Assert.Equal(DownloadManagerService.TorrentWaitingForWifi, back.Torrent!.WaitingFor);
+    }
+
+    [Fact]
+    public async Task SeedingOnUnmeteredMobileDataWaitsForWifi()
+    {
+        var (service, _, job) = await CompletedTorrentAsync();
+        await service.SetQueuePowerStateAsync(charging: true, batterySaver: false);
+        await UntilAsync(() => SeedsOnAWorker() ? job : null);
+
+        await service.SetNetworkCellularAsync(true);
+        var held = await UntilAsync(() => service.GetSnapshot().Jobs.FirstOrDefault(j => j.Id == job.Id && j.Torrent!.WaitingFor is not null));
+        Assert.Equal(DownloadManagerService.TorrentWaitingForWifi, held.Torrent!.WaitingFor);
+        Assert.True(held.Torrent.Seeding);
+        await UntilAsync(() => SeedsOnAWorker() ? null : job);
+
+        await service.SetNetworkCellularAsync(false);
+        await UntilAsync(() => SeedsOnAWorker() ? job : null);
+    }
+
+    [Fact]
     public async Task WhereNoPowerIsReportedSeedingIsNeverHeld()
     {
         var (service, _, job) = await CompletedTorrentAsync();

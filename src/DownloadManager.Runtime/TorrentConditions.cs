@@ -22,17 +22,44 @@ public sealed partial class DownloadManagerService
     /// <summary>Whether a torrent shows a WaitingFor note (under <c>_sync</c>), so the pass that clears it still runs.</summary>
     private bool _torrentWaitingShown;
 
-    private bool TorrentNetworkHoldsLocked() => _settings.TorrentOnlyOnUnmeteredNetwork && _networkMetered;
+    /// <summary>
+    /// Whether the phone is on mobile data (a cellular network with no Wi-Fi or Ethernet), under <c>_sync</c>. Only the two
+    /// torrent rules read it: an unmetered 5G plan is not metered, so HTTP downloads under "Unmetered network only" may run
+    /// there, but the torrent rules promise "Peers never use mobile data" (review A9-15, decided 2026-11-22).
+    /// </summary>
+    private bool _networkCellular;
+
+    /// <summary>The torrent rules' network test: metered, or mobile data even when it isn't metered.</summary>
+    private bool TorrentNetworkLimitedLocked() => _networkMetered || _networkCellular;
+
+    private bool TorrentNetworkHoldsLocked() => _settings.TorrentOnlyOnUnmeteredNetwork && TorrentNetworkLimitedLocked();
+
+    /// <summary>
+    /// The platform reports whether the active network is mobile data (Android). Report it before initialization, then on
+    /// changes; nothing is saved. Returns false when the state is unchanged.
+    /// </summary>
+    public async Task<bool> SetNetworkCellularAsync(bool cellular, CancellationToken cancellationToken = default)
+    {
+        lock (_sync)
+        {
+            if (_networkCellular == cellular) return false;
+            _networkCellular = cellular;
+            if (!_initialized) return true;
+        }
+        await RequeueExcessAsync(cancellationToken).ConfigureAwait(false);
+        Schedule();
+        return true;
+    }
 
     /// <summary>Why seeding waits now, or null. Unknown power holds it, as a queue that needs charging is held.</summary>
     private string? SeedHoldReasonLocked() =>
         !_settings.TorrentSeedOnlyOnUnmeteredAndCharging ? null
-        : _networkMetered ? TorrentWaitingForWifi
+        : TorrentNetworkLimitedLocked() ? TorrentWaitingForWifi
         : _platformReportsQueuePower && (!_queuePowerKnown || !_queueCharging) ? TorrentWaitingForCharging
         : null;
 
     /// <summary>Whether the phone's conditions can matter now; elsewhere nothing is looked at.</summary>
-    private bool TorrentConditionsMayApplyLocked() => _networkMetered || _platformReportsQueuePower || _seedHeld.Count > 0 || _torrentWaitingShown;
+    private bool TorrentConditionsMayApplyLocked() => TorrentNetworkLimitedLocked() || _platformReportsQueuePower || _seedHeld.Count > 0 || _torrentWaitingShown;
 
     /// <summary>
     /// Brings every torrent in line with the rules as they are now: says why a queued one waits, holds seeding that may not

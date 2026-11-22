@@ -19,6 +19,9 @@ internal static class NetworkMonitor
     private static readonly object Gate = new();
     private static Context? _app;
     private static bool _metered;
+    private static bool _cellular;
+    // One mobile-data report at a time, each reading the newest value, so the Host ends on the newest.
+    private static readonly SemaphoreSlim CellularGate = new(1, 1);
     private static bool _pumping;
     private static bool? _sent;
     private static AndroidHost? _host;
@@ -51,7 +54,7 @@ internal static class NetworkMonitor
             // The Host's first report: the network as it is now. No network at all counts as not metered (nothing transfers anyway,
             // and the callback reports the network when one comes).
             var active = cm.ActiveNetwork;
-            if (active is not null && cm.GetNetworkCapabilities(active) is { } caps) lock (Gate) _metered = IsMetered(caps);
+            if (active is not null && cm.GetNetworkCapabilities(active) is { } caps) lock (Gate) { _metered = IsMetered(caps); _cellular = IsMobileData(caps); }
             cm.RegisterDefaultNetworkCallback(new Callback());
             Log.Info(InboundApplication.Tag, "network: metered=" + _metered);
         }
@@ -62,18 +65,48 @@ internal static class NetworkMonitor
         MeteredPolicy.IsMetered(caps.HasCapability(NetCapability.NotMetered),
             OperatingSystem.IsAndroidVersionAtLeast(30) && caps.HasCapability(NetCapability.TemporarilyNotMetered));
 
+    private static bool IsMobileData(NetworkCapabilities caps) =>
+        MeteredPolicy.IsMobileData(caps.HasTransport(TransportType.Cellular), caps.HasTransport(TransportType.Wifi), caps.HasTransport(TransportType.Ethernet));
+
+    /// <summary>Whether the network now is mobile data (the torrent rules, review A9-15); handed to the Host before its InitializeAsync.</summary>
+    public static bool CurrentMobileData { get { lock (Gate) return _cellular; } }
+
+    private static void DeliverMobileData()
+    {
+        _ = Task.Run(async () =>
+        {
+            await CellularGate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                AndroidHost? host;
+                bool cellular;
+                lock (Gate) { host = _host; cellular = _cellular; }
+                if (host is not null && await host.Service.SetNetworkCellularAsync(cellular).ConfigureAwait(false))
+                    Log.Info(InboundApplication.Tag, "network reported to the Host: mobile data=" + cellular);
+            }
+            catch (System.Exception ex) { Log.Error(InboundApplication.Tag, "mobile data report: " + ex.Message); }
+            finally { CellularGate.Release(); }
+        });
+    }
+
     private sealed class Callback : ConnectivityManager.NetworkCallback
     {
         // Capabilities arrive after OnAvailable and on every change (Wi-Fi to mobile data included, as the default network switches).
         public override void OnCapabilitiesChanged(Network network, NetworkCapabilities networkCapabilities)
         {
-            bool metered;
+            bool metered, meteredChanged, cellularChanged;
             lock (Gate)
             {
                 metered = IsMetered(networkCapabilities);
-                if (_metered == metered) return;
+                var cellular = IsMobileData(networkCapabilities);
+                meteredChanged = _metered != metered;
+                cellularChanged = _cellular != cellular;
                 _metered = metered;
+                _cellular = cellular;
             }
+
+            if (cellularChanged) DeliverMobileData();
+            if (!meteredChanged) return;
 
             Log.Info(InboundApplication.Tag, "network changed: metered=" + metered);
             Deliver();
@@ -98,6 +131,8 @@ internal static class NetworkMonitor
 
         host.Service.MeteredWaitChanged += OnWaitChanged;
         Deliver();
+        // A change between the report before InitializeAsync and now (the Host ignores an unchanged value).
+        DeliverMobileData();
     }
 
 #if INBOUND_TEST_BUILD

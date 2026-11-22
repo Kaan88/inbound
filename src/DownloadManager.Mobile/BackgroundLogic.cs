@@ -96,6 +96,12 @@ public static class MeteredPolicy
     public static bool IsMetered(bool hasNotMetered, bool hasTemporarilyNotMetered) => !(hasNotMetered || hasTemporarilyNotMetered);
 
     /// <summary>
+    /// Mobile data: a cellular network with no Wi-Fi or Ethernet under it (a VPN keeps its underlying transport). The torrent
+    /// rules hold on it even when it isn't metered: "Peers never use mobile data" (review A9-15).
+    /// </summary>
+    public static bool IsMobileData(bool cellular, bool wifi, bool ethernet) => cellular && !wifi && !ethernet;
+
+    /// <summary>
     /// The rule has just started to hold and downloads that can't resume are running: stop them at once, or let them go on (with a
     /// warning and a Stop action)? Owner: continue if the phone is unlocked (the user is there and, if the switch was deliberate, wants
     /// it; Android can't say whether it was), otherwise stop at once. "Unlocked" means the device is not locked <b>and</b> the screen is

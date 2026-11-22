@@ -102,6 +102,9 @@ listing it.
   excluded). A Keystore wrap is a follow-up for all secrets together, not this release.
 - A9-15: kept `TEMPORARILY_NOT_METERED` as unmetered (Android's own meaning). Torrents on an unmetered 5G plan are
   allowed; the label stays. Raise with the owner.
+  **Changed 2026-11-22 (owner: "finish everything"):** the behaviour now matches the approved text "Peers never use
+  mobile data". The phone also reports whether the network is mobile data (cellular with no Wi-Fi or Ethernet), and the
+  two torrent rules hold on it even when it isn't metered; HTTP downloads under "Unmetered network only" are unchanged.
 - A9-18: kept rclone's 3-minute idle on the phone (review P2).
 - Earlier A4 (battery-saver-held queue wakes every 15 min): not changed. Dropping the retry could leave a queue
   waiting until the app is opened, since nothing wakes a dead process when saver turns off.
