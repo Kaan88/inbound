@@ -1,5 +1,18 @@
 # Progress — session handoff
 
+## Owner reports, 2026-11-23 (recorded, not started)
+
+The owner asked for these to be noted without starting work. Rows in ROADMAP:
+
+- EXT.B11: the finished-download popup also opens for downloads left to the browser.
+- EXT.B12: attachments from a Claude chat on the web fail with 403.
+- EXT.R18: open a finished download in the popup with one click, like Edge, without selecting text.
+- TB.F18: on a TorBox failure, say whether the hoster is down or not supported.
+- SITES.B1: Windows: OneDrive, Google Drive and Dropbox crash the add-a-remote dialog (likely a regression).
+- SITES.B2: Two panes: the remote picker makes the first pane look taller than the second.
+- UI.B41: with the window closed, magnets and .torrent files bring up the window but aren't added; seems general.
+- T14.B1: torrents go to E: with no setting pointing there; the folder isn't shown and "Each torrent's category folder" is unclear.
+
 ## Android 0.1.3 published; Android official on main, 2026-11-23
 
 - **Where to pick up:** Android lives on `main` (`d6cd023f` and later). Owner: "don't make a new desktop release yet,
