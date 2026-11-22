@@ -39,6 +39,9 @@ internal sealed partial class RemoteFilesScreen
         _transfersGen++;
         _transferLoading = false;
         _transferErrorTitle = _transferErrorText = null;
+        // Draw the screen now: the load only updates a Transfers screen that is already on show (S24 check: a tap on the
+        // Transfers row did nothing until something else redrew).
+        Render();
         _ = LoadTransfersAsync();
     }
 
@@ -223,8 +226,17 @@ internal sealed partial class RemoteFilesScreen
         if (_tfList?.Parent is not View scroll || _tfSwipe is null) return;
         if (_tfRefreshDisc is not null) _tfRefreshDisc.Visibility = _tfSwipe.Refreshing ? ViewStates.Visible : ViewStates.Gone;
         float target = _tfSwipe.Refreshing ? Dp(56) : 0;
+        // Compared with the last target, not the position: a load that ends inside the 150 ms slide must still send the list
+        // back up (S24 check: a quick load left it 56 dp down).
+        if (ReferenceEquals(_gapScroll, scroll) && Math.Abs(_gapTarget - target) < 0.5f) return;
+        _gapScroll = scroll;
+        _gapTarget = target;
+        scroll.Animate()?.Cancel();
         if (Math.Abs(scroll.TranslationY - target) > 0.5f) scroll.Animate()?.TranslationY(target)?.SetDuration(150)?.Start();
     }
+
+    private View? _gapScroll;
+    private float _gapTarget;
 
     private string? _bannerSig;
 
