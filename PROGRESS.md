@@ -132,6 +132,8 @@ start times and names from the list), i2 the same with a paired PC shown (each d
 it), i3 Downloads afterwards with "Added 13 from the list · 1 skipped · Details", i4 a file that isn't an Inbound list.
 Open questions for the owner: whether Save to can be changed on the phone (drawn as a field), whether Details lists the
 skipped entries, and links a TorBox or other provider could take (the desktop asks about those separately; not drawn).
+Owner answer (2026-11-22): "Approve as drawn". With the defaults put to the owner: Save to is a field that can be
+changed, Details lists the skipped entries and why, and links a provider could take are added as ordinary downloads.
 
 ## ANDROID.9 build started, 2026-11-21
 
