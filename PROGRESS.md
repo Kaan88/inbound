@@ -79,6 +79,14 @@ it, since this branch does not merge into `main` without the owner's say-so.
   `9c7163eb4c123a467ffe0f8b9c1a044ad1521d62b8d315647de558952c32548b`; the downloaded APK and manifest, and the
   `android-latest` manifest, match the staged files. Desktop latest stays `v0.9.0`. 0.1.0 was never published. The S24
   has 0.1.0, so it should offer 0.1.1 through the updater.
+- Owner, 2026-11-22, on 0.1.1: "changelog window too small and not formatted ... update progress bar has a fixed dot at
+  100% point ... release 0.1.2 with the same changelog". Notes are now one bullet per line with a short gap, in an area up
+  to 45% of the screen; the Settings update bar has no stop dot or gap (`d1e414fb`; seen in the short and long previews
+  on the emulator). Published [Android 0.1.2](https://github.com/Kaan88/inbound/releases/tag/android-v0.1.2)
+  (versionCode 14) from `d1e414fb`, latest=false, same notes as 0.1.1: APK SHA-256
+  `da21f2325ab305a6e1e729003a43ab3bd9c322ffb8f1de7be34fac89175eb082`, manifest SHA-256
+  `45996337573e5e358c9e685004d5d03220c8f23ca506827a2ffb00fd195d782a`; public APK, manifest and `android-latest` match.
+  Desktop latest stays `v0.9.0`. No Fable review (added to the queue).
 - Owner, 2026-11-22: "have an agent look at existing extension adaptability to mobile edge for capturing links, or other
   solutions. non critical or required for release." Research done (sources only, nothing tried on a device):
   - Edge for Android runs extensions only from Microsoft's allowlist (store listing, mobile value, QA test cases, a

@@ -26,6 +26,10 @@ Review `git diff 41ef14a8..5aa45d0a -- src tools`:
   down). Check `Render()` from the "View transfers" snackbar while a folder or form is open, and the gap fields when the
   Transfers chrome is rebuilt.
 - `5aa45d0a`: version 0.1.1 (versionCode 13) and `docs/android-release-notes-0.1.1.txt`.
+- `d1e414fb` (0.1.2): `UpdateReadyDialog` notes as BulletSpan paragraphs with a small blank line between them and a
+  notes height of up to 45% of the screen; `app_updates.xml` progress bar without the stop dot and gap. Check the
+  formatting with notes that hold blank lines, leading bullets or one very long line, and the Settings page that shares
+  `CreateNotes`/`BindNotes` (the Tag cache).
 
 ## Done: ANDROID.9 and the speed fixes, 772cd2c0..8d26b536 (2026-11-22)
 
