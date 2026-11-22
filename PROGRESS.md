@@ -96,6 +96,32 @@ Findings, open:
 4. A long Windows path truncates the archive row, hiding the "renamed" count.
 5. Downloads > Import a list shows "Unavailable" on a paired Host.
 
+### Fixes for the paired-PC findings, 2026-11-22
+
+Owner: "Yes, fix them". APK `c1aa4ff3` (check-apk passes, only the two known warnings), Mobile 634, installed on the S24
+with its data kept and checked there on real data:
+1. Fixed. t1's first segment names the Host on a paired PC or server ("Paired" on the test Host; one line, cut with
+   "…"), "This phone" on the phone (`AddTorrentScreen`). Capture `fix-t1-paired`.
+2. Built. Downloads lists each TorBox job still on TorBox above the downloads, as t3: violet bolt, "On TorBox · 23% ·
+   then to this phone" (or "then to <Host>"), violet bar; counted in All and Active, filtered by the search, tap opens
+   My TorBox (`Mobile/TorBox/TorBoxDownloads.cs`, `DownloadsScreen`; Sonnet built it, reviewed here; 15 Mobile tests).
+   Real data: an uncached Debian Edu 11.1.0 i386 netinst magnet (owner's choice) sent from the phone; the row read
+   "On TorBox · then to this phone", then "23%" with the bar; deleted from TorBox afterwards. Captures `fix-ontorbox`,
+   `fix-ontorbox-progress`, `fix-ontorbox-tap`. Deviations to show the owner: no round pause button (the Host can't
+   pause a TorBox job; the slot stays empty so text lines up), a job waiting for approval ("Not sent") gets no row, and
+   the rows can't be selected.
+3. Fixed. Not an ANR at root: the log shows a fatal `IllegalArgumentException` (DecorView "not attached to window
+   manager") from the host sheet's close animation, which finished after the host switch had recreated the activity and
+   then dismissed a window that was gone; NativeAOT's missing `propagateUncaughtException` turned the crash into a hang.
+   `AnimatedSheetDialog` stops the animation and skips the dismiss once the activity is destroyed. Three switches
+   (phone, paired PC, phone) on the S24 with no crash, ANR or log entry.
+4. Fixed. A finished archive row is built from the Host's counts with the folder last: "Extracted · 4 files · 4 renamed
+   · in …" (`ArchiveRowInfo`; the Host's own sentence only when it sends no counts). Capture `fix-downloads`.
+5. Not a paired-Host fault: Import a list was never built on Android (unavailable on every Host by design, A4) and has
+   no mockup. Left for the owner to decide.
+During the check Bitwarden opened over the pairing form (autofill); it was not touched, Home didn't close it, and the
+owner dismissed it.
+
 ## ANDROID.9 build started, 2026-11-21
 
 Owner decision (archives step): t6 and t7 show a list of saved archive passwords tried in order and a per-archive

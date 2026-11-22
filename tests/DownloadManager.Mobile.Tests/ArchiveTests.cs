@@ -84,6 +84,13 @@ public sealed class ArchiveTests
         Assert.Equal(ArchiveTone.Done, done.Tone);
         Assert.Equal(ArchiveAction.None, done.Action);
 
+        // With the Host's counts, they come before the folder, which is its last part only (a paired PC's long path).
+        var counted = Set("completed", @"Extraction completed: 3 files in C:\Users\someone\Downloads\Torrents\Compressed, 1 renamed");
+        counted.FilesWritten = 2; counted.FilesRenamed = 1; counted.Destination = @"C:\Users\someone\Downloads\Torrents\Compressed\";
+        Assert.Equal("Extracted · 3 files · 1 renamed · in Compressed", ArchiveRowInfo.For(counted)!.Subtitle);
+        counted.FilesRenamed = 0; counted.FilesWritten = 1; counted.ArchivesDeleted = true; counted.Destination = "/storage/emulated/0/Download";
+        Assert.Equal("Extracted · 1 file · archive removed · in Download", ArchiveRowInfo.For(counted)!.Subtitle);
+
         var failed = Set("failed", "Extraction failed"); failed.FailureKind = "corrupted"; failed.FailureMessage = "The archive is damaged.";
         var info = ArchiveRowInfo.For(failed)!;
         Assert.Equal("The archive is damaged.", info.Subtitle);

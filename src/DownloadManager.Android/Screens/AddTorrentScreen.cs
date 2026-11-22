@@ -79,8 +79,13 @@ internal sealed class AddTorrentScreen
         _withTorBox = Root.FindViewById<MaterialButton>(Resource.Id.with_torbox)!;
         var remote = activity.Capabilities.IsRemote;
         // The segment names say which Host does the work. A segment the Host can't serve stays drawn but can't be chosen, with its reason.
+        // t1: "This phone" on the phone; on a paired PC or server, its name.
+        var with = remote ? activity.HostName : "This phone";
+        _withPhone.Text = with;
+        _withPhone.SetMaxLines(1);
+        _withPhone.Ellipsize = Android.Text.TextUtils.TruncateAt.End;
         _withPhone.Enabled = torrents is not null;
-        _withPhone.ContentDescription = torrents is null ? "This phone. " + TorrentText.NotOffered : null;
+        _withPhone.ContentDescription = torrents is null ? with + ". " + TorrentText.NotOffered : null;
         _withTorBox.Enabled = client is not null;
         _withTorBox.ContentDescription = client is null ? "TorBox. This Host does not offer TorBox." : null;
         // Which segment opens chosen: the switch in Settings (Send magnets to TorBox first), and whatever the Host offers.

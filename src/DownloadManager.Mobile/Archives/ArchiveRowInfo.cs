@@ -57,7 +57,15 @@ public sealed class ArchiveRowInfo
                 };
 
             case "completed":
-                return new ArchiveRowInfo { Lead = words.Length > 0 ? words : "Extracted", Tone = ArchiveTone.Done };
+                var files = set.FilesWritten + set.FilesOverwritten + set.FilesRenamed;
+                if (files == 0 && set.FilesSkipped == 0) return new ArchiveRowInfo { Lead = words.Length > 0 ? words : "Extracted", Tone = ArchiveTone.Done };
+                // The counts first and the folder last: a long path (a paired PC's) is what the row's end cuts off, not the counts.
+                var done = new List<string> { files == 1 ? "1 file" : $"{files} files" };
+                if (set.FilesRenamed > 0) done.Add($"{set.FilesRenamed} renamed");
+                if (set.FilesSkipped > 0) done.Add($"{set.FilesSkipped} skipped");
+                if (set.ArchivesDeleted) done.Add("archive removed");
+                if (FileNameOf(set.Destination?.TrimEnd('/', '\\')) is { Length: > 0 } folder) done.Add("in " + folder);
+                return new ArchiveRowInfo { Lead = "Extracted", Rest = string.Join(" · ", done), Tone = ArchiveTone.Done };
 
             case "failed":
                 var why = string.IsNullOrWhiteSpace(set.FailureMessage) ? words : set.FailureMessage.Trim();

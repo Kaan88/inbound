@@ -87,6 +87,9 @@ internal sealed class AnimatedSheetDialog(Activity activity, float dim)
         _finishing = true;
         _animation?.Cancel();
         _animation = null;
+        // A host switch recreates the activity while the sheet slides away; its window went with the activity, and dismissing it
+        // then throws "not attached to window manager" (a crash that hung the app on the S24, 2026-11-22).
+        if (activity.IsDestroyed) return;
         if (cancel) base.Cancel();
         else base.Dismiss();
     }
@@ -103,6 +106,13 @@ internal sealed class AnimatedSheetDialog(Activity activity, float dim)
         var animator = _animation = new TimeAnimator();
         animator.Time += (_, e) =>
         {
+            if (activity.IsDestroyed)
+            {
+                animator.Cancel();
+                _animation = null;
+                return;
+            }
+
             float panel = Math.Min(1f, e.TotalTime / (float)panelMs);
             float shade = Math.Min(1f, e.TotalTime / (float)scrimMs);
             scrim.Alpha = startScrim + ((open ? dim : 0) - startScrim) * shade;

@@ -11,6 +11,7 @@ using AndroidX.RecyclerView.Widget;
 using DownloadManager.Contracts;
 using DownloadManager.Mobile;
 using DownloadManager.Mobile.Archives;
+using DownloadManager.Mobile.TorBox;
 using DownloadManager.Mobile.Torrents;
 using Google.Android.Material.Chip;
 using Google.Android.Material.ProgressIndicator;
@@ -39,6 +40,8 @@ internal sealed partial class DownloadsScreen
     private readonly Java.Lang.Runnable _queueTimingExpiry;
     private readonly Dictionary<int, (string Name, DateTimeOffset Start)> _queueStarts = new();
     private readonly ArchiveStore _archives;
+    private readonly TorBoxList _torBox = new();
+    private int _torCount;
     private Google.Android.Material.BottomSheet.BottomSheetDialog? _passwordSheet;
     private bool _disposed;
     private double _shownRate;
@@ -87,6 +90,10 @@ internal sealed partial class DownloadsScreen
         // The Torrents chip shows while the Host has torrents (or one is in the list): the hello can come after this screen is built.
         _model.HostHelloChanged += OnSummary;
         LoadArchives();
+        // TorBox jobs still being fetched (t3): rows above the downloads, from remote.list and remote.changed.
+        _model.RemoteChanged += OnRemoteChanged;
+        _model.HostHelloChanged += LoadTorBox;
+        LoadTorBox();
         // Lists: 200 ms fade and move. Rows never reorder: a row only comes in at the top or leaves.
         _recycler.SetItemAnimator(new DefaultItemAnimator { AddDuration = 200, MoveDuration = 200, RemoveDuration = 200, ChangeDuration = 0, SupportsChangeAnimations = false });
 
@@ -107,6 +114,7 @@ internal sealed partial class DownloadsScreen
         _search.TextChanged += (_, _) =>
         {
             _list.Search = _search.Text ?? "";
+            SyncTorBox();
             _searchClear.Visibility = (_search.Text?.Length ?? 0) > 0 ? ViewStates.Visible : ViewStates.Gone;
             UpdateFilterVisibility();
             _activity.UpdateBack();
@@ -162,7 +170,7 @@ internal sealed partial class DownloadsScreen
     public View? CardOf(JobRow row)
     {
         var i = _list.Visible.IndexOf(row);
-        return i < 0 ? null : (_recycler.FindViewHolderForAdapterPosition(i) as Holder)?.Card;
+        return i < 0 ? null : (_recycler.FindViewHolderForAdapterPosition(i + _adapter.TorBoxRows) as Holder)?.Card;
     }
 
     private void LoadArchives()
@@ -171,6 +179,41 @@ internal sealed partial class DownloadsScreen
         if (!ArchiveClient.Offered(_model.Hello) || _activity.NewArchiveClient() is not { } client) { _archives.Clear(); return; }
         // A failure leaves the rows as the downloads alone make them; the next hello or archive.changed brings the sets.
         ArchiveUi.Run(_activity, () => client.ListAsync(), list => { if (!_disposed) _archives.Load(list); }, _ => { });
+    }
+
+    private void LoadTorBox()
+    {
+        if (_disposed) return;
+        if (!TorBoxClient.Offered(_model.Hello) || _activity.NewTorBoxClient() is not { } client) { _torBox.Load([]); SyncTorBox(); return; }
+        // A failure shows no rows rather than another host's; the next hello or remote.changed brings them.
+        TorBoxUi.Run(_activity, () => client.ListAsync(), result =>
+        {
+            if (_disposed) return;
+            _torBox.Load(result.Ok ? result.Jobs : []);
+            SyncTorBox();
+        }, _ => { if (_disposed) return; _torBox.Load([]); SyncTorBox(); });
+    }
+
+    private void OnRemoteChanged(RemoteChangedDto change)
+    {
+        if (!_disposed && _torBox.Apply(change)) SyncTorBox();
+    }
+
+    /// <summary>The TorBox rows follow the chip (All and Active only), the search and the selection (hidden while selecting); the chip counts follow the jobs.</summary>
+    internal void SyncTorBox()
+    {
+        if (_disposed) return;
+        var host = _activity.Capabilities.IsRemote ? _activity.HostName : null;
+        _torCount = TorBoxDownloads.Rows(_torBox.Jobs, host).Count;
+        var show = TorBoxDownloads.ShownIn(_list.Filter) && !_list.Selecting;
+        _adapter.SetTorBox(show ? TorBoxDownloads.Rows(_torBox.Jobs, host, _list.Search) : []);
+        UpdateChipLabels();
+    }
+
+    private void UpdateChipLabels()
+    {
+        foreach (var (f, chip) in _chipFor)
+            chip.Text = TorBoxDownloads.ShownIn(f) ? $"{f} {_list.Count(f) + _torCount}" : _list.ChipLabel(f);
     }
 
     private void OnArchiveAction(JobRow row, ArchiveAction action)
@@ -197,6 +240,8 @@ internal sealed partial class DownloadsScreen
         _passwordSheet = null;
         _model.ArchiveChanged -= _archives.Apply;
         _model.HostHelloChanged -= LoadArchives;
+        _model.HostHelloChanged -= LoadTorBox;
+        _model.RemoteChanged -= OnRemoteChanged;
         _model.HostHelloChanged -= OnSummary;
         _archives.Changed -= _adapter.RefreshAll;
         _model.SettingsChanged -= RefreshScheduledRows;
@@ -259,7 +304,7 @@ internal sealed partial class DownloadsScreen
             var chip = (Chip)LayoutInflater.From(_activity)!.Inflate(Resource.Layout.chip_filter, group, false)!;
             var filter = f;
             chip.Checked = f == DownloadFilter.All;
-            chip.Click += (_, _) => { _list.Filter = filter; UpdateFilterVisibility(); };
+            chip.Click += (_, _) => { _list.Filter = filter; SyncTorBox(); UpdateFilterVisibility(); };
             group.AddView(chip);
             _chipFor[f] = chip;
         }
@@ -267,7 +312,7 @@ internal sealed partial class DownloadsScreen
 
     private void OnSummary()
     {
-        foreach (var (f, chip) in _chipFor) chip.Text = _list.ChipLabel(f);
+        UpdateChipLabels();
         if (_chipFor.TryGetValue(DownloadFilter.Torrents, out var torrents))
             torrents.Visibility = TorrentClient.Offered(_model.Hello) || _list.Count(DownloadFilter.Torrents) > 0 || _list.Filter == DownloadFilter.Torrents ? ViewStates.Visible : ViewStates.Gone;
         var s = _list.Summary;
@@ -300,6 +345,7 @@ internal sealed partial class DownloadsScreen
         _selTitle.Text = _list.SelectionTitle;
         _selResume.Visibility = _list.CanResumeSelection ? ViewStates.Visible : ViewStates.Gone;
         _selPause.Visibility = _list.CanPauseSelection ? ViewStates.Visible : ViewStates.Gone;
+        SyncTorBox();
         _adapter.RefreshAll();
         _activity.UpdateBack();
     }
@@ -400,6 +446,43 @@ internal sealed partial class DownloadsScreen
 
         public bool IsLive => _live;
 
+        private IReadOnlyList<TorBoxDownloadRow> _torRows = [];
+
+        /// <summary>The TorBox rows sit above the downloads; every download position is offset by their count.</summary>
+        public int TorBoxRows => _live ? _torRows.Count : 0;
+
+        public void SetTorBox(IReadOnlyList<TorBoxDownloadRow> next)
+        {
+            var old = _torRows;
+            _torRows = next;
+            if (!_live) return;
+            if (old.Select(r => r.Id).SequenceEqual(next.Select(r => r.Id)))
+            {
+                if (next.Count > 0) NotifyItemRangeChanged(0, next.Count, Payload);
+                return;
+            }
+
+            // Rows leave and come in with the usual animation; a changed order falls back to a redraw.
+            var keep = next.Select(r => r.Id).ToHashSet();
+            var working = old.Select(r => r.Id).ToList();
+            for (var i = working.Count - 1; i >= 0; i--)
+            {
+                if (keep.Contains(working[i])) continue;
+                working.RemoveAt(i);
+                NotifyItemRemoved(i);
+            }
+
+            for (var i = 0; i < next.Count; i++)
+            {
+                if (i < working.Count && working[i] == next[i].Id) continue;
+                if (working.Contains(next[i].Id)) { NotifyDataSetChanged(); return; }
+                working.Insert(i, next[i].Id);
+                NotifyItemInserted(i);
+            }
+
+            NotifyItemRangeChanged(0, next.Count, Payload);
+        }
+
         public void Live() { _live = true; NotifyDataSetChanged(); }
 
         public void RefreshAll()
@@ -407,7 +490,9 @@ internal sealed partial class DownloadsScreen
             if (_live && ItemCount > 0) NotifyItemRangeChanged(0, ItemCount, Payload);
         }
 
-        public override int ItemCount => _s._list.Visible.Count;
+        public override int ItemCount => TorBoxRows + _s._list.Visible.Count;
+
+        public override int GetItemViewType(int position) => position < TorBoxRows ? 1 : 0;
 
         private void OnRows(object? sender, NotifyCollectionChangedEventArgs e)
         {
@@ -416,24 +501,34 @@ internal sealed partial class DownloadsScreen
             {
                 // A list that is at the top stays at the top when a row comes in above.
                 var atTop = _s._recycler.GetLayoutManager() is LinearLayoutManager lm && lm.FindFirstCompletelyVisibleItemPosition() <= 0;
-                NotifyItemInserted(e.NewStartingIndex);
+                NotifyItemInserted(e.NewStartingIndex + TorBoxRows);
                 if (atTop && e.NewStartingIndex == 0) _s._recycler.ScrollToPosition(0);
             }
-            else if (e.Action == NotifyCollectionChangedAction.Remove) NotifyItemRemoved(e.OldStartingIndex);
+            else if (e.Action == NotifyCollectionChangedAction.Remove) NotifyItemRemoved(e.OldStartingIndex + TorBoxRows);
             else NotifyDataSetChanged();
         }
 
-        public override RecyclerView.ViewHolder OnCreateViewHolder(ViewGroup parent, int viewType) =>
-            new Holder(LayoutInflater.From(parent.Context)!.Inflate(Resource.Layout.row, parent, false)!, this, _s);
+        public override RecyclerView.ViewHolder OnCreateViewHolder(ViewGroup parent, int viewType)
+        {
+            var view = LayoutInflater.From(parent.Context)!.Inflate(Resource.Layout.row, parent, false)!;
+            return viewType == 1 ? new TorBoxHolder(view, _s) : new Holder(view, this, _s);
+        }
 
-        public override void OnBindViewHolder(RecyclerView.ViewHolder holder, int position) => ((Holder)holder).Bind(_s._list.Visible[position], false);
+        public override void OnBindViewHolder(RecyclerView.ViewHolder holder, int position) => Bind(holder, position, false);
 
         public override void OnBindViewHolder(RecyclerView.ViewHolder holder, int position, IList<Java.Lang.Object> payloads) =>
-            ((Holder)holder).Bind(_s._list.Visible[position], payloads.Count > 0);
+            Bind(holder, position, payloads.Count > 0);
+
+        private void Bind(RecyclerView.ViewHolder holder, int position, bool animate)
+        {
+            var torBox = TorBoxRows;
+            if (holder is TorBoxHolder t) { if (position < torBox) t.Bind(_torRows[position], animate); }
+            else if (position >= torBox) ((Holder)holder).Bind(_s._list.Visible[position - torBox], animate);
+        }
 
         public override void OnViewRecycled(Java.Lang.Object holder)
         {
-            ((Holder)holder).Unbind();
+            (holder as Holder)?.Unbind();
             base.OnViewRecycled(holder);
         }
 
@@ -450,9 +545,46 @@ internal sealed partial class DownloadsScreen
             _ui.Post(() =>
             {
                 _flushQueued = false;
-                foreach (var r in _dirty) { var i = _s._list.Visible.IndexOf(r); if (i >= 0) NotifyItemChanged(i, Payload); }
+                foreach (var r in _dirty) { var i = _s._list.Visible.IndexOf(r); if (i >= 0) NotifyItemChanged(i + TorBoxRows, Payload); }
                 _dirty.Clear();
             });
+        }
+    }
+
+    /// <summary>A TorBox job being fetched (t3): violet bolt, "On TorBox · 37% · then to this phone", a violet bar. Tap opens My TorBox; no round button, the Host cannot pause a remote job.</summary>
+    private sealed class TorBoxHolder : RecyclerView.ViewHolder
+    {
+        private readonly TextView _name, _subtitle;
+        private readonly LinearProgressIndicator _bar;
+        private readonly ImageView _icon;
+
+        public TorBoxHolder(View v, DownloadsScreen screen) : base(v)
+        {
+            _name = v.FindViewById<TextView>(Resource.Id.name)!;
+            _subtitle = v.FindViewById<TextView>(Resource.Id.subtitle)!;
+            _bar = v.FindViewById<LinearProgressIndicator>(Resource.Id.bar)!;
+            _icon = v.FindViewById<ImageView>(Resource.Id.icon)!;
+            v.FindViewById<View>(Resource.Id.action)!.Visibility = ViewStates.Invisible;
+            v.FindViewById<View>(Resource.Id.archive_action)!.Visibility = ViewStates.Gone;
+            v.Click += (_, _) => screen._activity.OpenTorBox();
+        }
+
+        public void Bind(TorBoxDownloadRow row, bool animate)
+        {
+            var ctx = ItemView.Context!;
+            _name.Text = row.Name;
+            var styled = new Android.Text.SpannableString(row.Subtitle);
+            styled.SetSpan(new Android.Text.Style.ForegroundColorSpan(new Android.Graphics.Color(Motion.Attr(ctx, Resource.Attribute.colorPrimary))), 0, row.Lead.Length, Android.Text.SpanTypes.ExclusiveExclusive);
+            _subtitle.SetText(styled, Android.Widget.TextView.BufferType.Spannable);
+            _subtitle.SetTextColor(new Android.Graphics.Color(Motion.Attr(ctx, Resource.Attribute.colorOnSurfaceVariant)));
+            ((Google.Android.Material.Card.MaterialCardView)ItemView).SetCardBackgroundColor(Motion.Attr(ctx, Resource.Attribute.colorSurfaceContainer));
+            _icon.SetImageResource(Resource.Drawable.ic_flow_bolt);
+            _icon.ImageTintList = Android.Content.Res.ColorStateList.ValueOf(new Android.Graphics.Color(ctx.GetColor(Resource.Color.state_media)));
+            ItemView.ContentDescription = row.Name + ". " + row.Subtitle;
+            _bar.Visibility = ViewStates.Visible;
+            _bar.SetIndicatorColor(ctx.GetColor(Resource.Color.state_media));
+            if (_bar.Indeterminate) _bar.Indeterminate = false;
+            _bar.SetProgressCompat((int)(row.Progress * 1000), animate);
         }
     }
 
