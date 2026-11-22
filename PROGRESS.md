@@ -122,6 +122,17 @@ with its data kept and checked there on real data:
 During the check Bitwarden opened over the pairing form (autofill); it was not touched, Home didn't close it, and the
 owner dismissed it.
 
+### Import a list on Android: proposed mockups, 2026-11-22
+
+Owner: "Mock it up first". `docs/plans/android-mockups/i-import-list.html` (same tokens as the t-series) and
+`i1-import-review.png` to `i4-import-not-a-list.png`, waiting for the owner's approval. A4's last row opens the system
+file picker; i1 reviews the list on the phone (counts of downloads, links and torrents, the first rows, the entries that
+can't be added and why, Save to the phone's download folder because a list's folders are another computer's; queues,
+start times and names from the list), i2 the same with a paired PC shown (each download's own folder where that PC has
+it), i3 Downloads afterwards with "Added 13 from the list · 1 skipped · Details", i4 a file that isn't an Inbound list.
+Open questions for the owner: whether Save to can be changed on the phone (drawn as a field), whether Details lists the
+skipped entries, and links a TorBox or other provider could take (the desktop asks about those separately; not drawn).
+
 ## ANDROID.9 build started, 2026-11-21
 
 Owner decision (archives step): t6 and t7 show a list of saved archive passwords tried in order and a per-archive
