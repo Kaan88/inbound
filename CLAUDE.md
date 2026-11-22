@@ -3,13 +3,17 @@
 Read this first, then `GOAL.md`, `ROADMAP.md`, and `PROGRESS.md`, the
 authoritative tracking. Update them after every meaningful increment.
 
-## Android work on this branch
+## Android work
 
-This is the `android-remote-files-parity` worktree. Claude leads the Android work
+The Android app is an official part of Inbound (owner, 2026-11-23) and lives on `main`
+since the merge of `android-remote-files-parity` (2026-11-23). Do Android work on a short
+branch cut from `main`, in a worktree (never switch the shared `idm` checkout's branch),
+and fast-forward `main` when it is done. Android releases stay separate from desktop
+releases (`android-v<version>` tags and the `android-latest` feed, `latest=false`); a
+desktop release is its own decision. Claude leads the Android work
 again from 2026-11-21. Read the [Android handoff](docs/plans/android-parity-handoff.md)
 first, then the [operating notes](docs/android-operating-notes.md) (architecture,
-SDK, adb, phones, emulators, builds) and the [acceptance matrix](docs/plans/android-mockup-acceptance.md).
-Keep `main` on its own checkout and branch. The separate `android-app` working copy
+SDK, adb, phones, emulators, builds) and the [acceptance matrix](docs/plans/android-mockup-acceptance.md). The separate `android-app` working copy
 holds unfinished, uncommitted ANDROID.9 work; inventory it before reusing anything.
 
 Track flow batches, owner decisions and milestone changes, not every check: a case
@@ -53,10 +57,11 @@ by Fable; they are the first open entry in the
 
 ## What this project is
 
-A private-use Windows download manager, **Inbound Download Manager**. It is a
+A private-use Windows and Android download manager, **Inbound Download Manager**. It is a
 new C#/.NET application with a WinUI 3 frontend, a separate background host and
-download engine, and our own Manifest V3 Chrome extension + Native Messaging
-host.
+download engine, our own Manifest V3 Chrome extension + Native Messaging
+host, and an Android app (`src/DownloadManager.Android`, with its platform-free logic in
+`src/DownloadManager.Mobile`) that embeds its own Host and can also manage a paired one.
 
 Never commit cookies, credentials, browser profiles, or captures containing
 secrets.

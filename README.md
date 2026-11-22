@@ -1,10 +1,11 @@
 # Inbound Download Manager
 
-A download manager for Windows, in three parts:
+A download manager for Windows and Android, in four parts:
 
 - a WinUI 3 desktop app;
 - a background service that owns the downloads and keeps them running from the notification area when the window is closed;
-- a browser extension for Chrome, Edge and Firefox that can send browser downloads to the app.
+- a browser extension for Chrome, Edge and Firefox that can send browser downloads to the app;
+- an Android app that downloads on the phone itself and can also control the app on a PC or an Inbound server.
 
 It splits downloads into segments, resumes them after interruptions and restarts, and supports queues, schedules, proxies and site logins.
 
@@ -13,6 +14,19 @@ It splits downloads into segments, resumes them after interruptions and restarts
 Download the installer from the [latest release](https://github.com/Kaan88/inbound/releases/latest) and run it.
 
 Program files install to `%LOCALAPPDATA%\Programs\Inbound Download Manager`; settings, the download list and logs live in `%LOCALAPPDATA%\Inbound Download Manager`. 0.3.0 is a fresh start: it does not read state or settings from earlier builds.
+
+## Android app
+
+Download `Inbound-android-<version>-arm64.apk` from the newest `android-v…` release on the
+[releases page](https://github.com/Kaan88/inbound/releases) and open it on the phone (Android 12 or later, arm64). Android
+asks once to allow installs from the browser or file manager you open it with. After that the app checks for updates on
+its own, downloads a newer version, checks its signature and offers to install it; Android asks before it installs.
+Android releases are separate from the desktop releases and never replace the desktop's latest release.
+
+The phone downloads on its own, with queues, schedules, torrents, TorBox, archive extraction and Remote Files (SFTP,
+FTP, WebDAV, S3 and cloud storage, both ways between the phone and a remote). It can also pair with Inbound on a PC or
+an Inbound server and manage that one's downloads instead. How updates are checked and published:
+[docs/android-updates.md](docs/android-updates.md).
 
 ## Browser extension (Chrome, Edge, Firefox)
 
@@ -71,6 +85,13 @@ dotnet build DownloadManager.slnx -c Release
 cd extensions\chrome; npm ci; npm run build; npm run build:firefox
 ```
 
+The Android app stays out of the solution build; it needs the Android SDK and a JDK 21:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\build-android.ps1 -Mode emulator -TestBuild
+powershell -ExecutionPolicy Bypass -File scripts\build-android.ps1 -Mode phone
+```
+
 Run the tests with `scripts\test.ps1`. To publish and install a development build:
 
 ```powershell
@@ -97,6 +118,8 @@ src/
   DownloadManager.Archives/        archive extraction
   DownloadManager.Containers/      link container files (CCF, DLC)
   DownloadManager.Providers.TorBox/ TorBox provider
+  DownloadManager.Mobile/          the Android app's platform-free client and screen logic
+  DownloadManager.Android/         Android app (embeds its own Host)
 extensions/chrome/                 our MV3 TypeScript extension (Chrome, Edge, Firefox)
 webui/                             web UI for the server
 docker/                            Docker compose example and container scripts
@@ -116,5 +139,7 @@ docs/                              architecture and operation docs
 - `CLAUDE.md` — agent onboarding
 - `docs/architecture.md` — process boundaries and IPC
 - `docs/docker.md` — running the server in Docker
+- `docs/android-operating-notes.md` — Android architecture, SDK, devices and builds
+- `docs/android-updates.md` — Android update channel and release steps
 - `docs/browser-integration.md` — handoff constraints and protocol
 - `docs/chrome-extension-privacy.md` — extension privacy policy

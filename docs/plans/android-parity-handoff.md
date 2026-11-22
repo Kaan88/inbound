@@ -6,10 +6,11 @@ Updated 2026-11-22 (after the Fable review). Claude leads the Android work again
 
 ## Where things stand
 
-- **Branch:** `android-remote-files-parity`, pushed and even with origin at the
-  commit that carries this handoff. Worktree (the working folder):
-  `C:/Users/kaank/.local/share/opencode/worktree/08edba/android-remote-files-parity`.
-  Never switch the branch of the shared `idm` checkout.
+- **Branch (2026-11-23):** Android is on `main` now (merged both ways, owner: "yes, then to
+  main"; Android made an official part of the project). New work goes on a short branch cut
+  from `main` in a worktree, then fast-forwards `main`. The old worktree
+  `C:/Users/kaank/.local/share/opencode/worktree/08edba/android-remote-files-parity` and its
+  branch are retired after 0.1.3. Never switch the branch of the shared `idm` checkout.
 - **ANDROID.9 is built and checked (2026-11-22):** torrents on the phone (Wi-Fi only,
   seeding on Wi-Fi while charging), TorBox (add, cache hit and miss, My TorBox, "On
   TorBox" rows in Downloads), archives (password sheet, saved passwords, per-archive
@@ -20,7 +21,7 @@ Updated 2026-11-22 (after the Fable review). Claude leads the Android work again
   owner's S24 but not published. The newest APK is a local test build, not a release.
 - **Redesign:** Remote Files r1-r6 were built on `android-remote-files-redesign`
   (pushed, kept apart). It merges only after the release (owner, 2026-11-21).
-- **Against `main`:** no merge without the owner's say-so.
+- **Against `main`:** merged (2026-11-23). No desktop release without the owner's say-so.
 - **Local state here:** `SiteTransferDtos.cs` shows as modified with no content change
   (line endings) and `.cortexkit/` is untracked. Never stage either.
 - **`android-app` working copy** (`C:/Users/kaank/Downloads Archive/2026-11-20/Projects/Inbound/idm-android-trial`):
