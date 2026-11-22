@@ -32,9 +32,8 @@ Updated 2026-11-22 (after the Fable review). Claude leads the Android work again
    (2026-11-22, [review](android-review-android9.md)). The signed APK is staged, not published:
    `artifacts/android-app/release-0.0.11/` (APK SHA-256 `034244f63bea3c904caeb751a7ee2925ee78a93b59b8f447ac872ae310a68c41`,
    versionCode 11, signed manifest and notes from `docs/android-release-notes-0.0.11.txt`; built from a clean Release
-   output). `check-apk.py --release` and the release verifier passed. Still owed before publishing: one start of that
-   APK on the S24 (install in place over 0.0.10, launch, see Downloads) with the owner's OK, since the owner was
-   asleep and said not to count on the phone. Then publish per `docs/android-updates.md`: APK and manifest on
+   output). `check-apk.py --release` and the release verifier passed. The S24 start passed on 2026-11-22 (installed in place over
+   0.0.10, opened on Downloads with data kept; PROGRESS). Still owed: the owner's OK to publish. Then publish per `docs/android-updates.md`: APK and manifest on
    `android-v0.0.11`, the same manifest on `android-latest`, `latest=false` on both.
 2. **Merge the redesign branch** after the release, then compare r1-r6 on real data and on the owner's phone.
    A trial merge on 2026-11-22 had two capability-list conflicts and passed its checks (PROGRESS has the resolutions);

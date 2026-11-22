@@ -25,6 +25,10 @@ Android 0.0.11 staged, not published: signed release APK from a clean Release ou
 `artifacts/android-app/release-0.0.11/` with the signed manifest and notes. Release verifier and `check-apk.py --release`
 passed. Publishing waits for one start on the S24 with the owner's OK (the owner was asleep and said not to count on
 the phone; no device run of the fixes yet).
+S24 start, 2026-11-22 12:12 (owner unlocked the phone): the staged APK (same SHA-256) installed in place over 0.0.10
+(versionCode 11), started without a crash and opened on Downloads with its data kept (still paired with the owner's
+server, Idle). Display baseline (automatic brightness, 60, longest timeout) recorded, brightness set to minimum for the
+check, then restored and read back. Publishing waits for the owner's OK.
 
 Remaining review items of the earlier range, 2026-11-22 (owner away; decisions noted): A5, A7, S9, T1 and the F3
 note fixed, S4 partly fixed (a skipped update version changes the settings revision); S5, S7, S8, S10 and M4 kept with
@@ -46,7 +50,8 @@ worktree), and a site-transfer test once left a Host and `rclone serve sftp` run
 it did not come back when those tests ran alone. Rerun the full Integration suite after the real merge, from this worktree.
 Engine: `ReportsHttpDnsTlsAndTimeoutFailureClasses` fails about half the time on this branch with or without the merge
 (3 of 6; line 696, a stalled four-range download finishes); `main` passes it 6 of 6 with its later transfer-loop fixes,
-which arrive when this branch merges into `main`.
+which arrive when this branch merges into `main`. Cherry-picking `main`'s `373fe7ca` (bytes before a failed read are written
+first) did not cure it (2 of 8 still failed), so it was not kept; the cause is elsewhere in `main`'s later engine work.
 
 Owner, 2026-11-22, on delegation: Opus coordinates, checks every worker diff, owns merges and does risky and important
 changes itself; Haiku mechanical work; Sonnet routine implementation with an outcome, owned files and a check; Fable
