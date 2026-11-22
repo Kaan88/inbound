@@ -16,7 +16,7 @@
       </LinearLayout>
     </LinearLayout>
     <TextView android:id="@+id/update_status" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:textAppearance="?attr/textAppearanceBodyMedium" android:textColor="?attr/colorOnSurface" android:accessibilityLiveRegion="polite" />
-    <com.google.android.material.progressindicator.LinearProgressIndicator android:id="@+id/update_progress" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp" android:max="1000" android:visibility="gone" android:contentDescription="Update download progress" />
+    <com.google.android.material.progressindicator.LinearProgressIndicator android:id="@+id/update_progress" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp" android:max="1000" android:visibility="gone" android:contentDescription="Update download progress" app:trackStopIndicatorSize="0dp" app:indicatorTrackGapSize="0dp" app:trackCornerRadius="3dp" />
     <LinearLayout android:id="@+id/update_offer_details" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:layout_marginTop="16dp" android:visibility="gone">
       <View android:layout_width="match_parent" android:layout_height="1dp"
           android:layout_marginBottom="12dp" android:background="?attr/colorOutlineVariant" />

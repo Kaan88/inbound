@@ -57,7 +57,8 @@ internal static class UpdateReadyDialog
     public static View CreateNotes(Context context, out TextView text)
     {
         var scroll = new NotesScrollView(context) { FillViewport = false };
-        text = Label(context, "", 14, Resource.Attribute.colorOnSurface);
+        text = Label(context, "", 15, Resource.Attribute.colorOnSurface);
+        text.SetLineSpacing(Motion.Dp(context, 2), 1f);
         text.SetTextIsSelectable(false);
         scroll.AddView(text, new Android.Views.ViewGroup.LayoutParams(-1, -2));
         return scroll;
@@ -65,11 +66,38 @@ internal static class UpdateReadyDialog
     public static void BindNotes(TextView text, AndroidUpdateManifest manifest)
     {
         var value = Notes(manifest);
-        if (text.Text != value) text.Text = value;
+        if (!ReferenceEquals(text.Tag, null) && text.Tag.ToString() == value) return;
+        text.Tag = value;
+        text.TextFormatted = Formatted(text.Context!, value, string.IsNullOrWhiteSpace(manifest.ReleaseNotes));
         var colour = string.IsNullOrWhiteSpace(manifest.ReleaseNotes)
             ? Resource.Attribute.colorOnSurfaceVariant : Resource.Attribute.colorOnSurface;
         text.SetTextColor(new Android.Graphics.Color(Motion.Attr(text.Context!, colour)));
     }
+    /// <summary>One bullet per line of the notes, with room between them (owner, 2026-11-22: the notes were one block).</summary>
+    private static Java.Lang.ICharSequence Formatted(Context context, string value, bool placeholder)
+    {
+        var builder = new Android.Text.SpannableStringBuilder();
+        if (placeholder) { builder.Append(value); return builder; }
+        var lines = value.Replace("\r\n", "\n").Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var bullet = Motion.Attr(context, Resource.Attribute.colorPrimary);
+        for (int i = 0; i < lines.Length; i++)
+        {
+            int start = builder.Length();
+            builder.Append(lines[i].TrimStart('•', '-', '*', ' ', '\t'));
+            if (i < lines.Length - 1) builder.Append("\n");
+            builder.SetSpan(new Android.Text.Style.BulletSpan(Motion.Dp(context, 10), new Android.Graphics.Color(bullet), Motion.Dp(context, 3)),
+                start, builder.Length(), Android.Text.SpanTypes.ExclusiveExclusive);
+            if (i < lines.Length - 1)
+            {
+                // A short blank line between items keeps each bullet centred on its first line.
+                int gap = builder.Length();
+                builder.Append("\n");
+                builder.SetSpan(new Android.Text.Style.AbsoluteSizeSpan(Motion.Dp(context, 8)), gap, builder.Length(), Android.Text.SpanTypes.ExclusiveExclusive);
+            }
+        }
+        return builder;
+    }
+
     private static TextView Label(Context context, string value, float size, int colour)
     {
         var text = new TextView(context) { Text = value, TextSize = size };
@@ -81,7 +109,8 @@ internal static class UpdateReadyDialog
     {
         protected override void OnMeasure(int widthMeasureSpec, int heightMeasureSpec)
         {
-            int max = Motion.Dp(Context!, 160);
+            // Up to 45 % of the screen (at least 160 dp): the notes were cut to a few lines (owner, 2026-11-22).
+            int max = Math.Max(Motion.Dp(Context!, 160), (int)(Context!.Resources!.DisplayMetrics!.HeightPixels * 0.45));
             var mode = MeasureSpec.GetMode(heightMeasureSpec);
             int size = MeasureSpec.GetSize(heightMeasureSpec);
             if (mode == MeasureSpecMode.Unspecified || size > max)
