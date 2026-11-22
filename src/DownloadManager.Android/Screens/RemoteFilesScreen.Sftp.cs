@@ -122,7 +122,8 @@ internal sealed partial class RemoteFilesScreen
         }
         finally
         {
-            if (!_closed && generation == _generation) { _busy = _mutation = false; Render(); }
+            // _mutation belongs to this save whatever ran since; _busy only while nothing newer took over (Fable L1).
+            if (!_closed) { _mutation = false; if (generation == _generation) _busy = false; Render(); }
         }
         if (!saved) { if (_error is not null && (_inFolder || _showTransfers)) Toast.MakeText(_activity, _error, ToastLength.Long)?.Show(); return; }
         await LoadLocationsAsync();

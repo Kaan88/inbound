@@ -76,6 +76,12 @@ internal sealed partial class RemoteFilesScreen
             var result = await _client.ListTransfersAsync(_life.Token);
             if (!SameHost() || generation != _transfersGen) return;
             _transfers = result.Transfers;
+            // (Fable L9) Drop the names of transfers the Host no longer lists.
+            if (_transferPaths.Count > 0)
+            {
+                var live = new HashSet<string>(_transfers.Select(t => t.Id), StringComparer.Ordinal);
+                foreach (var stale in _transferPaths.Keys.Where(id => !live.Contains(id)).ToList()) _transferPaths.Remove(stale);
+            }
             _transfersLoaded = true;
             _transfersAt = DateTimeOffset.Now;
             _transferErrorTitle = _transferErrorText = null;
@@ -488,8 +494,11 @@ internal sealed partial class RemoteFilesScreen
             case TransferAttention.SignIn:
                 _expiredCloudSites.Add(site.Id); // the Host says the sign-in lapsed, whatever the location list still shows
                 if (!CanSignIn(site)) { _activity.ShowMessage("Sign in to " + site.Name + " from the Host."); return; }
+                if (_signInWait is not null) { _activity.ShowMessage("Finish the sign-in that is open first."); return; }
+                // Set before the sign-in starts: on a paired Host the paste flow ends its wait at once and the token is
+                // accepted later, so the retry must outlive the wait (Fable M1). A cancelled sign-in drops it.
+                _retryAfterSignIn = (site.Id, t.Id);
                 BeginCloudSignIn(site, again: true);
-                if (_signInWait is not null && _signInSiteId == site.Id) _retryAfterSignIn = (site.Id, t.Id);
                 break;
             case TransferAttention.ReviewKey:
                 if (!_secureHostConnection) { _activity.ShowMessage("The server key must be reviewed over a secure connection to the Host."); return; }
@@ -561,7 +570,7 @@ internal sealed partial class RemoteFilesScreen
         LinearProgressIndicator? progress = null;
         if (t.State is "running" or "paused" && t.Bytes > 0)
         {
-            var bar = progress = new LinearProgressIndicator(_activity) { Indeterminate = false, Max = 1000, TrackThickness = Dp(5), TrackCornerRadius = Dp(3), TrackStopIndicatorSize = 0 };
+            var bar = progress = new LinearProgressIndicator(_activity) { Indeterminate = false, Max = 1000, TrackThickness = Dp(5), TrackCornerRadius = Dp(3), TrackStopIndicatorSize = 0, IndicatorTrackGapSize = 0 /* (mockup low a) */ };
             bar.SetIndicatorColor(t.State == "paused" ? Attr(Resource.Attribute.colorOutline) : Attr(Resource.Attribute.colorPrimary));
             bar.TrackColor = Attr(Resource.Attribute.colorSurfaceContainerHighest);
             bar.Progress = (int)Math.Min(1000, t.BytesDone * 1000 / Math.Max(1, t.Bytes));

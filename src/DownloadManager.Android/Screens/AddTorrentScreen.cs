@@ -533,7 +533,7 @@ internal sealed class AddTorrentScreen
 
             _error.Text = result.Error;
             _error.Visibility = ViewStates.Visible;
-        }, words => { _busy = false; UpdateSend(); _error.Text = words; _error.Visibility = ViewStates.Visible; });
+        }, words => { _busy = false; UpdateSend(); _activity.ForgetNewRow(); /* (Fable L5) */ _error.Text = words; _error.Visibility = ViewStates.Visible; });
     }
 
     private void SendTorBox()

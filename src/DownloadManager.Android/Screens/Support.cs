@@ -316,19 +316,33 @@ internal sealed class RingSpinner : View
         _arc.Color = new Color(arcColor);
     }
 
-    protected override void OnAttachedToWindow()
+    // Runs only while the ring can actually be seen: a Gone spinner, a hidden screen or an app in the background costs
+    // no frames (Fable M2). Android calls this on attach, detach and every visibility change up the tree.
+    public override void OnVisibilityAggregated(bool isVisible)
     {
-        base.OnAttachedToWindow();
+        base.OnVisibilityAggregated(isVisible);
+        if (isVisible) Spin();
+        else Stop();
+    }
+
+    protected override void OnDetachedFromWindow()
+    {
+        Stop();
+        base.OnDetachedFromWindow();
+    }
+
+    private void Spin()
+    {
+        if (_animator is not null) return;
         _animator = new Android.Animation.TimeAnimator();
         _animator.Time += (_, e) => { _angle = -90f + e.TotalTime * 360f / 1100f % 360f; Invalidate(); };
         _animator.Start();
     }
 
-    protected override void OnDetachedFromWindow()
+    private void Stop()
     {
         _animator?.Cancel();
         _animator = null;
-        base.OnDetachedFromWindow();
     }
 
     protected override void OnDraw(Canvas canvas)

@@ -84,7 +84,7 @@ public sealed partial class MainActivity
                             else if (state == "done") finished = gone = true;
                         }
                         catch (OperationCanceledException) { throw; }
-                        catch (Exception) { /* Try again on the next tick. */ }
+                        catch (Exception) { gone = ++tracked.Misses >= 5; } // try again on the next tick, a few times (Fable L4)
                         if (!gone) continue;
                         lock (TrackedDownloads) TrackedDownloads.Remove(tracked);
                         if (finished)
@@ -125,6 +125,16 @@ public sealed partial class MainActivity
                 if (!Outside.ShowDownloadFolder(this)) ShowMessage("No app on this phone can show the folder.");
                 return;
             }
+            // An open page would cover the folder (Fable L8). Details and Torrent details close and give way, as for x10b; any
+            // other page (a half-filled New download) keeps its state and the tap does nothing.
+            if (_nav?.Page is { } open)
+            {
+                if (!ReferenceEquals(open, _details?.Root) && !ReferenceEquals(open, _torrentDetails?.Root)) return;
+                _afterPage = () => ShowPhoneFolder(phonePath, file);
+                _nav.Close(open);
+                return;
+            }
+            CloseFolderPage();
             var bottom = FindViewById<Google.Android.Material.BottomNavigation.BottomNavigationView>(Resource.Id.nav)!;
             if (!_onRemoteFiles) bottom.SelectedItemId = Resource.Id.nav_remote_files;
             _remoteFiles?.ShowPhoneFolder(phonePath, file);

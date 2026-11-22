@@ -380,7 +380,7 @@ internal sealed partial class RemoteFilesScreen
     private void FinishSignInWait(string siteId)
     {
         if (_signInSiteId != siteId) return;
-        if (_retryAfterSignIn is { } stale && stale.SiteId == siteId) _retryAfterSignIn = null;
+        // A pending retry is kept: on a paired Host the token is accepted after this wait ends (Fable M1).
         _signInSiteId = null;
         _signInAgain = null;
         _signInWait?.Dispose();

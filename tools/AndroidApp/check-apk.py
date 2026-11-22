@@ -13,7 +13,8 @@ HOOKS = ("probe_url", "crash_now", "update_fixture", "update_prompt_preview", "I
          "hold_remote_files_publication", "remote_files_fixture_port", "remote_files_upload_port",
          "remote_files_s3_upload_port", "metered_override", "wifi_only", "add_url", "log_state", "rclone_probe",
          "media_upload_create", "media_upload_cleanup", "media_upload_nested", "skip_first_run",
-         "update_preview_kind", "update_preview_notes_scroll", "update_preview_outer_scroll")
+         "update_preview_kind", "update_preview_notes_scroll", "update_preview_outer_scroll",
+         "x_fixture", "x10_fixture", "x10b_fixture")
 PAGE_ALIGN = 0x4000
 
 

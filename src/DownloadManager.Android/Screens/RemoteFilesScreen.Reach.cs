@@ -80,7 +80,14 @@ internal sealed partial class RemoteFilesScreen
         _transfersGen++;
         _transferLoading = false;
         _showTransfers = false;
-        _adding = false;
+        if (_adding)
+        {
+            // Leaving an open form drops what was typed in it, secrets included (Fable L2).
+            CancelCurrent();
+            ClearPassword();
+            _adding = false; _addStep = 0; _editSite = null; _savedId = null; _savedSite = null;
+            _fv.Clear();
+        }
         _sheet?.Dismiss();
         _inFolder = true;
         _lastActiveTransfers = _transfers.Count(RemoteTransferText.IsActive);

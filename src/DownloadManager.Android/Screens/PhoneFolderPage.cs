@@ -518,7 +518,7 @@ internal sealed class PhoneFolderPage : IDisposable
             _open.Click += (_, _) => { if (_row is { } r && !r.Item.IsFolder) _p.OpenFile(r.Item.Name); };
             line.AddView(_open, new LinearLayout.LayoutParams(-2, p.Dp(36)));
             root.AddView(line, new LinearLayout.LayoutParams(-1, -2));
-            _bar = new LinearProgressIndicator(p._activity) { Max = 1000, TrackThickness = p.Dp(6), TrackCornerRadius = p.Dp(3), Visibility = ViewStates.Gone, ImportantForAccessibility = ImportantForAccessibility.No };
+            _bar = new LinearProgressIndicator(p._activity) { Max = 1000, TrackThickness = p.Dp(6), TrackCornerRadius = p.Dp(3), TrackStopIndicatorSize = 0, IndicatorTrackGapSize = 0 /* (mockup low a) */, Visibility = ViewStates.Gone, ImportantForAccessibility = ImportantForAccessibility.No };
             _bar.TrackColor = Motion.Attr(p._activity, Resource.Attribute.colorSurfaceContainerHighest);
             _bar.SetIndicatorColor(Motion.Attr(p._activity, Resource.Attribute.colorPrimary));
             root.AddView(_bar, new LinearLayout.LayoutParams(-1, -2) { LeftMargin = p.Dp(64), RightMargin = p.Dp(12), BottomMargin = p.Dp(12) });

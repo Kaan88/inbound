@@ -111,17 +111,26 @@ internal sealed partial class RemoteFilesScreen
                 using (var cursor = resolver.Query(uri, [Android.Provider.IOpenableColumns.DisplayName], null, null, null))
                     if (cursor is not null && cursor.MoveToFirst() && cursor.GetString(0) is { Length: > 0 } shown) name = shown;
                 using var stream = resolver.OpenInputStream(uri) ?? throw new IOException();
-                using var memory = new MemoryStream();
+                // (Fable L6) Pre-sized to the limit plus one read, so it never regrows and leaves secret copies; zeroed in the finally.
                 var buffer = new byte[4096];
-                int read;
-                while ((read = stream.Read(buffer, 0, buffer.Length)) > 0)
+                var backing = new byte[SftpKeyFile.MostKeyBytes + buffer.Length];
+                using var memory = new MemoryStream(backing, 0, backing.Length, true, true); // publiclyVisible: GetBuffer works
+                memory.SetLength(0);
+                try
                 {
-                    memory.Write(buffer, 0, read);
-                    if (memory.Length > SftpKeyFile.MostKeyBytes) { failure = SftpKeyFile.TooLargeMessage; break; }
+                    int read;
+                    while ((read = stream.Read(buffer, 0, buffer.Length)) > 0)
+                    {
+                        memory.Write(buffer, 0, read);
+                        if (memory.Length > SftpKeyFile.MostKeyBytes) { failure = SftpKeyFile.TooLargeMessage; break; }
+                    }
+                    if (failure is null) text = new System.Text.UTF8Encoding(false, false).GetString(memory.GetBuffer(), 0, (int)memory.Length).TrimStart('﻿');
                 }
-                if (failure is null) text = new System.Text.UTF8Encoding(false, false).GetString(memory.GetBuffer(), 0, (int)memory.Length).TrimStart('﻿');
-                System.Security.Cryptography.CryptographicOperations.ZeroMemory(memory.GetBuffer());
-                Array.Clear(buffer);
+                finally
+                {
+                    System.Security.Cryptography.CryptographicOperations.ZeroMemory(memory.GetBuffer());
+                    Array.Clear(buffer);
+                }
             }
             catch (Exception e) when (e is IOException or Java.Lang.SecurityException or UnauthorizedAccessException or InvalidOperationException)
             {
@@ -386,6 +395,7 @@ internal sealed partial class RemoteFilesScreen
         var name = Add(_content, "name", "Location name", placeholder: "Name");
 
         MaterialButton? primary = null;
+        TextInputLayout? passFocus = null;
         // --- kind specific ---------------------------------------------------------------------------------------
         if (cloud)
         {
@@ -504,8 +514,8 @@ internal sealed partial class RemoteFilesScreen
                     placeholder: replaceSaved ? "Saved; type to replace" : null,
                     changed: _ => { if (_passphraseError is not null && layout0("keypass") is { } l) { _passphraseError = null; SetFieldError(l, null); } });
                 pass.Enabled = secure && usable;
-                if (_passphraseError is not null) SetFieldError(pass, _passphraseError);
-                if (!sftpEdit)
+                if (_passphraseError is not null) { SetFieldError(pass, _passphraseError); passFocus = pass; } // (mockup y2) focus the passphrase
+                if (!sftpEdit && _passphraseError is null) // (mockup y2) the note goes while the passphrase error shows
                     _content.AddView(Hint(_phoneHost ? "OpenSSH and PuTTY (.ppk) keys both work. The key is stored by this phone's Host."
                         : "OpenSSH and PuTTY (.ppk) keys both work. The key is sent to " + _hostName + " and stored there."));
             }
@@ -642,7 +652,8 @@ internal sealed partial class RemoteFilesScreen
         int primaryIcon = cloud && _editSite is null ? Resource.Drawable.ic_open : Resource.Drawable.ic_remote_check;
         primary = FormFooter(primaryText, primaryIcon, LeaveForm, () => SubmitForm(layouts), secure && !_busy);
         primary.ContentDescription = primaryText;
-        if (_editSite is null && _savedId is null) name.RequestFocus();
+        if (passFocus is not null) (edits.GetValueOrDefault("keypass") as View ?? passFocus).RequestFocus();
+        else if (_editSite is null && _savedId is null) name.RequestFocus();
     }
 
     /// <summary>y1 to y3: "Sign in with" and the Password / Key choice (a 44 dp pill, the chosen half tinted with a check).</summary>
@@ -868,7 +879,7 @@ internal sealed partial class RemoteFilesScreen
         if (edit is not null && cloud) request.AuthMethod = "signIn";
         bool addressChanged = edit is not null && kind == SiteKindCatalog.Sftp
             && (!string.Equals(edit.Host, host, StringComparison.OrdinalIgnoreCase) || edit.Port != port);
-        ClearFormSecrets();
+        // (Fable L7) The typed secrets are cleared only after a successful save (SaveFormAsync), so a failure can be resubmitted.
         _ = SaveFormAsync(request, addressChanged);
     }
 
@@ -905,7 +916,7 @@ internal sealed partial class RemoteFilesScreen
             request.KeyPassphrase = null;
             if (!_closed && generation == _generation) { _busy = false; Render(); }
         }
-        if (saved is not null) ClearKeyState(); // the Host holds the key now; the phone keeps no copy
+        if (saved is not null) { ClearFormSecrets(); ClearKeyState(); } // (Fable L7) the Host holds the key now; the phone keeps no copy
         if (saved is null || !SameHost() || generation != _generation) return;
         _savedId = saved.Id;
         _savedSite = saved;
