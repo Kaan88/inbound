@@ -1,5 +1,9 @@
 using DownloadManager.Mobile;
 using Inbound.App.Host;
+using Android.Content;
+using Android.Views;
+using Android.Widget;
+using AndroidX.Core.View;
 using Inbound.App.Screens;
 
 namespace Inbound.App;
@@ -126,6 +130,199 @@ public sealed partial class MainActivity
             _remoteFiles?.ShowPhoneFolder(phonePath, file);
         });
     }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // x10b: Show in folder from Downloads. The app's own folder page over the Downloads tab, which stays selected.
+
+    private PhoneFolderPage? _folderPage;
+    private AndroidX.Activity.OnBackPressedCallback? _folderBack;
+    private Action? _afterPage;
+    private long _expectNewRowUntil;
+    private JobRow? _lastAddedRow;
+
+    /// <summary>The Show in folder of an "added" snackbar: the folder page, with the download just added outlined when it is the one saved there.</summary>
+    internal void ShowAddedFolder(string phoneFolder, bool useRow = true)
+    {
+        var row = useRow ? _lastAddedRow : null;
+        // The page reads the file name live from the row: right after Add the Host often does not know it yet.
+        if (row is not null && PhoneFolderOf(row.Job.DestinationDirectory) == phoneFolder) ShowDownloadsFolder(phoneFolder, null, row);
+        else ShowDownloadsFolder(phoneFolder, null);
+    }
+
+    /// <summary>
+    /// A snackbar for after a page closes: the page is still animating away, so the message waits and sits above the bottom bar
+    /// (the FAB lifts with it), and the new card's outline starts then, when the list is in view.
+    /// </summary>
+    internal void ShowMessageAfterClose(string text, string? action = null, Action? onAction = null)
+    {
+        new Android.OS.Handler(Android.OS.Looper.MainLooper!).PostDelayed(() =>
+        {
+            if (IsFinishing || IsDestroyed) return;
+            ShowMessage(text, action, onAction, downloadsFeedback: true);
+            if (_pendingMark is { } row) { _pendingMark = null; _downloads?.MarkNew(row); }
+        }, Motion.ContainerMs + 100);
+    }
+
+    private JobRow? _pendingMark;
+
+    private sealed class FolderBack(Action back) : AndroidX.Activity.OnBackPressedCallback(true)
+    {
+        public override void HandleOnBackPressed() => back();
+    }
+
+    /// <summary>Back with a Navigator page over the folder page (a notification's Details, a share): the visible page goes first.</summary>
+    private void FolderBackPressed()
+    {
+        if (_nav?.PageOpen == true && _folderBack is { } callback)
+        {
+            callback.Enabled = false;
+            OnBackPressedDispatcher.OnBackPressed();
+            callback.Enabled = _folderPage is not null;
+            return;
+        }
+        CloseFolderPage();
+    }
+
+    /// <summary>
+    /// Show in folder from the Downloads side (a snackbar, the finished card, Details): the folder page with <paramref name="file"/>
+    /// outlined; <paramref name="row"/> is the download while it still runs, so its row shows the progress.
+    /// </summary>
+    internal void ShowDownloadsFolder(string phonePath, string? file, JobRow? row = null)
+    {
+        RunOnUiThread(() =>
+        {
+            if (IsFinishing || IsDestroyed || Capabilities.IsRemote) return;
+            if (_nav?.Page is { } open)
+            {
+                // Only Details and Torrent details (the sources of this action) close and give way; any other page (the queue editor,
+                // a half-filled New download) keeps its state and the tap does nothing.
+                if (!ReferenceEquals(open, _details?.Root) && !ReferenceEquals(open, _torrentDetails?.Root)) return;
+                _afterPage = () => OpenFolderPage(phonePath, file, row);
+                _nav.Close(open);
+                return;
+            }
+            OpenFolderPage(phonePath, file, row);
+        });
+    }
+
+    /// <summary>Show in folder for a finished row (card button, Details menu): its folder when it is on this phone's Download folder, else the Files app.</summary>
+    internal void ShowRowFolder(JobRow row)
+    {
+        var folder = PhoneFolderOf(row.Job.DestinationDirectory);
+        if (folder is not null) ShowDownloadsFolder(folder, row.Name, row);
+        else if (!Outside.ShowDownloadFolder(this)) ShowMessage("No app on this phone can show the folder.");
+    }
+
+    private void OpenFolderPage(string phonePath, string? file, JobRow? row, List<DownloadManager.Contracts.SiteItemDto>? canned = null)
+    {
+        if (IsFinishing || IsDestroyed) return;
+        var bottom = FindViewById<Google.Android.Material.BottomNavigation.BottomNavigationView>(Resource.Id.nav)!;
+        if (_onSettings || _onQueues || _onRemoteFiles) bottom.SelectedItemId = Resource.Id.nav_downloads;
+        CloseFolderPage();
+        var pages = FindViewById<FrameLayout>(Resource.Id.pages)!;
+        var page = new PhoneFolderPage(this, phonePath, file, row, () => CloseFolderPage(), canned);
+        _folderPage = page;
+        if (!Motion.Reduced(this)) AndroidX.Transitions.TransitionManager.BeginDelayedTransition(pages, Motion.Fade());
+        pages.AddView(page.Root, new FrameLayout.LayoutParams(-1, -1));
+        FindViewById<View>(Resource.Id.downloads_root)!.ImportantForAccessibility = ImportantForAccessibility.NoHideDescendants;
+        ViewCompat.SetAccessibilityPaneTitle(page.Root, "Folder " + phonePath);
+        ViewCompat.RequestApplyInsets(page.Root);
+        if (_folderBack is null) { _folderBack = new FolderBack(FolderBackPressed); OnBackPressedDispatcher.AddCallback(this, _folderBack); }
+        _folderBack.Enabled = true;
+    }
+
+    /// <summary>Back from the folder page to the Downloads list (the Downloads tab never stopped being selected).</summary>
+    private void CloseFolderPage()
+    {
+        if (_folderPage is not { } page) return;
+        _folderPage = null;
+        if (_folderBack is not null) _folderBack.Enabled = false;
+        var pages = FindViewById<FrameLayout>(Resource.Id.pages);
+        if (pages is not null)
+        {
+            if (!Motion.Reduced(this) && !IsFinishing && !IsDestroyed) AndroidX.Transitions.TransitionManager.BeginDelayedTransition(pages, Motion.Fade());
+            pages.RemoveView(page.Root);
+        }
+        page.Dispose();
+        FindViewById<View>(Resource.Id.downloads_root)!.ImportantForAccessibility = ImportantForAccessibility.Auto;
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // x10: a newly added download shows its folder line and an outline on its card for about 3 s.
+
+    /// <summary>Called as a download is submitted: the next new row (within a short while) is the one the person just added.</summary>
+    internal void ExpectNewRow() { _expectNewRowUntil = Environment.TickCount64 + 20_000; _lastAddedRow = null; _pendingMark = null; }
+
+    internal void ForgetNewRow() { _expectNewRowUntil = 0; _lastAddedRow = null; _pendingMark = null; }
+
+    private void MarkIfExpected(JobRow row)
+    {
+        if (_expectNewRowUntil < Environment.TickCount64) return;
+        _expectNewRowUntil = 0;
+        _lastAddedRow = row;
+        // The New download page still covers the list: the outline starts when its snackbar appears.
+        if (_nav?.PageOpen == true) _pendingMark = row;
+        else _downloads?.MarkNew(row);
+    }
+
+    /// <summary>A removed row: a folder page waiting on its download stops showing progress.</summary>
+    private void RowGone(JobRow row)
+    {
+        _folderPage?.OnRowRemoved(row);
+        if (ReferenceEquals(_lastAddedRow, row)) _lastAddedRow = null;
+    }
+
+    /// <summary>
+    /// The "Added to Downloads" snackbar of a torrent or TorBox file: Show in folder on this phone (x10), no action on a paired Host,
+    /// whose files are not on this phone.
+    /// </summary>
+    internal void ShowAdded(string text, string? destination, bool afterPage = false, bool newRow = true)
+    {
+        var folder = Capabilities.IsRemote || destination is null ? null : PhoneFolderOf(destination);
+        string? action = folder is null ? null : "Show in folder";
+        Action? click = folder is null ? null : () => ShowAddedFolder(folder, newRow);
+        if (afterPage) ShowMessageAfterClose(text, action, click);
+        else ShowMessage(text, action, click, downloadsFeedback: true);
+    }
+
+#if INBOUND_TEST_BUILD
+    /// <summary>
+    /// Test build only, for captures: <c>--es x10b_fixture finished|running</c> opens the x10b folder page with canned rows (manual-v2.pdf
+    /// outlined with Open, or its progress), and <c>--es x10_fixture added</c> shows the x10 snackbar and outlines the newest card.
+    /// </summary>
+    internal void RunFolderFixture(Intent? intent)
+    {
+        if (intent?.GetStringExtra("x10_fixture") == "added")
+        {
+            ShowMessage("Download added · saving to Download/Inbound", "Show in folder", () => ShowDownloadsFolder("Download/Inbound", null), downloadsFeedback: true);
+            if (_model?.Rows.FirstOrDefault() is { } newest) _downloads?.MarkNew(newest);
+        }
+
+        var mode = intent?.GetStringExtra("x10b_fixture");
+        if (mode is not "finished" and not "running") return;
+        var now = DateTimeOffset.Now;
+        var rows = new List<DownloadManager.Contracts.SiteItemDto>
+        {
+            new() { Name = "Music", IsFolder = true, ChildCount = 4 },
+            new() { Name = "Video", IsFolder = true, ChildCount = 2 },
+            new() { Name = "manual-v2.pdf", Size = 8_400_000, Modified = now },
+            new() { Name = "field-recordings-vol3.zip", Size = 640_000_000, Modified = now.AddHours(-3) },
+            new() { Name = "poster-final.png", Size = 3_200_000, Modified = now.AddDays(-1) },
+            new() { Name = "setlist.pdf", Size = 220_000, Modified = now.AddDays(-1) },
+        };
+        JobRow? running = null;
+        if (mode == "running")
+        {
+            running = new JobRow { Id = Guid.NewGuid() };
+            running.ApplyFrom(new DownloadManager.Contracts.JobDto
+            {
+                State = "downloading", FileName = "manual-v2.pdf", TotalBytes = 8_400_000, ReceivedBytes = 1_200_000, BytesPerSecond = 2_100_000,
+                DestinationDirectory = AndroidHost.SharedDownloadFolder + "/Inbound",
+            });
+        }
+        OpenFolderPage("Download/Inbound", "manual-v2.pdf", running, rows);
+    }
+#endif
 
     /// <summary>"Download/Inbound" for a folder in this phone's shared Download folder; null for any other place.</summary>
     internal static string? PhoneFolderOf(string folder)

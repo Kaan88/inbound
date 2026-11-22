@@ -13,6 +13,12 @@
             android:textAppearance="?attr/textAppearanceTitleMedium" android:textColor="?attr/colorOnSurface" />
         <TextView android:id="@+id/subtitle" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:singleLine="true" android:ellipsize="end"
             android:textAppearance="?attr/textAppearanceBodyMedium" android:textSize="13sp" android:textColor="?attr/colorOnSurfaceVariant" />
+        <!-- x10: the folder line of a card that was just added (shown for about 3 s). -->
+        <LinearLayout android:id="@+id/folder_line" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:orientation="horizontal" android:gravity="center_vertical" android:visibility="gone">
+          <ImageView android:layout_width="16dp" android:layout_height="16dp" android:src="@drawable/ic_flow_folder" app:tint="?attr/colorOnSurfaceVariant" android:importantForAccessibility="no" />
+          <TextView android:id="@+id/folder_text" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginLeft="6dp" android:singleLine="true" android:ellipsize="middle"
+              android:textAppearance="?attr/textAppearanceBodyMedium" android:textSize="13sp" android:textColor="?attr/colorOnSurfaceVariant" />
+        </LinearLayout>
       </LinearLayout>
       <!-- A 48 dp touch target around the 40 dp circle; the negative margins keep the row's size as it was. -->
       <ImageButton android:id="@+id/action" android:layout_width="48dp" android:layout_height="48dp" android:layout_marginTop="-4dp" android:layout_marginBottom="-4dp" android:layout_marginRight="-4dp"

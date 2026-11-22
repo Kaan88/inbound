@@ -113,6 +113,7 @@ public sealed partial class MainActivity : AppCompatActivity
         FindViewById<View>(Resource.Id.fab)!.Click += (_, _) => ShowAddSheet();
         var bottom = FindViewById<Google.Android.Material.BottomNavigation.BottomNavigationView>(Resource.Id.nav)!;
         bottom.ItemSelected += (_, e) => { ShowTab(e.Item.ItemId); e.Handled = true; };
+        bottom.ItemReselected += (_, _) => CloseFolderPage();
         _model.HostHelloChanged += () =>
         {
             var offered = _model.Hello?.Capabilities.Contains("sites") == true;
@@ -151,6 +152,9 @@ public sealed partial class MainActivity : AppCompatActivity
             if (remoteFilesOffered && savedInstanceState?.GetBoolean("on_remote_files") == true)
                 bottom.SelectedItemId = Resource.Id.nav_remote_files;
             foreach (var r in _model.Rows) WatchForFinish(r);
+#if INBOUND_TEST_BUILD
+            RunFolderFixture(Intent);
+#endif
             _snapshotReady = true;
             PresentShare();
             if (reported) return;
@@ -343,6 +347,7 @@ public sealed partial class MainActivity : AppCompatActivity
         var settingsPage = FindViewById<View>(Resource.Id.settings_root)!;
         var queuesPage = FindViewById<View>(Resource.Id.queues_root)!;
         var remoteFilesPage = FindViewById<FrameLayout>(Resource.Id.remote_files_root)!;
+        CloseFolderPage(); // a tab was chosen: the folder page over Downloads goes
         var from = _onSettings ? settingsPage : _onQueues ? queuesPage : _onRemoteFiles ? remoteFilesPage : downloads;
         var to = settings ? settingsPage : queues ? queuesPage : remoteFiles ? remoteFilesPage : downloads;
         if (from == downloads) _downloads?.EndSelection();
@@ -429,7 +434,7 @@ public sealed partial class MainActivity : AppCompatActivity
             // Downloads already ends above the visible navigation bar and its system insets.
             var navigation = FindViewById<View>(Resource.Id.nav);
             bool withinDownloads = downloadsFeedback && navigation?.Visibility == ViewStates.Visible &&
-                !_onSettings && !_onQueues && !_onRemoteFiles && _nav?.PageOpen != true;
+                !_onSettings && !_onQueues && !_onRemoteFiles && _nav?.PageOpen != true && _folderPage is null;
             var parent = FindViewById<View>(withinDownloads ? Resource.Id.downloads_root : Resource.Id.root)!;
             var bar = Google.Android.Material.Snackbar.Snackbar.Make(parent, text, Google.Android.Material.Snackbar.Snackbar.LengthLong)!;
             if (withinDownloads)
@@ -458,8 +463,9 @@ public sealed partial class MainActivity : AppCompatActivity
 
     private void OnRowsForFinished(object? s, NotifyCollectionChangedEventArgs e)
     {
+        if (e.OldItems is not null) foreach (JobRow r in e.OldItems) RowGone(r);
         if (e.NewItems is null) return;
-        foreach (JobRow r in e.NewItems) WatchForFinish(r);
+        foreach (JobRow r in e.NewItems) { WatchForFinish(r); MarkIfExpected(r); }
     }
 
     // The "finished" snackbar of A3: a download that was running and now has its file. Not for rows that arrive already finished.
@@ -677,6 +683,7 @@ public sealed partial class MainActivity : AppCompatActivity
             var after = _afterLinkPage; _afterLinkPage = null; after?.Invoke();
             PresentShare();
         }
+        var afterPage = _afterPage; _afterPage = null; afterPage?.Invoke();
         var imm = (Android.Views.InputMethods.InputMethodManager)GetSystemService(InputMethodService)!;
         imm.HideSoftInputFromWindow(FindViewById<View>(Resource.Id.root)!.WindowToken, 0);
     }
@@ -790,6 +797,8 @@ public sealed partial class MainActivity : AppCompatActivity
         // An open page goes with the activity: Details stops polling, and no view of this activity is held on to (findings 15, 16).
         _updateScreen?.Dispose();
         _nav?.Dispose();
+        _folderPage?.Dispose();
+        _folderPage = null;
         _details?.Dispose();
         _details = null;
         _queueEditor?.Dispose();

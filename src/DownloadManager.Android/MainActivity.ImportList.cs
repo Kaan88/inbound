@@ -106,9 +106,7 @@ public sealed partial class MainActivity
         if (IsFinishing || IsDestroyed) return;
         CloseRowPage(page);
         // The page is still open while it animates away; the message waits so it sits above the bottom bar.
-        new Handler(Looper.MainLooper!).PostDelayed(() =>
-            ShowMessage(result.SnackbarText, result.ActionText, result.ActionText is null ? null : () => ShowSkipped(result), downloadsFeedback: true),
-            Motion.ContainerMs + 100);
+        ShowMessageAfterClose(result.SnackbarText, result.ActionText, result.ActionText is null ? null : () => ShowSkipped(result));
     }
 
     private void ShowSkipped(ListImportResult result)

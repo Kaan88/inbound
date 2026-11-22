@@ -166,6 +166,28 @@ internal sealed partial class DownloadsScreen
         _activity.UpdateBack();
     }
 
+    private readonly HashSet<Guid> _marked = new();
+
+    /// <summary>x10: the card of a download just added is outlined and shows its folder line for about 3 s.</summary>
+    public void MarkNew(JobRow row)
+    {
+        if (_disposed) return;
+        _marked.Add(row.Id);
+        NotifyRow(row);
+        _recycler.PostDelayed(() =>
+        {
+            if (_disposed) return;
+            _marked.Remove(row.Id);
+            NotifyRow(row);
+        }, 3000);
+    }
+
+    private void NotifyRow(JobRow row)
+    {
+        var i = _list.Visible.IndexOf(row);
+        if (i >= 0) _adapter.NotifyItemChanged(i + _adapter.TorBoxRows);
+    }
+
     /// <summary>The card of a row, if it is on screen, for the container transform back from Details.</summary>
     public View? CardOf(JobRow row)
     {
@@ -410,7 +432,7 @@ internal sealed partial class DownloadsScreen
             case RowAction.RefreshLink: _activity.ShowRefreshLink(row); break;
             case RowAction.StopSeeding: StopSeeding(row); break;
             case RowAction.ShowInFolder when _activity.Capabilities.CanShowInFolder:
-                if (!Outside.ShowDownloadFolder(_activity)) _activity.ShowMessage("No app on this phone can show the folder.");
+                _activity.ShowRowFolder(row);
                 break;
         }
     }
@@ -596,6 +618,8 @@ internal sealed partial class DownloadsScreen
         private readonly LinearProgressIndicator _bar;
         private readonly ImageView _icon;
         private readonly View _tile;
+        private readonly View _folderLine;
+        private readonly TextView _folderText;
         private readonly ImageButton _action;
         private readonly Google.Android.Material.Button.MaterialButton _archiveAction;
         private ArchiveAction _archiveActionKind;
@@ -611,6 +635,8 @@ internal sealed partial class DownloadsScreen
             _bar = v.FindViewById<LinearProgressIndicator>(Resource.Id.bar)!;
             _icon = v.FindViewById<ImageView>(Resource.Id.icon)!;
             _tile = v.FindViewById<View>(Resource.Id.tile)!;
+            _folderLine = v.FindViewById<View>(Resource.Id.folder_line)!;
+            _folderText = v.FindViewById<TextView>(Resource.Id.folder_text)!;
             _action = v.FindViewById<ImageButton>(Resource.Id.action)!;
             v.Click += (_, _) =>
             {
@@ -725,7 +751,16 @@ internal sealed partial class DownloadsScreen
             }
 
             Card.Selected = selected;
-            Card.ContentDescription = row.Name + ". " + subtitle;
+            var marked = _s._marked.Contains(row.Id) && !selected;
+            card.StrokeWidth = marked ? Motion.Dp(ctx, 2) : 0;
+            if (marked) card.StrokeColor = Motion.Attr(ctx, Resource.Attribute.colorPrimary);
+            _folderLine.Visibility = marked ? ViewStates.Visible : ViewStates.Gone;
+            if (marked)
+            {
+                var folder = _s._activity.Capabilities.IsRemote ? row.Job.DestinationDirectory : MainActivity.PhoneFolderOf(row.Job.DestinationDirectory);
+                _folderText.Text = folder ?? DetailsInfo.FolderName(row.Job.DestinationDirectory);
+            }
+            Card.ContentDescription = row.Name + ". " + subtitle + (marked ? ". Saving to " + _folderText.Text : "");
             BindAction(row, ctx, info);
 
             if (info is not null)
