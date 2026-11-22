@@ -1041,7 +1041,6 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
     /// </summary>
     private void ForgetListingsAfterUploads(SiteTransfersDto change)
     {
-        List<string>? stale = null;
         lock (_listings)
         {
             foreach (var transfer in change.Transfers)
@@ -1050,7 +1049,15 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
                 var seen = _uploadFilesDone.GetValueOrDefault(transfer.Id);
                 if (transfer.FilesDone == seen) continue;
                 _uploadFilesDone[transfer.Id] = transfer.FilesDone;
-                (stale ??= []).Add(transfer.SiteId);
+                // A listing being read now may predate the file: it isn't kept (held ones elsewhere stay).
+                _generations[transfer.SiteId] = _generations.GetValueOrDefault(transfer.SiteId) + 1;
+                // Only the upload's folder, what is inside it, and the folders above it (whose counts change) are
+                // read again; paging elsewhere on the site goes on (Fable follow-up to F3).
+                if (!_listings.TryGetValue(transfer.SiteId, out var held)) continue;
+                var target = SitePaths.Normalize(transfer.RemoteFolder);
+                if (target is null) { _listings.Remove(transfer.SiteId); continue; }
+                held.RemoveAll(listing => Related(listing.Path, target));
+                if (held.Count == 0) _listings.Remove(transfer.SiteId);
             }
             if (_uploadFilesDone.Count > 64)
             {
@@ -1058,7 +1065,10 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
                 foreach (var id in _uploadFilesDone.Keys.Where(id => !present.Contains(id)).ToList()) _uploadFilesDone.Remove(id);
             }
         }
-        foreach (var siteId in stale?.Distinct(StringComparer.Ordinal) ?? []) ForgetListings(siteId);
+
+        static bool Related(string listed, string target) => Under(listed, target) || Under(target, listed);
+        static bool Under(string path, string folder) => path == folder || folder.Length == 0 || folder == "/" ||
+            path.StartsWith(folder.TrimEnd('/') + "/", StringComparison.Ordinal);
     }
 
     private void ForgetListings(string siteId)

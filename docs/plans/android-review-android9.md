@@ -106,6 +106,22 @@ listing it.
 - Earlier A4 (battery-saver-held queue wakes every 15 min): not changed. Dropping the retry could leave a queue
   waiting until the app is opened, since nothing wakes a dead process when saver turns off.
 
-**Still open:** A9-11 (a chooser result after the activity is recreated is dropped), the 3 s `PeriodicTimer` in
-`RemoteFilesScreen.cs:480`, earlier A3, A5-A7, S4, S5, S7, S8-S10, T1-T8 and P6/M4. The fixes go back to the same two
+**Fable's check of the fixes (same two agents, 2026-11-22, at `82c551c3`):** all fixes approved; the Android agent
+"approved for release from the Android side" and accepted the four decisions, A9-15 on condition that the owner says
+yes or the subtitle "Peers never use mobile data" is reworded (it is approved mockup text, so it goes to the owner).
+Follow-ups fixed in the next commit:
+- A paired PC refuses turning a set's delete on (F2), so the password sheet shows the delete box there only when the
+  set already deletes, and sends the choice only when it changed.
+- Add torrent: no second tick chain when the app comes back while a tick is inside its poll.
+- F3 narrowed: a finished upload file drops only the held listings of its folder, the folders inside it and the
+  folders above it, so paging elsewhere on the site goes on; a listing being read meanwhile isn't kept.
+- A9-11: which chooser is open is kept across a recreate; a list file then opens the review page, a torrent file
+  asks to be chosen again.
+- Remote Files' 3 s transfer look stops while the app is hidden.
+
+Accepted as they are (Fable's notes): F6 when the worker stop exceeds `SeedStopWait` (rare, Android only); S6's
+"left this queue" check runs only for the waiter at the head of the limiter's gate; F7 for a `FilePath` target (a
+path that isn't an archive leaves the password saved); a folder-limited browser session can remove saved passwords.
+
+**Still open:** earlier A3, A5-A7, S4, S5, S7, S8-S10, T1-T8 and P6/M4. The fixes go back to the same two
 Fable agents for approval.

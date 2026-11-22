@@ -46,6 +46,8 @@ public sealed partial class MainActivity : AppCompatActivity
     private TorrentDetailsScreen? _torrentDetails;
     private ActivityResultLauncher? _torrentPicker;
     private Action<Android.Net.Uri?>? _torrentPicked;
+    // Which chooser is open ("torrent" or "list"), kept across a recreate: the callback above is not (Fable A9-11).
+    private string? _pickKind;
     private PrefsStore? _prefs;
     private bool _onSettings;
     private bool _onQueues;
@@ -59,6 +61,7 @@ public sealed partial class MainActivity : AppCompatActivity
     protected override void OnCreate(Bundle? savedInstanceState)
     {
         base.OnCreate(savedInstanceState);
+        _pickKind = savedInstanceState?.GetString("pick_kind");
         // The .torrent chooser of Add torrent: registered now, before the activity starts, as the result API requires.
         _torrentPicker = RegisterForActivityResult(new ActivityResultContracts.StartActivityForResult(), new TorrentPickResult(this));
         WindowCompat.SetDecorFitsSystemWindows(Window!, false); // edge to edge
@@ -170,6 +173,7 @@ public sealed partial class MainActivity : AppCompatActivity
     protected override void OnSaveInstanceState(Bundle outState)
     {
         var updatePrompt = new Bundle(); _updateScreen?.Save(updatePrompt); outState.PutBundle("app_update_prompt", updatePrompt);
+        if (_pickKind is not null) outState.PutString("pick_kind", _pickKind);
 #if INBOUND_TEST_BUILD
         SaveUpdatePreview(outState);
 #endif
@@ -554,9 +558,9 @@ public sealed partial class MainActivity : AppCompatActivity
         intent.SetType("*/*");
         // application/x-bittorrent, and the octet-stream that many file providers give a .torrent file.
         intent.PutExtra(Intent.ExtraMimeTypes, new[] { "application/x-bittorrent", "application/octet-stream" });
-        _torrentPicked = picked;
+        _torrentPicked = picked; _pickKind = "torrent";
         try { _torrentPicker.Launch(intent); }
-        catch (ActivityNotFoundException) { _torrentPicked = null; return false; }
+        catch (ActivityNotFoundException) { _torrentPicked = null; _pickKind = null; return false; }
         return true;
     }
 
@@ -565,9 +569,14 @@ public sealed partial class MainActivity : AppCompatActivity
         public void OnActivityResult(Java.Lang.Object? result)
         {
             var picked = owner._torrentPicked;
-            owner._torrentPicked = null;
+            var kind = owner._pickKind;
+            owner._torrentPicked = null; owner._pickKind = null;
             if (result is not ActivityResult outcome || outcome.ResultCode != (int)Result.Ok) return;
-            picked?.Invoke(outcome.Data?.Data);
+            if (picked is not null) { picked(outcome.Data?.Data); return; }
+            // Android recreated the app while the chooser was open: the page that asked is gone (Fable A9-11).
+            if (outcome.Data?.Data is not { } uri) return;
+            if (kind == "list") owner.ReadImportList(uri, null);
+            else if (kind == "torrent") owner.ShowMessage("Android restarted Inbound while the file was chosen. Choose the torrent file again.");
         }
     }
 
@@ -724,6 +733,7 @@ public sealed partial class MainActivity : AppCompatActivity
         _torrentDetails?.SetVisible(true);
         _torBox?.SetVisible(true);
         _addTorrent?.SetVisible(true);
+        _remoteFiles?.SetVisible(true);
     }
 
     protected override void OnStop()
@@ -737,6 +747,7 @@ public sealed partial class MainActivity : AppCompatActivity
         _torrentDetails?.SetVisible(false);
         _torBox?.SetVisible(false);
         _addTorrent?.SetVisible(false);
+        _remoteFiles?.SetVisible(false);
         base.OnStop();
     }
 

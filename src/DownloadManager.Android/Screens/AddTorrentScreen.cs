@@ -23,6 +23,8 @@ internal sealed class AddTorrentScreen
     private const int WaitTickMs = 1000;
     private const int HeldTickMs = 5000;
     private bool _visible = true;
+    // A tick is inside its poll: showing the app again must not start a second chain (Fable follow-up to A9-4).
+    private bool _tickInFlight;
     private const int MaxTorrentFileBytes = 8 * 1024 * 1024;
     private readonly MainActivity _activity;
     private readonly DownloadsModel _host;
@@ -226,6 +228,16 @@ internal sealed class AddTorrentScreen
         {
             _waitTick = null;
             if (_disposed || phone.Check != TorrentCheck.Waiting) return;
+            _tickInFlight = true;
+            try { await TickAsync(); }
+            finally { _tickInFlight = false; }
+        });
+        // Only the list this screen already has is read; held for Wi-Fi, nothing changes until the network does.
+        if (_visible) _ui.PostDelayed(_waitTick, phone.HeldFor is null ? WaitTickMs : HeldTickMs);
+        else _waitTick = null;
+
+        async Task TickAsync()
+        {
             // The list learns of the new job from the Host's own event; for a few seconds a job not in it yet is not a job gone.
             var job = _host.JobOf(id);
             var absent = job is null ? missing + 1 : 0;
@@ -239,10 +251,7 @@ internal sealed class AddTorrentScreen
             if (_disposed) return;
             if (changed) Render();
             if (phone.Check == TorrentCheck.Waiting) WaitForFileList(absent);
-        });
-        // Only the list this screen already has is read; held for Wi-Fi, nothing changes until the network does.
-        if (_visible) _ui.PostDelayed(_waitTick, phone.HeldFor is null ? WaitTickMs : HeldTickMs);
-        else _waitTick = null;
+        }
     }
 
     /// <summary>The app went to the background (false) or came back (true): no ticks while nothing is shown (Fable A9-4).</summary>
@@ -251,7 +260,7 @@ internal sealed class AddTorrentScreen
         if (_disposed || _visible == visible) return;
         _visible = visible;
         if (!visible) { if (_waitTick is not null) { _ui.RemoveCallbacks(_waitTick); _waitTick = null; } }
-        else if (_waitTick is null) WaitForFileList();
+        else if (_waitTick is null && !_tickInFlight) WaitForFileList();
     }
 
     private Task RemoveStraysAsync()

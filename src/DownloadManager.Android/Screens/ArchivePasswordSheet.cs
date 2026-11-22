@@ -57,11 +57,11 @@ internal static class ArchivePasswordSheet
         var extras = activity.HasArchiveSavedPasswords;
         var save = new MaterialCheckBox(activity) { Text = "Save it for other archives", Checked = true };
         var delete = new MaterialCheckBox(activity) { Text = "Delete the archive after extracting", Checked = set.DeleteArchives };
-        if (extras)
-        {
-            root.AddView(save, new LinearLayout.LayoutParams(-1, -2) { TopMargin = dp(8) });
-            root.AddView(delete, new LinearLayout.LayoutParams(-1, -2));
-        }
+        // A paired PC lets another device turn deleting off but not on (only in the app on that PC): the box is shown there
+        // only when the set already deletes (Fable follow-up to F2).
+        var offerDelete = extras && (!activity.Capabilities.IsRemote || set.DeleteArchives);
+        if (extras) root.AddView(save, new LinearLayout.LayoutParams(-1, -2) { TopMargin = dp(8) });
+        if (offerDelete) root.AddView(delete, new LinearLayout.LayoutParams(-1, -2));
 
         if (!string.IsNullOrWhiteSpace(set.Destination))
         {
@@ -106,7 +106,8 @@ internal static class ArchivePasswordSheet
             // The text leaves the field now: only the request holds it, and nothing is logged.
             input.Text = "";
             var saveForOthers = extras && save.Checked;
-            bool? deleteArchives = extras ? delete.Checked : null;
+            // Only a change is sent: the set keeps its own choice otherwise.
+            bool? deleteArchives = offerDelete && delete.Checked != set.DeleteArchives ? delete.Checked : null;
             ArchiveUi.Run(activity, () => client.SetPasswordAsync(set.Id, password, saveForOthers, deleteArchives), result =>
             {
                 if (result.Ok) { dialog.Dismiss(); applied(result.Set); }

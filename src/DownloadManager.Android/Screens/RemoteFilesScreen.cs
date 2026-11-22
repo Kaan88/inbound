@@ -96,7 +96,27 @@ internal sealed partial class RemoteFilesScreen : IDisposable
         if (_closed || _started) return;
         _started = true;
         _ = LoadLocationsAsync();
-        _ = ObserveLocationTransfersAsync(_life.Token);
+        StartObserving();
+    }
+
+    // The 3 s look at location transfers, stopped while the app is hidden so it wakes nothing (Fable review, 2026-11-22).
+    private CancellationTokenSource? _observing;
+    private bool _appVisible = true;
+
+    private void StartObserving()
+    {
+        if (_closed || !_appVisible || _observing is not null) return;
+        _observing = CancellationTokenSource.CreateLinkedTokenSource(_life.Token);
+        _ = ObserveLocationTransfersAsync(_observing.Token);
+    }
+
+    /// <summary>The app went to the background (false) or came back (true).</summary>
+    public void SetVisible(bool visible)
+    {
+        if (_closed || _appVisible == visible) return;
+        _appVisible = visible;
+        if (visible) { if (_started) StartObserving(); }
+        else if (_observing is { } observing) { _observing = null; observing.Cancel(); observing.Dispose(); }
     }
 
     /// <summary>Returns true when Back was consumed within the screen.</summary>

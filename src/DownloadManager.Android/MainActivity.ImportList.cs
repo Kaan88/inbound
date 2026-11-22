@@ -39,9 +39,9 @@ public sealed partial class MainActivity
         intent.AddCategory(Intent.CategoryOpenable);
         intent.SetType("*/*");
         // The same launcher and result as the .torrent chooser: only one chooser is ever open.
-        _torrentPicked = picked;
+        _torrentPicked = picked; _pickKind = "list";
         try { _torrentPicker.Launch(intent); }
-        catch (ActivityNotFoundException) { _torrentPicked = null; return false; }
+        catch (ActivityNotFoundException) { _torrentPicked = null; _pickKind = null; return false; }
         return true;
     }
 
