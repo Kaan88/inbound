@@ -614,6 +614,8 @@ public sealed partial class MainActivity : AppCompatActivity
         _details = null;
         _newDownload?.Dispose();
         _newDownload = null;
+        _importList?.Dispose();
+        _importList = null;
         _addTorrent?.Dispose();
         _addTorrent = null;
         _torBox?.Dispose();

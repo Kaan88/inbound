@@ -97,6 +97,38 @@ public sealed class TorrentClient
         RequestAsync<TorrentActionResult>(IpcMessage.Create(TorrentMessageTypes.Watch, new TorrentWatchRequest { On = on, LeaseSeconds = WatchLeaseSeconds }),
             TorrentMessageTypes.ActionResult, cancellationToken);
 
+    /// <summary>The torrents of an imported list, in as many requests as the frame size needs. A Host that doesn't know the request skips them all with its words.</summary>
+    public async Task<TorrentImportResult> ImportAsync(IReadOnlyList<JobListEntry> entries, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(entries);
+        var total = new TorrentImportResult { Ok = true };
+        var sent = 0;
+        foreach (var chunk in TorrentListPaging.Chunk(entries))
+        {
+            TorrentImportResult part;
+            try
+            {
+                part = await RequestAsync<TorrentImportResult>(IpcMessage.Create(TorrentMessageTypes.Import, new TorrentImportRequest { Entries = chunk }),
+                    TorrentMessageTypes.ImportResult, cancellationToken).ConfigureAwait(false);
+            }
+            catch (InvalidOperationException ex) when (sent == 0)
+            {
+                return new TorrentImportResult { Ok = true, Skipped = entries.Count, SkipReason = ex.Message };
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or InvalidDataException)
+            {
+                total.Failed += entries.Count - sent;
+                total.FirstError ??= ex.Message;
+                break;
+            }
+
+            TorrentListPaging.AddTo(total, part);
+            sent += chunk.Count;
+        }
+
+        return total;
+    }
+
     private async Task<T> RequestAsync<T>(IpcMessage request, string expectedType, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();

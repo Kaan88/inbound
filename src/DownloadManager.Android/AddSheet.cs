@@ -47,7 +47,8 @@ public sealed class AddSheet : BottomSheetDialogFragment
             Activity is MainActivity host && host.HasRemoteFilesSource ? () => { Dismiss(); host.OpenRemoteFilesSource(); } : null);
         Source(Resource.Drawable.ic_flow_bolt, "TorBox", "Send a link or torrent to your TorBox account",
             torBox ? () => { var a = Activity as MainActivity; Dismiss(); a?.OpenTorBox(); } : null);
-        Source(Resource.Drawable.ic_add_source_import, "Import a list", "A list exported from any Inbound");
+        Source(Resource.Drawable.ic_add_source_import, "Import a list", "A list exported from any Inbound",
+            Activity is MainActivity imp && imp.HasImportList ? () => { Dismiss(); imp.StartImportList(); } : null);
         v.FindViewById<View>(Resource.Id.clip_use)!.Click += (_, _) => Go(_link);
         // The clipboard can only be read while this window has the focus (Android 10 and later), so it is read when the focus arrives.
         v.ViewTreeObserver!.WindowFocusChange += (_, e) => { if (e.HasFocus) ReadClipboard(); };
