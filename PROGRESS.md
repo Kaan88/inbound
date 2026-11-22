@@ -60,6 +60,14 @@ it, since this branch does not merge into `main` without the owner's say-so.
   Open: x10b (the Downloads-tab folder page, with the FAB-lifted snackbar and the Torrent/TorBox actions), x32 pane
   messages, the sign-in/trust action in place of Retry on a transfer that needs it, y1-y3 on Android; then captures
   side by side with the mockups, the S24 on real data, Fable, release.
+- Fable final review of the x/y work: not approved at first (M1 paired-Host "Sign in again" never retried, M2 the ring
+  spinner animated while hidden, nine lows, four mockup lows). All fixed (`41ef14a8`, `2410c669`: secrets dropped when a
+  form is left or kept for a resubmit, Show in folder closing Details first, crumb text as drawn, no gap in progress
+  tracks, y2 note hidden and passphrase focused). Fable re-review: **"APPROVED for 0.1.0 code"**; lows left as is: N2 (a
+  second "Sign in again" during a paired token submit replaces the first retry), N3 (x2 copy icon size), N4 (a page opened
+  during a close animation keeps the follow-up until the next close). x1, x2, y2, x10b recaptured. Still open: the S24
+  comparison on real data for the x/y screens, the signed build and publishing; three uncommitted worker edits
+  (TransfersEmpty layout, RemoteTransferText reason, a fixture time) wait for the owner.
 - Owner, 2026-11-22: "have an agent look at existing extension adaptability to mobile edge for capturing links, or other
   solutions. non critical or required for release." Research done (sources only, nothing tried on a device):
   - Edge for Android runs extensions only from Microsoft's allowlist (store listing, mobile value, QA test cases, a
