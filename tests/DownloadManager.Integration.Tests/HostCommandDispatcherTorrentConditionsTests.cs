@@ -130,9 +130,13 @@ public sealed partial class HostCommandDispatcherTests
         await Task.Delay(200);
         lock (_torrentWorkers) Assert.DoesNotContain(_torrentWorkers, w => w.Torrents.Count > 0);
 
-        await service.SetNetworkCellularAsync(false);
+        Assert.True(service.TorrentsWaitingForNetwork);
+
+        // The phone sends both facts in one report (audit A9-15-1).
+        await service.SetNetworkAsync(metered: false, mobileData: false);
         var running = await UntilAsync(() => service.GetSnapshot().Jobs.FirstOrDefault(j => j.Id == job.Id && j.State is "connecting" or "downloading"));
         Assert.Null(running.Torrent!.WaitingFor);
+        Assert.False(service.TorrentsWaitingForNetwork);
 
         await service.SetNetworkCellularAsync(true);
         var back = await UntilAsync(() => service.GetSnapshot().Jobs.FirstOrDefault(j => j.Id == job.Id && j.State == "queued" && j.Torrent!.WaitingFor is not null));

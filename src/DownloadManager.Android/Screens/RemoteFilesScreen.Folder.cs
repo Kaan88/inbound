@@ -3,6 +3,7 @@ using Android.Graphics.Drawables;
 using Android.Views;
 using Android.Widget;
 using AndroidX.RecyclerView.Widget;
+using AndroidX.SwipeRefreshLayout.Widget;
 using DownloadManager.Contracts;
 using DownloadManager.Mobile;
 using Google.Android.Material.Button;
@@ -17,6 +18,8 @@ internal sealed partial class RemoteFilesScreen
 {
     private LinearLayout? _folderHeader, _folderFooter, _folderMessage;
     private RecyclerView? _folderList;
+    // Pull to refresh around the rows (the spec's interaction list): reloads the active pane's folder.
+    private SwipeRefreshLayout? _folderRefresh;
     private FolderAdapter? _folderAdapter;
     private LinearProgressIndicator? _folderProgress;
     private string? _listIdentity;
@@ -47,7 +50,17 @@ internal sealed partial class RemoteFilesScreen
         _folderList.SetAdapter(_folderAdapter);
         _folderList.SetClipToPadding(false);
         _folderList.SetPadding(0, Dp(2), 0, Dp(16));
-        body.AddView(_folderList, new FrameLayout.LayoutParams(-1, -1));
+        _folderRefresh = new SwipeRefreshLayout(_activity);
+        _folderRefresh.SetColorSchemeColors(Attr(Resource.Attribute.colorPrimary));
+        _folderRefresh.SetProgressBackgroundColorSchemeColor(Attr(Resource.Attribute.colorSurfaceContainer));
+        _folderRefresh.Refresh += (_, _) =>
+        {
+            var pane = Active;
+            if (pane.Loading || !SameHost()) { _folderRefresh.Refreshing = pane.Loading; return; }
+            _ = BrowsePaneAsync(pane, pane.Path, true);
+        };
+        _folderRefresh.AddView(_folderList, new ViewGroup.LayoutParams(-1, -1));
+        body.AddView(_folderRefresh, new FrameLayout.LayoutParams(-1, -1));
         _folderMessage = new LinearLayout(_activity) { Orientation = Orientation.Vertical, Visibility = ViewStates.Gone };
         _folderMessage.SetPadding(Dp(24), Dp(16), Dp(24), 0);
         body.AddView(_folderMessage, new FrameLayout.LayoutParams(-1, -2));
@@ -68,6 +81,7 @@ internal sealed partial class RemoteFilesScreen
         if (Android.OS.Looper.MyLooper() != Android.OS.Looper.MainLooper) { _activity.RunOnUiThread(UpdateFolderUi); return; }
         if (_closed || !_inFolder || _showTransfers || _adding || _folderHeader?.Parent is null) return;
         var pane = Active;
+        if (_folderRefresh is not null && !pane.Loading && _folderRefresh.Refreshing) _folderRefresh.Refreshing = false;
         BuildHeader(pane);
         BuildRows(pane);
         BuildFooter(pane);

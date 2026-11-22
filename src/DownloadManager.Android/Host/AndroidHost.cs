@@ -126,8 +126,9 @@ internal sealed class AndroidHost : IAsyncDisposable
     /// <param name="sleep">Held by the Runtime while downloads run and the setting is on (wake lock, Wi-Fi lock).</param>
     /// <param name="lastRunStoppedByUser">The previous run was stopped by the user: downloads that were running start Paused.</param>
     /// <param name="networkMetered">The network as it is now, reported to the Runtime before InitializeAsync.</param>
+    /// <param name="networkMobileData">Whether that network is mobile data (the torrent rules), reported with it.</param>
     public static async Task<AndroidHost> StartAsync(string stateRoot, string defaultDownloadFolder, ISleepPrevention sleep,
-        bool lastRunStoppedByUser, bool networkMetered, Action<string> say, CancellationToken ct)
+        bool lastRunStoppedByUser, bool networkMetered, bool networkMobileData, Action<string> say, CancellationToken ct)
     {
         var paths = new StoragePaths(stateRoot);
         paths.EnsureCreated();
@@ -214,8 +215,7 @@ internal sealed class AndroidHost : IAsyncDisposable
         {
             // Before InitializeAsync: only stored there, and the first Schedule after reconcile is already held.
             Background.InboundBackground.RegisterStartingService(service);
-            await service.SetNetworkMeteredAsync(networkMetered, ct).ConfigureAwait(false);
-            await service.SetNetworkCellularAsync(Background.NetworkMonitor.CurrentMobileData, ct).ConfigureAwait(false);
+            await service.SetNetworkAsync(networkMetered, networkMobileData, ct).ConfigureAwait(false);
             var power = Background.QueuePowerMonitor.Read(Android.App.Application.Context);
             await service.SetQueuePowerStateAsync(power.Charging, power.BatterySaver, ct).ConfigureAwait(false);
             await service.InitializeAsync(lastRunStoppedByUser, ct).ConfigureAwait(false);

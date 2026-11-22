@@ -353,6 +353,11 @@ public sealed class SiteTransfers : IAsyncDisposable
         }
 
         if (items.Count == 0) return Fail("Nothing was chosen.");
+        // Keep both into the folder a chosen folder is in would number every file inside that folder (a/f1 (2), ...)
+        // rather than make a second folder (audit RF-3, 2026-11-22), so only files may be copied there.
+        if (destination is not null && destination.Id == site.Id && destinationFolder == remoteFolder &&
+            items.Any(i => i.Folder || i.Path.Contains('/', StringComparison.Ordinal)))
+            return Fail("A folder can't be copied into the folder it is in; choose another folder to copy to.");
         if (items.Count > MaxItems) return Fail($"That is {items.Count:N0} files; a transfer can hold at most {MaxItems:N0}.");
 
         if (request.Direction == SiteTransferDirections.Download)

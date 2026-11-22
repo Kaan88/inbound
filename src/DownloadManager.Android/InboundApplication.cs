@@ -65,17 +65,17 @@ public sealed class InboundApplication : Application
             return _host ??= Task.Run(async () =>
             {
                 // The network is read here and reported before the Host's InitializeAsync (its first Schedule is already held).
-                var metered = NetworkMonitor.Current;
+                var network = NetworkMonitor.CurrentReport;
                 // Both are asked (no short-circuit): a tripped crash guard posts its notice even when the last run was also a user stop.
                 var guardPaused = CrashGuardStore.HostStartsPaused(app);
                 var userStopped = RunTracker.LastRunStoppedByUser(app);
                 var host = await AndroidHost.StartAsync(root, AndroidHost.SharedDownloadFolder, new AndroidSleepPrevention(app),
-                    userStopped || guardPaused, metered, m => Android.Util.Log.Info(Tag, m), CancellationToken.None).ConfigureAwait(false);
+                    userStopped || guardPaused, network.Metered, network.MobileData, m => Android.Util.Log.Info(Tag, m), CancellationToken.None).ConfigureAwait(false);
                 // The Host used the "stopped by the user" decision in its start: the older runs are explained.
                 RunTracker.HostConsumed();
                 // The crash guard's Resume restarts what this start paused (not downloads the user had paused before).
                 if (guardPaused) ResumeSet.Add(app, host.Service.PausedAtStart, "crash guard start");
-                NetworkMonitor.OnHostStarted(host, metered);
+                NetworkMonitor.OnHostStarted(host, network);
                 QueuePowerMonitor.OnHostStarted(host);
                 InboundBackground.OnHostStarted(app, host);
                 QueueWorkScheduler.OnHostStarted(app, host);

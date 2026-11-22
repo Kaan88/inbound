@@ -95,6 +95,35 @@ public sealed class BrowserRequestsTests
         requests.Observe(File, "GET", true, Page); requests.CommitPage("https://example.test/next");
         Assert.Null(requests.Take("https://cdn.example.test/file.zip"));
     }
+    [Fact] public void A_stale_main_frame_request_is_neither_matched_nor_blocks_a_newer_one()
+    {
+        long now = 1_000;
+        var requests = new BrowserRequests(() => now); requests.CommitPage(Page);
+        requests.Observe("https://example.test/stale.zip", "GET", true, Page);
+        now += BrowserRequests.RedirectWindowMs + 1;
+        Assert.Null(requests.Take("https://cdn.example.test/late.zip"));
+        requests.Observe(File, "GET", true, Page);
+        var observation = requests.Take("https://cdn.example.test/file.zip");
+        Assert.NotNull(observation); Assert.True(observation.Redirected);
+    }
+    [Fact] public void A_refused_redirect_source_is_dropped_so_a_later_one_can_be_traced()
+    {
+        var requests = new BrowserRequests(); requests.CommitPage(Page);
+        requests.Observe(File, "POST", true, Page);
+        Assert.Null(requests.Take("https://cdn.example.test/a.zip"));
+        requests.Observe("https://example.test/b.zip", "GET", true, Page);
+        Assert.NotNull(requests.Take("https://cdn.example.test/b.zip"));
+    }
+    [Fact] public void Nothing_is_traced_after_the_table_overflowed_until_the_next_page()
+    {
+        var requests = new BrowserRequests(); requests.CommitPage(Page);
+        for (var i = 0; i < 128; i++) requests.Observe($"https://example.test/r{i}.css", "GET", false, Page);
+        requests.Observe(File, "GET", true, Page);
+        Assert.Null(requests.Take("https://cdn.example.test/file.zip"));
+        requests.CommitPage(Page);
+        requests.Observe(File, "GET", true, Page);
+        Assert.NotNull(requests.Take("https://cdn.example.test/file.zip"));
+    }
     [Theory]
     [InlineData(null)] [InlineData("{")] [InlineData("42")] [InlineData("{}")]
     [InlineData("\"{bad\"")] [InlineData("\"{}\"")]

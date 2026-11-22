@@ -380,6 +380,11 @@ internal sealed partial class RemoteFilesScreen
         if (!SameHost() || _confirm is not null || items.Count == 0 || items.Any(item => !SafeName(item.Name)) || !CanDeleteSelection(pane)) return;
         var names = items.Select(item => item.Name).Distinct(StringComparer.Ordinal).ToArray();
         string place = PaneName(pane) + (pane.IsPhone ? "" : " · " + pane.Path);
+        // The folder the question is about, taken before any wait (audit RF-2): the pane may move meanwhile, and the delete
+        // must go to this folder or nowhere. ViewEpoch, not Generation: a quiet refresh of the same folder keeps it.
+        string? siteId = pane.Site?.Id, path = pane.Path;
+        int epoch = pane.ViewEpoch;
+        bool SameFolder() => pane.Site?.Id == siteId && pane.Path == path && pane.ViewEpoch == epoch;
         string detail = "";
         if (!pane.IsPhone && items.Any(item => item.IsFolder))
         {
@@ -389,19 +394,23 @@ internal sealed partial class RemoteFilesScreen
                 {
                     Id = pane.Site!.Id, Path = pane.Path, Items = names.Select(n => new SiteChangeItemDto { Name = n, IsFolder = items.First(i => i.Name == n).IsFolder }).ToList()
                 }, _life.Token);
-                if (!SameHost() || _confirm is not null) return;
+                if (!SameHost() || _confirm is not null || !SameFolder()) return;
                 if (count.Ok) detail = $"\n\nThat is {count.Files:N0} {(count.Files == 1 ? "file" : "files")}" + (count.SizeUnknown ? "." : " (" + Fmt.Bytes(count.Bytes) + ").");
             }
             catch (OperationCanceledException) when (_life.IsCancellationRequested) { return; }
             catch (Exception) { /* The question is still asked, without the counts. */ }
         }
-        int generation = pane.Generation;
+        if (!SameFolder()) return;
         _confirm = new MaterialAlertDialogBuilder(_activity)
             .SetTitle(names.Length == 1 ? $"Delete {names[0]}?" : $"Delete {names.Length} items?")!
             .SetMessage($"Permanently delete the selected {(names.Length == 1 ? "item" : "items")} from {place}?{detail}\n\nThis cannot be undone."
                 + (pane.IsPhone ? "" : "\nCopies on this phone are not affected."))!
             .SetNegativeButton("Cancel", (Android.Content.IDialogInterfaceOnClickListener?)null)!
-            .SetPositiveButton("Delete", (_, _) => { if (generation == pane.Generation && CanDeleteSelection(pane)) _ = DeleteItemsAsync(pane, items); })!
+            .SetPositiveButton("Delete", (_, _) =>
+            {
+                if (SameFolder() && CanDeleteSelection(pane)) _ = DeleteItemsAsync(pane, items);
+                else Toast.MakeText(_activity, "The folder changed, so nothing was deleted.", ToastLength.Long)?.Show();
+            })!
             .Create();
         _confirm.DismissEvent += (_, _) => _confirm = null;
         _confirm.Show();

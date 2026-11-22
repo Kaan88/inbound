@@ -20,10 +20,8 @@ internal static class NetworkMonitor
     private static Context? _app;
     private static bool _metered;
     private static bool _cellular;
-    // One mobile-data report at a time, each reading the newest value, so the Host ends on the newest.
-    private static readonly SemaphoreSlim CellularGate = new(1, 1);
     private static bool _pumping;
-    private static bool? _sent;
+    private static NetworkReport? _sent;
     private static AndroidHost? _host;
 #if INBOUND_TEST_BUILD
     private static bool? _override;
@@ -44,6 +42,24 @@ internal static class NetworkMonitor
         }
     }
 
+    /// <summary>
+    /// What the Host is told, both facts read together: metered (the Wi-Fi-only rules) and mobile data (the torrent rules hold on it
+    /// even unmetered, review A9-15). One report carries both so the Host never schedules between them (audit A9-15-1).
+    /// </summary>
+    public static NetworkReport CurrentReport
+    {
+        get
+        {
+            lock (Gate)
+            {
+#if INBOUND_TEST_BUILD
+                if (_override is { } forced) return new(forced, _cellular);
+#endif
+                return new(_metered, _cellular);
+            }
+        }
+    }
+
     /// <summary>Application.OnCreate: read the active network now (synchronously), then follow it.</summary>
     public static void Init(Context app)
     {
@@ -56,7 +72,7 @@ internal static class NetworkMonitor
             var active = cm.ActiveNetwork;
             if (active is not null && cm.GetNetworkCapabilities(active) is { } caps) lock (Gate) { _metered = IsMetered(caps); _cellular = IsMobileData(caps); }
             cm.RegisterDefaultNetworkCallback(new Callback());
-            Log.Info(InboundApplication.Tag, "network: metered=" + _metered);
+            Log.Info(InboundApplication.Tag, "network: " + CurrentReport);
         }
         catch (System.Exception ex) { Log.Warn(InboundApplication.Tag, "network monitor: " + ex.Message); }
     }
@@ -68,47 +84,21 @@ internal static class NetworkMonitor
     private static bool IsMobileData(NetworkCapabilities caps) =>
         MeteredPolicy.IsMobileData(caps.HasTransport(TransportType.Cellular), caps.HasTransport(TransportType.Wifi), caps.HasTransport(TransportType.Ethernet));
 
-    /// <summary>Whether the network now is mobile data (the torrent rules, review A9-15); handed to the Host before its InitializeAsync.</summary>
-    public static bool CurrentMobileData { get { lock (Gate) return _cellular; } }
-
-    private static void DeliverMobileData()
-    {
-        _ = Task.Run(async () =>
-        {
-            await CellularGate.WaitAsync().ConfigureAwait(false);
-            try
-            {
-                AndroidHost? host;
-                bool cellular;
-                lock (Gate) { host = _host; cellular = _cellular; }
-                if (host is not null && await host.Service.SetNetworkCellularAsync(cellular).ConfigureAwait(false))
-                    Log.Info(InboundApplication.Tag, "network reported to the Host: mobile data=" + cellular);
-            }
-            catch (System.Exception ex) { Log.Error(InboundApplication.Tag, "mobile data report: " + ex.Message); }
-            finally { CellularGate.Release(); }
-        });
-    }
-
     private sealed class Callback : ConnectivityManager.NetworkCallback
     {
         // Capabilities arrive after OnAvailable and on every change (Wi-Fi to mobile data included, as the default network switches).
         public override void OnCapabilitiesChanged(Network network, NetworkCapabilities networkCapabilities)
         {
-            bool metered, meteredChanged, cellularChanged;
+            NetworkReport now;
             lock (Gate)
             {
-                metered = IsMetered(networkCapabilities);
-                var cellular = IsMobileData(networkCapabilities);
-                meteredChanged = _metered != metered;
-                cellularChanged = _cellular != cellular;
-                _metered = metered;
-                _cellular = cellular;
+                now = new(IsMetered(networkCapabilities), IsMobileData(networkCapabilities));
+                if (_metered == now.Metered && _cellular == now.MobileData) return;
+                _metered = now.Metered;
+                _cellular = now.MobileData;
             }
 
-            if (cellularChanged) DeliverMobileData();
-            if (!meteredChanged) return;
-
-            Log.Info(InboundApplication.Tag, "network changed: metered=" + metered);
+            Log.Info(InboundApplication.Tag, "network changed: " + now);
             Deliver();
         }
 
@@ -120,7 +110,7 @@ internal static class NetworkMonitor
     /// The Host has started with <paramref name="reportedAtStart"/> as its first report: from now on changes reach it. A change that came
     /// while it started is delivered here.
     /// </summary>
-    public static void OnHostStarted(AndroidHost host, bool reportedAtStart)
+    public static void OnHostStarted(AndroidHost host, NetworkReport reportedAtStart)
     {
         lock (Gate)
         {
@@ -131,8 +121,6 @@ internal static class NetworkMonitor
 
         host.Service.MeteredWaitChanged += OnWaitChanged;
         Deliver();
-        // A change between the report before InitializeAsync and now (the Host ignores an unchanged value).
-        DeliverMobileData();
     }
 
 #if INBOUND_TEST_BUILD
@@ -148,12 +136,14 @@ internal static class NetworkMonitor
     private static bool _deferred;
 
     /// <summary>
-    /// Below API 34 a "not metered" report is held back while the Host holds downloads for Wi-Fi and nothing could keep them alive: the app is
-    /// not visible and no foreground service runs. The service can only start while the app is visible (review of step 2: the Host resumed
-    /// the transfers in the background with no service). API 34+ has the hold job, which the system starts on such a network.
+    /// Below API 34 a report that would let held work go is held back while nothing could keep it alive: the app is not visible and no
+    /// foreground service runs. The service can only start while the app is visible (review of step 2: the Host resumed the transfers in
+    /// the background with no service). That is "not metered" while downloads wait for Wi-Fi, and "not metered and not mobile data" while
+    /// torrents wait for it (audit A9-15-1). API 34+ has the hold job, which the system starts on such a network.
     /// </summary>
-    private static bool HoldBackNotMetered(AndroidHost host, bool metered, bool visible, bool keepAlive) =>
-        !metered && !OperatingSystem.IsAndroidVersionAtLeast(34) && !visible && !keepAlive && host.Service.WaitingForMeteredNetwork;
+    private static bool HoldBackRelease(AndroidHost host, NetworkReport report, bool visible, bool keepAlive) =>
+        !report.Metered && !OperatingSystem.IsAndroidVersionAtLeast(34) && !visible && !keepAlive &&
+        (host.Service.WaitingForMeteredNetwork || !report.MobileData && host.Service.TorrentsWaitingForNetwork);
 
     /// <summary>The app became visible: a report held back is delivered now (the Host resumes, and the keep-alive can start).</summary>
     public static void AppVisible()
@@ -179,7 +169,7 @@ internal static class NetworkMonitor
                 while (true)
                 {
                     AndroidHost host;
-                    bool metered;
+                    NetworkReport report;
                     bool defer = false, wasDeferred, done = false;
                     // Read before Gate: InboundBackground reads this class under its own lock (lock order).
                     var visible = InboundBackground.Visible;
@@ -188,10 +178,10 @@ internal static class NetworkMonitor
                     {
                         if (_host is null) { _pumping = false; return; }
                         host = _host;
-                        metered = Current;
+                        report = CurrentReport;
                         wasDeferred = _deferred;
-                        if (_sent == metered) { _pumping = false; _deferred = false; done = true; }
-                        else if (HoldBackNotMetered(host, metered, visible, keepAlive))
+                        if (_sent == report) { _pumping = false; _deferred = false; done = true; }
+                        else if (HoldBackRelease(host, report, visible, keepAlive))
                         {
                             // API 31 to 33, app not visible: the Host would resume the held downloads with no foreground service (one can't
                             // start from the background). They stay held; the waiting notification says "Wi-Fi is back · Tap to resume", and
@@ -199,12 +189,12 @@ internal static class NetworkMonitor
                             _pumping = false;
                             _deferred = defer = true;
                         }
-                        else { _sent = metered; _deferred = false; }
+                        else { _sent = report; _deferred = false; }
                     }
 
                     if (defer)
                     {
-                        if (!wasDeferred) Log.Info(InboundApplication.Tag, "network not metered again with the app hidden (API < 34): held until the app is opened");
+                        if (!wasDeferred) Log.Info(InboundApplication.Tag, "network free again with the app hidden (API < 34): held until the app is opened (" + report + ")");
                         InboundBackground.SetWifiBack(true);
                         return;
                     }
@@ -212,8 +202,8 @@ internal static class NetworkMonitor
                     if (wasDeferred) InboundBackground.SetWifiBack(false);
                     if (done) return;
 
-                    await host.Service.SetNetworkMeteredAsync(metered).ConfigureAwait(false);
-                    Log.Info(InboundApplication.Tag, "network reported to the Host: metered=" + metered);
+                    await host.Service.SetNetworkAsync(report.Metered, report.MobileData).ConfigureAwait(false);
+                    Log.Info(InboundApplication.Tag, "network reported to the Host: " + report);
                 }
             }
             catch (System.Exception ex)
@@ -249,4 +239,10 @@ internal static class NetworkMonitor
             catch (System.Exception ex) { Log.Error(InboundApplication.Tag, "metered hold: " + ex.Message); }
         });
     }
+}
+
+/// <summary>The network as the Host is told it: metered, and mobile data (cellular with no Wi-Fi or Ethernet).</summary>
+internal readonly record struct NetworkReport(bool Metered, bool MobileData)
+{
+    public override string ToString() => $"metered={Metered} mobile data={MobileData}";
 }

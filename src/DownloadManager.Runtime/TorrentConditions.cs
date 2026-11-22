@@ -35,7 +35,39 @@ public sealed partial class DownloadManagerService
     private bool TorrentNetworkHoldsLocked() => _settings.TorrentOnlyOnUnmeteredNetwork && TorrentNetworkLimitedLocked();
 
     /// <summary>
-    /// The platform reports whether the active network is mobile data (Android). Report it before initialization, then on
+    /// The platform reports both facts of the network at once (Android): applied under one lock, then one scheduling pass, so nothing
+    /// starts between them (audit A9-15-1). Report it before initialization, then on changes; nothing is saved.
+    /// </summary>
+    public async Task SetNetworkAsync(bool metered, bool mobileData, CancellationToken cancellationToken = default)
+    {
+        lock (_sync)
+        {
+            _networkMetered = metered;
+            if (!metered) _meteredLifted = false;
+            _networkCellular = mobileData;
+            if (!_initialized) return;
+        }
+        await RequeueExcessAsync(cancellationToken).ConfigureAwait(false);
+        SettingsChanged?.Invoke(this, _settings);
+        Schedule();
+    }
+
+    /// <summary>
+    /// Whether torrents are held for the network now: a queued or running torrent under "only on Wi-Fi", or seeding held off its worker.
+    /// The phone holds back a report that would let them go while nothing could keep them alive (API below 34).
+    /// </summary>
+    public bool TorrentsWaitingForNetwork
+    {
+        get
+        {
+            lock (_sync)
+                return TorrentNetworkLimitedLocked() && (_seedHeld.Count > 0 ||
+                    _settings.TorrentOnlyOnUnmeteredNetwork && _jobs.Values.Any(r => r.Job.Torrent is not null && !r.Job.IsTerminal));
+        }
+    }
+
+    /// <summary>
+    /// The platform reports whether the active network is mobile data. Report it before initialization, then on
     /// changes; nothing is saved. Returns false when the state is unchanged.
     /// </summary>
     public async Task<bool> SetNetworkCellularAsync(bool cellular, CancellationToken cancellationToken = default)

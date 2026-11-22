@@ -92,6 +92,8 @@ public sealed partial class SiteTransfersEndToEndTests
         Assert.Contains("into itself", (await Refused(Copy(from, "/pub/docs/deep"))).Message);
         Assert.Contains("into itself", (await Refused(Copy(from, "/pub/docs"))).Message);
         Assert.Contains("the folder the files are in", (await Refused(Copy(from, "/pub", name: "readme.txt"))).Message);
+        // Keep both in the same folder would number each file inside the folder, not copy the folder (audit RF-3).
+        Assert.Contains("can't be copied into the folder it is in", (await Refused(Copy(from, "/pub", SiteTransferConflicts.KeepBoth))).Message);
         Assert.Contains("no longer exists", (await Refused(Copy("0123456789abcdef0123456789abcdef", "/x"))).Message);
         Assert.Contains("no longer exists", (await Refused(Copy("", "/x"))).Message);
 
