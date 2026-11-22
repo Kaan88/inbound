@@ -463,6 +463,7 @@ public sealed partial class MainActivity : AppCompatActivity
 
     private void OnRowsForFinished(object? s, NotifyCollectionChangedEventArgs e)
     {
+        if (e.OldItems is not null) foreach (JobRow r in e.OldItems) RowGone(r);
         if (e.NewItems is null) return;
         foreach (JobRow r in e.NewItems) { WatchForFinish(r); MarkIfExpected(r); }
     }

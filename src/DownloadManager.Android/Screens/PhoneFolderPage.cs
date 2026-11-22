@@ -28,8 +28,8 @@ internal sealed class PhoneFolderPage : IDisposable
 
     private readonly MainActivity _activity;
     private readonly JobRow? _running;
-    private readonly string _file;
-    private readonly string _markFolder;
+    private string _file;
+    private string _markFolder;
     private readonly List<SiteItemDto>? _canned;
     private readonly Action _close;
     private readonly Handler _ui = new(Looper.MainLooper!);
@@ -55,7 +55,7 @@ internal sealed class PhoneFolderPage : IDisposable
     {
         _activity = activity;
         _path = _markFolder = phonePath;
-        _file = file ?? "";
+        _file = file ?? running?.FileName ?? "";
         _running = running is { Group: not RowGroup.Finished and not RowGroup.Failed } ? running : null;
         _close = close;
         _canned = canned;
@@ -77,16 +77,21 @@ internal sealed class PhoneFolderPage : IDisposable
         Root.AddView(_list, new LinearLayout.LayoutParams(-1, 0, 1));
         InsetsListener.Pad(Root, top: true, bottom: false);
 
-        if (file is not null)
+        if (file is not null || running is not null)
         {
-            _mark = file;
-            if (_running is null) _pill = file;
+            _mark = _file;
+            if (_running is null) _pill = _file;
             // The outline fades after about 3 s; the Open pill stays until the person leaves the folder (x9).
             if (_running is null) StartMarkTimer();
         }
         if (_running is not null) _running.PropertyChanged += OnRunningChanged;
         Load(_path);
     }
+
+    /// <summary>The file this page is about: the running download's name as the Host knows it now (it can change), else the one fixed at the end.</summary>
+    private string CurrentFile => Running && _running is { } job ? (job.FileName.Length > 0 ? job.FileName : job.Name) : _file;
+
+    private string _appliedFile = "";
 
     private int Dp(float dp) => Motion.Dp(_activity, dp);
 
@@ -204,20 +209,23 @@ internal sealed class PhoneFolderPage : IDisposable
     {
         if (_disposed || generation != _generation) return;
         var rows = new List<Row>();
-        bool here = _path == _markFolder && _file.Length > 0;
+        string file = CurrentFile;
+        _appliedFile = file;
+        bool here = _path == _markFolder && file.Length > 0;
         var folders = items.Where(i => i.IsFolder).OrderBy(i => i.Name, StringComparer.OrdinalIgnoreCase).ToList();
         var files = items.Where(i => !i.IsFolder).OrderByDescending(i => i.Modified ?? DateTimeOffset.MinValue).ThenBy(i => i.Name, StringComparer.OrdinalIgnoreCase).ToList();
         rows.AddRange(folders.Select(f => new Row(f, false)));
         if (here && Running)
         {
             // The download's own file is not there until it is renamed from its part file: the row stands in with its progress.
-            files.RemoveAll(f => f.Name == _file);
-            rows.Add(new Row(new SiteItemDto { Name = _file, Size = _running!.Job.TotalBytes ?? -1 }, true));
+            // Its part file (<name>.<id>.part) is not shown either: only this row, with the progress.
+            files.RemoveAll(f => f.Name == file || (f.Name.StartsWith(file + ".", StringComparison.Ordinal) && f.Name.EndsWith(".part", StringComparison.Ordinal)));
+            rows.Add(new Row(new SiteItemDto { Name = file, Size = _running!.Job.TotalBytes ?? -1 }, true));
         }
-        else if (here && !Running && _pill == _file && files.All(f => f.Name != _file) && _lastFinished is { } done)
+        else if (here && !Running && _pill == file && files.All(f => f.Name != file) && _lastFinished is { } done && ExistsOnPhone(file))
         {
-            // Just finished and not in the phone's media index yet.
-            files.Insert(0, new SiteItemDto { Name = _file, Size = done.Size, Modified = DateTimeOffset.Now });
+            // Just finished and not in the phone's media index yet; only when the file is really there.
+            files.Insert(0, new SiteItemDto { Name = file, Size = done.Size, Modified = DateTimeOffset.Now });
         }
         rows.AddRange(files.Select(f => new Row(f, false)));
         _rows = rows;
@@ -226,12 +234,32 @@ internal sealed class PhoneFolderPage : IDisposable
         _adapter.NotifyDataSetChanged();
         if (!_scrolled && here)
         {
-            int index = _rows.FindIndex(r => r.Item.Name == _file);
+            int index = _rows.FindIndex(r => r.Item.Name == file);
             if (index >= 0) { _scrolled = true; _list.ScrollToPosition(index); }
         }
     }
 
     private (long Size, string Name)? _lastFinished;
+
+    private bool ExistsOnPhone(string name)
+    {
+        try
+        {
+            var relative = RemoteTransfers.DownloadRelative(_markFolder) ?? "";
+            return SafeRelative(relative) && SafeSegment(name) && File.Exists(System.IO.Path.Combine(AndroidHost.SharedDownloadFolder, relative, name));
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException) { return false; }
+    }
+
+    /// <summary>The row of this page's download was removed (deleted from another place): its progress row goes.</summary>
+    public void OnRowRemoved(JobRow row)
+    {
+        if (_disposed || !ReferenceEquals(row, _running) || _runningDone) return;
+        _running!.PropertyChanged -= OnRunningChanged;
+        _runningDone = true;
+        _mark = _pill = null;
+        Load(_path);
+    }
 
     private void StartMarkTimer()
     {
@@ -246,19 +274,34 @@ internal sealed class PhoneFolderPage : IDisposable
     private void OnRunningChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (_disposed || _running is null) return;
+        if (_running.Group == RowGroup.Failed)
+        {
+            _running.PropertyChanged -= OnRunningChanged;
+            _runningDone = true;
+            _mark = _pill = null;
+            Load(_path);
+            return;
+        }
         if (_running.Group == RowGroup.Finished)
         {
             _running.PropertyChanged -= OnRunningChanged;
+            // The final name and folder (the Host may have renamed it): read before the page lists again.
+            string final = _running.Job.FinalFilePath ?? "";
+            string name = System.IO.Path.GetFileName(final);
+            _file = name.Length > 0 ? name : CurrentFile;
+            if (final.Length > 0 && System.IO.Path.GetDirectoryName(final) is { } directory && MainActivity.PhoneFolderOf(directory) is { } folder)
+                _path = _markFolder = folder;
             _lastFinished = (_running.Job.TotalBytes ?? _running.Job.ReceivedBytes, _file);
             _pill = _mark = _file;
+            _runningDone = true;
             _scrolled = false;
             StartMarkTimer();
-            _runningDone = true;
             Load(_path);
             // The phone's media index may need a moment to list the file.
             _ui.PostDelayed(() => { if (!_disposed) Load(_path); }, 2000);
             return;
         }
+        if (CurrentFile != _appliedFile) { Load(_path); return; } // the Host's name arrived
         int index = _rows.FindIndex(r => r.Running);
         if (index >= 0) _adapter.NotifyItemChanged(index);
     }
@@ -332,9 +375,8 @@ internal sealed class PhoneFolderPage : IDisposable
 
         try
         {
-            string root = AndroidHost.SharedDownloadFolder.TrimEnd('/');
-            string full = System.IO.Path.GetFullPath(System.IO.Path.Combine(root, parent));
-            if ((full == root || full.StartsWith(root + "/", StringComparison.Ordinal)) && Directory.Exists(full))
+            // The same resolved-path check as the Remote Files tab: a link out of the Download folder is not followed.
+            if (RemoteFilesScreen.ExistingPhoneDownloadFolder(parent) is { } full)
                 foreach (var directory in new DirectoryInfo(full).EnumerateDirectories())
                     if (SafeSegment(directory.Name) && (directory.Attributes & FileAttributes.ReparsePoint) == 0)
                     {

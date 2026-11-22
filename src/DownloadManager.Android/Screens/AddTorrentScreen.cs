@@ -525,9 +525,11 @@ internal sealed class AddTorrentScreen
             {
                 _activity.CloseRowPage(Root);
                 // x10: the same Show in folder as a plain download; the folder is the one chosen, else the Host's torrent folder.
-                _activity.ShowAdded("Added to Downloads", _destination ?? phone.Destination ?? _host.DefaultDownloadDirectory);
+                _activity.ShowAdded("Added to Downloads", _destination ?? phone.Destination ?? _host.DefaultDownloadDirectory, afterPage: true);
                 return;
             }
+
+            _activity.ForgetNewRow();
 
             _error.Text = result.Error;
             _error.Visibility = ViewStates.Visible;
@@ -548,8 +550,9 @@ internal sealed class AddTorrentScreen
             if (result.Done)
             {
                 _activity.CloseRowPage(Root);
-                if (hit) _activity.ShowAdded("Added to Downloads from TorBox", _destination ?? _host.DefaultDownloadDirectory);
-                else _activity.ShowMessage("Sent to TorBox. It waits on the TorBox list and starts when it's ready.");
+                // A TorBox file is not a row the page can outline: Show in folder opens the folder alone.
+                if (hit) _activity.ShowAdded("Added to Downloads from TorBox", _destination ?? _host.DefaultDownloadDirectory, afterPage: true, newRow: false);
+                else _activity.ShowMessageAfterClose("Sent to TorBox. It waits on the TorBox list and starts when it's ready.");
                 return;
             }
 

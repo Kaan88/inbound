@@ -250,7 +250,7 @@ internal sealed class TorBoxScreen
     {
         if (_disposed) return;
         _dialog?.Dismiss();
-        _dialog = TorBoxFilesSheet.Show(_activity, _client, row, choose, () => _activity.ShowAdded("Added to Downloads from TorBox", _host.DefaultDownloadDirectory));
+        _dialog = TorBoxFilesSheet.Show(_activity, _client, row, choose, () => _activity.ShowAdded("Added to Downloads from TorBox", _host.DefaultDownloadDirectory, newRow: false));
     }
 
     private void ConfirmDelete(TorBoxRow row, bool fromMenu = false)

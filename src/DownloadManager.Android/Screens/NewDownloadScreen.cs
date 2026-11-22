@@ -508,11 +508,12 @@ internal sealed class NewDownloadScreen
                 // x10: on this phone the snackbar names the folder and offers Show in folder (the folder page over Downloads). The FAB
                 // lifts above it. A paired Host names its own place and has no action: its files are not on this phone.
                 var phoneFolder = _activity.Capabilities.CanOpenFiles && result.Added > 0 ? MainActivity.PhoneFolderOf(saveTo) : null;
+                // The page is still animating away: the message waits so it sits inside Downloads and the FAB lifts.
                 if (result.Added > 0 && _activity.Capabilities.IsRemote)
-                    _activity.ShowMessage(NewDownloadModel.Describe(result) + " · saving on " + _activity.HostName + " in " + saveTo, downloadsFeedback: true);
-                else if (phoneFolder is null) _activity.ShowMessage(NewDownloadModel.Describe(result), downloadsFeedback: true);
-                else _activity.ShowMessage(NewDownloadModel.Describe(result) + " · saving to " + phoneFolder, "Show in folder",
-                    () => _activity.ShowAddedFolder(phoneFolder), downloadsFeedback: true);
+                    _activity.ShowMessageAfterClose(NewDownloadModel.Describe(result) + " · saving on " + _activity.HostName + " in " + saveTo);
+                else if (phoneFolder is null) _activity.ShowMessageAfterClose(NewDownloadModel.Describe(result));
+                else _activity.ShowMessageAfterClose(NewDownloadModel.Describe(result) + " · saving to " + phoneFolder, "Show in folder",
+                    () => _activity.ShowAddedFolder(phoneFolder));
             });
         });
     }

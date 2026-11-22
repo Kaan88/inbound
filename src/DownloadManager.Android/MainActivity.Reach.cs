@@ -141,16 +141,46 @@ public sealed partial class MainActivity
     private JobRow? _lastAddedRow;
 
     /// <summary>The Show in folder of an "added" snackbar: the folder page, with the download just added outlined when it is the one saved there.</summary>
-    internal void ShowAddedFolder(string phoneFolder)
+    internal void ShowAddedFolder(string phoneFolder, bool useRow = true)
     {
-        var row = _lastAddedRow;
-        if (row is not null && row.FileName.Length > 0 && PhoneFolderOf(row.Job.DestinationDirectory) == phoneFolder) ShowDownloadsFolder(phoneFolder, row.Name, row);
+        var row = useRow ? _lastAddedRow : null;
+        // The page reads the file name live from the row: right after Add the Host often does not know it yet.
+        if (row is not null && PhoneFolderOf(row.Job.DestinationDirectory) == phoneFolder) ShowDownloadsFolder(phoneFolder, null, row);
         else ShowDownloadsFolder(phoneFolder, null);
     }
+
+    /// <summary>
+    /// A snackbar for after a page closes: the page is still animating away, so the message waits and sits above the bottom bar
+    /// (the FAB lifts with it), and the new card's outline starts then, when the list is in view.
+    /// </summary>
+    internal void ShowMessageAfterClose(string text, string? action = null, Action? onAction = null)
+    {
+        new Android.OS.Handler(Android.OS.Looper.MainLooper!).PostDelayed(() =>
+        {
+            if (IsFinishing || IsDestroyed) return;
+            ShowMessage(text, action, onAction, downloadsFeedback: true);
+            if (_pendingMark is { } row) { _pendingMark = null; _downloads?.MarkNew(row); }
+        }, Motion.ContainerMs + 100);
+    }
+
+    private JobRow? _pendingMark;
 
     private sealed class FolderBack(Action back) : AndroidX.Activity.OnBackPressedCallback(true)
     {
         public override void HandleOnBackPressed() => back();
+    }
+
+    /// <summary>Back with a Navigator page over the folder page (a notification's Details, a share): the visible page goes first.</summary>
+    private void FolderBackPressed()
+    {
+        if (_nav?.PageOpen == true && _folderBack is { } callback)
+        {
+            callback.Enabled = false;
+            OnBackPressedDispatcher.OnBackPressed();
+            callback.Enabled = _folderPage is not null;
+            return;
+        }
+        CloseFolderPage();
     }
 
     /// <summary>
@@ -164,7 +194,9 @@ public sealed partial class MainActivity
             if (IsFinishing || IsDestroyed || Capabilities.IsRemote) return;
             if (_nav?.Page is { } open)
             {
-                // Details (or another page) is open: it closes first, then the folder page opens.
+                // Only Details and Torrent details (the sources of this action) close and give way; any other page (the queue editor,
+                // a half-filled New download) keeps its state and the tap does nothing.
+                if (!ReferenceEquals(open, _details?.Root) && !ReferenceEquals(open, _torrentDetails?.Root)) return;
                 _afterPage = () => OpenFolderPage(phonePath, file, row);
                 _nav.Close(open);
                 return;
@@ -195,7 +227,7 @@ public sealed partial class MainActivity
         FindViewById<View>(Resource.Id.downloads_root)!.ImportantForAccessibility = ImportantForAccessibility.NoHideDescendants;
         ViewCompat.SetAccessibilityPaneTitle(page.Root, "Folder " + phonePath);
         ViewCompat.RequestApplyInsets(page.Root);
-        if (_folderBack is null) { _folderBack = new FolderBack(() => CloseFolderPage()); OnBackPressedDispatcher.AddCallback(this, _folderBack); }
+        if (_folderBack is null) { _folderBack = new FolderBack(FolderBackPressed); OnBackPressedDispatcher.AddCallback(this, _folderBack); }
         _folderBack.Enabled = true;
     }
 
@@ -219,27 +251,38 @@ public sealed partial class MainActivity
     // x10: a newly added download shows its folder line and an outline on its card for about 3 s.
 
     /// <summary>Called as a download is submitted: the next new row (within a short while) is the one the person just added.</summary>
-    internal void ExpectNewRow() => _expectNewRowUntil = Environment.TickCount64 + 20_000;
+    internal void ExpectNewRow() { _expectNewRowUntil = Environment.TickCount64 + 20_000; _lastAddedRow = null; _pendingMark = null; }
 
-    internal void ForgetNewRow() => _expectNewRowUntil = 0;
+    internal void ForgetNewRow() { _expectNewRowUntil = 0; _lastAddedRow = null; _pendingMark = null; }
 
     private void MarkIfExpected(JobRow row)
     {
         if (_expectNewRowUntil < Environment.TickCount64) return;
         _expectNewRowUntil = 0;
         _lastAddedRow = row;
-        _downloads?.MarkNew(row);
+        // The New download page still covers the list: the outline starts when its snackbar appears.
+        if (_nav?.PageOpen == true) _pendingMark = row;
+        else _downloads?.MarkNew(row);
+    }
+
+    /// <summary>A removed row: a folder page waiting on its download stops showing progress.</summary>
+    private void RowGone(JobRow row)
+    {
+        _folderPage?.OnRowRemoved(row);
+        if (ReferenceEquals(_lastAddedRow, row)) _lastAddedRow = null;
     }
 
     /// <summary>
     /// The "Added to Downloads" snackbar of a torrent or TorBox file: Show in folder on this phone (x10), no action on a paired Host,
     /// whose files are not on this phone.
     /// </summary>
-    internal void ShowAdded(string text, string? destination)
+    internal void ShowAdded(string text, string? destination, bool afterPage = false, bool newRow = true)
     {
         var folder = Capabilities.IsRemote || destination is null ? null : PhoneFolderOf(destination);
-        if (folder is null) ShowMessage(text, downloadsFeedback: true);
-        else ShowMessage(text, "Show in folder", () => ShowAddedFolder(folder), downloadsFeedback: true);
+        string? action = folder is null ? null : "Show in folder";
+        Action? click = folder is null ? null : () => ShowAddedFolder(folder, newRow);
+        if (afterPage) ShowMessageAfterClose(text, action, click);
+        else ShowMessage(text, action, click, downloadsFeedback: true);
     }
 
 #if INBOUND_TEST_BUILD

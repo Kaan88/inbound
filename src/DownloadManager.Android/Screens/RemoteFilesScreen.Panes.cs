@@ -472,7 +472,7 @@ internal sealed partial class RemoteFilesScreen
         return new PhoneFolder(items, uris, null);
     }
 
-    private static string? ExistingPhoneDownloadFolder(string relativePath)
+    internal static string? ExistingPhoneDownloadFolder(string relativePath)
     {
         if (!SafeRelativeFolder(relativePath)) return null;
         string root = AndroidHost.SharedDownloadFolder;
