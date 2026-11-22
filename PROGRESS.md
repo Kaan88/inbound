@@ -25,7 +25,8 @@ it, since this branch does not merge into `main` without the owner's say-so.
 - Mockups x1-x33 (48 screens, dark and light) for Transfers, getting to the file, the locations list, Add/Edit location
   and pane messages: `docs/plans/android-mockups/x-*`, `aaa54bfd`. **Owner, 2026-11-22: "Approve all"** (gallery of x1-x33 with
   every Proposal listed). So all x1-x33 screens and proposals are approved, the name stays "Remote Files". Not drawn and
-  still open: SFTP key login on Android. Building: Transfers and get-there (x1-x10b, x33) and locations/forms (x11-x31)
+  was open: SFTP key login on Android; owner, 2026-11-22: "well, yeah. with ppk support if possible." So Android gets
+  SFTP key login (mockup first), and the Host converts PuTTY .ppk keys to OpenSSH on save (desktop and CLI gain it too). Building: Transfers and get-there (x1-x10b, x33) and locations/forms (x11-x31)
   on draft branches, then pane messages (x32), merge, S24 comparison, Fable, release.
 - Owner, 2026-11-22: "have an agent look at existing extension adaptability to mobile edge for capturing links, or other
   solutions. non critical or required for release." Research done (sources only, nothing tried on a device):
