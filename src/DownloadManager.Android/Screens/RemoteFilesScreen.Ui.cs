@@ -115,7 +115,7 @@ internal sealed partial class RemoteFilesScreen
     }
 
     /// <summary>A monospace box with a copy button beside it (keys, fingerprints, the rclone command).</summary>
-    private View CopyBox(string text, string copyLabel, string? caption = null)
+    private View CopyBox(string text, string copyLabel, string? caption = null, string? copyText = null)
     {
         var holder = new LinearLayout(_activity) { Orientation = Orientation.Vertical };
         if (caption is not null)
@@ -133,7 +133,7 @@ internal sealed partial class RemoteFilesScreen
         mono.Background = Rounded(Attr(Resource.Attribute.colorSurfaceContainerHighest), Dp(16));
         mono.SetPadding(Dp(16), Dp(12), Dp(16), Dp(12));
         row.AddView(mono, new LinearLayout.LayoutParams(0, -2, 1));
-        row.AddView(IconButton(Resource.Drawable.ic_copy, copyLabel, () => CopyText(text)), new LinearLayout.LayoutParams(Dp(48), Dp(48)) { LeftMargin = Dp(4) });
+        row.AddView(IconButton(Resource.Drawable.ic_copy, copyLabel, () => CopyText(copyText ?? text)), new LinearLayout.LayoutParams(Dp(48), Dp(48)) { LeftMargin = Dp(4) });
         holder.AddView(row);
         holder.LayoutParameters = new LinearLayout.LayoutParams(-1, -2) { BottomMargin = Dp(6) };
         return holder;

@@ -66,15 +66,15 @@ internal sealed partial class RemoteFilesScreen
             AddInset(column, Banner(BannerKind.Fail, "This is not the key you trusted",
                 "Someone could be intercepting the connection. Only continue if the server's administrator confirms that the key changed.",
                 Resource.Drawable.ic_remote_alert));
-            foreach (var key in review.Trusted) AddInset(column, CopyBox(KeyText(key), "Copy trusted key", "Trusted before"));
-            foreach (var key in review.Offered) AddInset(column, CopyBox(KeyText(key), "Copy offered key", "Offered now"));
+            foreach (var key in review.Trusted) AddInset(column, CopyBox(KeyText(key), "Copy trusted key", "Trusted before", key.Fingerprint));
+            foreach (var key in review.Offered) AddInset(column, CopyBox(KeyText(key), "Copy offered key", "Offered now", key.Fingerprint));
         }
         else
         {
             if (review.Case == SftpKeyCase.MoreKeys)
                 AddInset(column, FolderText("The server also offers other key types. Trusting them lets this phone connect whichever one the server uses.", 15,
                     Resource.Attribute.colorOnSurfaceVariant));
-            foreach (var key in review.Offered) AddInset(column, CopyBox(KeyText(key), "Copy key"));
+            foreach (var key in review.Offered) AddInset(column, CopyBox(KeyText(key), "Copy key", null, key.Fingerprint));
             AddInset(column, Banner(BannerKind.Info, "Compare a fingerprint with the one from the server's administrator before you trust it.", null,
                 Resource.Drawable.ic_remote_info));
         }
@@ -92,7 +92,6 @@ internal sealed partial class RemoteFilesScreen
             accept.Enabled = false;
             confirmed.CheckedChange += (_, e) => accept.Enabled = e.IsChecked;
         }
-        _confirm = null;
         ShowSheet(dialog);
     }
 

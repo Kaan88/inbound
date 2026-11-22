@@ -216,7 +216,7 @@ internal sealed partial class RemoteFilesScreen : IDisposable
     {
         if (_closed) return;
         bool folder = !_showTransfers && !_adding && _inFolder;
-        SetFolderFullScreen(folder);
+        SetFolderFullScreen(folder || _adding);
         if (!folder) ResetChrome();
         _content.RemoveAllViews();
         if (_showTransfers) RenderTransfers();

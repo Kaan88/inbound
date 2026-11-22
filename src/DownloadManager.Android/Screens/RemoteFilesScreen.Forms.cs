@@ -119,6 +119,17 @@ internal sealed partial class RemoteFilesScreen
     /// <summary>Back, X or Cancel: a type form returns to the picker; anything else leaves the form.</summary>
     private void CloseForm()
     {
+        if (_busy && _editSite is null)
+        {
+            // A save or test is running: drop it, so it cannot carry on after the form is gone.
+            CancelCurrent();
+            ClearPassword();
+            _busy = false;
+            _adding = false; _addStep = 0; _editSite = null; _savedId = null;
+            _fv.Clear();
+            _ = LoadLocationsAsync();
+            return;
+        }
         if (_editSite is null && _addStep == 1 && _savedId is null)
         {
             ClearFormSecrets();
@@ -133,6 +144,22 @@ internal sealed partial class RemoteFilesScreen
         _fv.Clear();
         CancelCurrent();
         if (saved) _ = LoadLocationsAsync(); else Render();
+    }
+
+    /// <summary>Footer Cancel (a5): leaves the add flow entirely, also from a type form.</summary>
+    private void LeaveForm()
+    {
+        if (_editSite is null && _addStep == 1 && _savedId is null && !_busy) _addStep = 2;
+        CloseForm();
+    }
+
+    private Task FinishFormLoad()
+    {
+        ClearPassword();
+        _adding = false; _addStep = 0; _editSite = null; _savedId = null;
+        _fv.Clear();
+        _busy = false;
+        return LoadLocationsAsync();
     }
 
     private void FinishForm()
@@ -359,10 +386,22 @@ internal sealed partial class RemoteFilesScreen
                     if (target is not null && edits.TryGetValue("port", out var portEdit)) portEdit.Text = target;
                 }));
             }
+            bool keyLogin = site?.AuthMethod == "key";
+            bool sftpEdit = site is not null && kind == SiteKindCatalog.Sftp;
             Add(_content, "user", kind == SiteKindCatalog.Sftp ? "User name" : "User name (optional)");
-            Add(_content, "password", kind == SiteKindCatalog.Sftp ? "Password (optional)" : "Password (optional)", password: true,
-                placeholder: site?.HasPassword == true ? "Saved; type to replace" : null);
-            _content.AddView(Hint(_phoneHost ? "Credentials are stored by this phone's Host." : "Credentials are sent to " + _hostName + " and stored there."));
+            if (keyLogin)
+            {
+                _content.AddView(Hint("This location signs in with a private key, which is managed on the desktop. Its address can't be changed here."));
+                edits["host"].Enabled = false;
+                edits["port"].Enabled = false;
+            }
+            else
+            {
+                Add(_content, "password", sftpEdit ? "Password" : "Password (optional)", password: true,
+                    placeholder: site?.HasPassword == true ? "Saved; type to replace" : null);
+                if (!sftpEdit)
+                    _content.AddView(Hint(_phoneHost ? "Credentials are stored by this phone's Host." : "Credentials are sent to " + _hostName + " and stored there."));
+            }
             if (kind == SiteKindCatalog.Ftp)
             {
                 Add(_content, "folder", "Starting folder (optional)", placeholder: "/");
@@ -370,22 +409,27 @@ internal sealed partial class RemoteFilesScreen
             }
             else
             {
-                if (site is not null)
+                if (sftpEdit)
                 {
+                    Add(_content, "folder", "Starting folder (optional)", placeholder: "/");
                     newAddressBanner = Banner(BannerKind.Warn, "New address or port", "You are asked to trust the server key again when you save.",
                         Resource.Drawable.ic_settings_site_key);
                     newAddressBanner.Visibility = ViewStates.Gone;
                     _content.AddView(newAddressBanner);
                 }
-                _content.AddView(ExpanderHeader("More options", "Starting folder", _moreOpen, open => _moreOpen = open, out var more));
-                Add(more, "folder", "Starting folder (optional)", placeholder: "/");
+                else
+                {
+                    _content.AddView(ExpanderHeader("More options", "Starting folder", _moreOpen, open => _moreOpen = open, out var more));
+                    Add(more, "folder", "Starting folder (optional)", placeholder: "/");
+                }
             }
         }
         else if (kind == SiteKindCatalog.WebDav)
         {
             View? httpBanner = null;
+            CheckBox? httpTick = null;
             var address = Add(_content, "url", "Address", InputTypes.ClassText | InputTypes.TextVariationUri, placeholder: "https://files.example.com/dav",
-                changed: _ => { _allowInsecure = false; UpdateHttpBanner(); });
+                changed: _ => { _allowInsecure = false; if (httpTick is not null) httpTick.Checked = false; UpdateHttpBanner(); });
             address.EndIconMode = TextInputLayout.EndIconCustom;
             address.SetEndIconDrawable(Resource.Drawable.ic_paste);
             address.EndIconContentDescription = "Paste address";
@@ -401,6 +445,7 @@ internal sealed partial class RemoteFilesScreen
             }));
             var tick = new CheckBox(_activity) { SaveEnabled = false, Checked = _allowInsecure, Enabled = secure, ContentDescription = "Allow HTTP" };
             httpBanner = Banner(BannerKind.Warn, "Allow HTTP", "Not encrypted. Credentials and files can be read or changed in transit.", 0, leading: tick);
+            httpTick = tick;
             tick.CheckedChange += (_, e) =>
             {
                 _allowInsecure = e.IsChecked;
@@ -474,9 +519,9 @@ internal sealed partial class RemoteFilesScreen
             _content.AddView(remove, new LinearLayout.LayoutParams(-1, Dp(56)) { TopMargin = Dp(16) });
         }
 
-        string primaryText = _busy ? "Saving…" : edit && _editSite is not null ? "Save" : cloud ? "Add and sign in" : "Add location";
+        string primaryText = _busy ? _savedId is not null ? "Checking…" : "Saving…" : edit && _editSite is not null ? "Save" : cloud ? "Add and sign in" : "Add location";
         int primaryIcon = cloud && _editSite is null ? Resource.Drawable.ic_open : Resource.Drawable.ic_remote_check;
-        primary = FormFooter(primaryText, primaryIcon, CloseForm, () => SubmitForm(layouts), secure && !_busy);
+        primary = FormFooter(primaryText, primaryIcon, LeaveForm, () => SubmitForm(layouts), secure && !_busy);
         primary.ContentDescription = primaryText;
         if (_editSite is null && _savedId is null) name.RequestFocus();
     }
@@ -544,6 +589,17 @@ internal sealed partial class RemoteFilesScreen
         if (kind == SiteKindCatalog.B2 && (V("user").Trim().Length == 0 || !hasPassword)) Fail("user", B2KeysRequired);
         string ownId = V("ownId").Trim(), ownSecret = V("ownSecret");
         if (cloud && ClientIdProblem(ownId, ownSecret) is { } clientProblem) Fail("ownId", clientProblem);
+        if (_editSite is { HasPassword: true } stored && stored.AuthMethod != "key" && V("password").Length == 0 && !SiteKindCatalog.SignsIn(kind))
+        {
+            bool moved = kind switch
+            {
+                SiteKindCatalog.Sftp or SiteKindCatalog.Ftp => !string.Equals(stored.Host, host, StringComparison.OrdinalIgnoreCase) || stored.Port != port,
+                SiteKindCatalog.WebDav => !string.Equals(stored.Url ?? "", url, StringComparison.OrdinalIgnoreCase),
+                SiteKindCatalog.S3 => !string.Equals(stored.Endpoint ?? "", endpoint, StringComparison.OrdinalIgnoreCase),
+                _ => false,
+            };
+            if (moved) Fail("password", "Enter the password again: it isn't kept for a new address.");
+        }
         if (failed) return;
 
         var edit = _editSite;
@@ -607,11 +663,11 @@ internal sealed partial class RemoteFilesScreen
         bool editing = _editSite is not null;
         if (SiteKindCatalog.SignsIn(kind))
         {
-            FinishForm();
-            if (!editing)
+            await FinishFormLoad();
+            if (!editing && SameHost())
             {
-                await Task.Delay(50);
-                _ = SignInAfterAddAsync(saved.Id);
+                if (FreshSite(saved.Id) is { } fresh) _activity.RunOnUiThread(() => { if (SameHost()) BeginCloudSignIn(fresh); });
+                else _activity.ShowMessage("Saved. Open the location to sign in.");
             }
             return;
         }
@@ -622,14 +678,6 @@ internal sealed partial class RemoteFilesScreen
             return;
         }
         await TestFormLocationAsync(saved, false);
-    }
-
-    private async Task SignInAfterAddAsync(string id)
-    {
-        // FinishForm started a list load; wait for it, then start the sign-in on the fresh row.
-        for (int i = 0; i < 40 && (_busy || !_listLoaded); i++) await Task.Delay(100);
-        if (!SameHost() || FreshSite(id) is not { } fresh) return;
-        _activity.RunOnUiThread(() => { if (SameHost()) BeginCloudSignIn(fresh); });
     }
 
     private async Task TestFormLocationAsync(SiteDto saved, bool afterTrust)
@@ -650,6 +698,16 @@ internal sealed partial class RemoteFilesScreen
         ShowTestFailed(saved, failure ?? result?.Message ?? "It did not answer.");
     }
 
+    /// <summary>x23b Edit: the form stays open as an edit of the location the Host already saved.</summary>
+    private void EditSavedAfterFailure(SiteDto saved)
+    {
+        if (!SameHost()) return;
+        _editSite = saved;
+        _savedId = saved.Id;
+        _error = null;
+        Render();
+    }
+
     private void ShowTestFailed(SiteDto saved, string message)
     {
         if (!SameHost() || _confirm is not null) return;
@@ -658,12 +716,12 @@ internal sealed partial class RemoteFilesScreen
         var dialog = new MaterialAlertDialogBuilder(_activity)
             .SetTitle("Saved, but it did not connect")!
             .SetMessage($"{saved.Name} is saved. The Host said: {detail}.\n\nEdit the location to fix it, or keep it and try later.")!
-            .SetPositiveButton("Edit", (Android.Content.IDialogInterfaceOnClickListener?)null)!
+            .SetPositiveButton("Edit", (_, _) => EditSavedAfterFailure(saved))!
             .SetNegativeButton("Keep anyway", (_, _) => FinishForm())!
             .Create();
         _confirm = dialog;
         dialog.DismissEvent += (_, _) => { if (ReferenceEquals(_confirm, dialog)) _confirm = null; };
-        dialog.CancelEvent += (_, _) => { /* Back keeps the form open on the saved location, as Edit does. */ };
+        dialog.CancelEvent += (_, _) => EditSavedAfterFailure(saved);
         dialog.Show();
     }
 
@@ -713,7 +771,7 @@ internal sealed partial class RemoteFilesScreen
         Row("Issued by", cert.Issuer);
         Row("Valid until", cert.NotAfter.ToLocalTime().ToString("d MMM yyyy"));
         AddInset(column, details);
-        AddInset(column, CopyBox("SHA-256\n" + cert.Fingerprint, "Copy fingerprint"));
+        AddInset(column, CopyBox(cert.Fingerprint, "Copy fingerprint", "SHA-256"));
         SheetButtons(column, "Trust certificate", Resource.Drawable.ic_remote_lock, () => _ = TrustCertificateAsync(saved, cert.Fingerprint));
         ShowSheet(dialog);
     }

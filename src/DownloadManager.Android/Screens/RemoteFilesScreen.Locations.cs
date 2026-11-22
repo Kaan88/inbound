@@ -418,7 +418,7 @@ internal sealed partial class RemoteFilesScreen
     /// <summary>x12 and x12b: the long-press sheet of a location.</summary>
     private void ShowLocationSheet(SiteDto site)
     {
-        if (!SameHost() || _busy) return;
+        if (!SameHost() || _busy || _sheet is not null) return;
         var dialog = NewSheet(out var column);
         var header = new LinearLayout(_activity) { Orientation = Orientation.Horizontal };
         header.SetGravity(GravityFlags.CenterVertical);

@@ -360,6 +360,7 @@ internal sealed partial class RemoteFilesScreen
     {
         if (_signInSiteId != siteId) return;
         _signInSiteId = null;
+        _signInAgain = null;
         _signInWait?.Dispose();
         _signInWait = null;
         _signInCancellation.Dispose();
