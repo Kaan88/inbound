@@ -365,8 +365,11 @@ internal sealed partial class RemoteFilesScreen
             _name.Text = item.Name;
             string detail = RemoteFileList.Detail(item, DateTimeOffset.Now);
             _detail.Text = detail;
-            bool marked = !selected && pane.Mark == item.Name;
-            _open.Visibility = marked && !item.IsFolder ? ViewStates.Visible : ViewStates.Gone;
+            bool inMarkFolder = pane.MarkPath is null || pane.MarkPath == pane.Path;
+            bool marked = !selected && inMarkFolder && pane.Mark == item.Name;
+            bool pill = !selected && inMarkFolder && pane.PillMark == item.Name && !item.IsFolder;
+            _open.Visibility = pill ? ViewStates.Visible : ViewStates.Gone;
+            _open.ContentDescription = "Open " + item.Name;
             if (selected)
             {
                 var background = new GradientDrawable();
@@ -545,8 +548,6 @@ internal sealed partial class RemoteFilesScreen
         if (pane.Selected.Count == 1 && CanChange(pane) && SelectedItems(pane) is [var renamable])
             Item(Resource.Drawable.ic_remote_edit, "Rename", () => ShowRenameDialog(pane, renamable));
         Item(Resource.Drawable.ic_remote_selall, "Select all", () => SelectAll(pane));
-        int active = _transfers.Count(t => t.State is "queued" or "running" or "paused");
-        Item(Resource.Drawable.ic_remote_transfers, "Transfers", OpenTransfers, active > 0 ? active.ToString() : null);
         popup.ShowAsDropDown(anchor, 0, -anchor.Height, GravityFlags.End);
     }
 

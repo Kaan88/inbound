@@ -93,6 +93,9 @@ internal sealed partial class RemoteFilesScreen : IDisposable
     {
         if (_closed || _started) return;
         _started = true;
+#if INBOUND_TEST_BUILD
+        if (FixtureMode is not null) { StartFixture(); return; }
+#endif
         _ = LoadLocationsAsync();
         StartObserving();
     }

@@ -57,4 +57,27 @@ public sealed class RemoteTransferTextTests
         Assert.False(RemoteTransferText.InFilter(new SiteTransferDto { State = "done" }, "active"));
         Assert.True(RemoteTransferText.InFilter(new SiteTransferDto { State = "canceled" }, "canceled"));
     }
+
+    [Fact]
+    public void RunningBeforeTheSizeIsKnownSaysStarting()
+    {
+        var t = Download(); t.Bytes = 0; t.BytesDone = 0; t.Speed = 0;
+        Assert.Equal("Starting", RemoteTransferText.Status(t, DateTimeOffset.Now));
+    }
+
+    [Fact]
+    public void PausedBannerHasTitleAndDetail()
+    {
+        var reason = RemoteTransferText.Reason(new SiteTransferDto { State = "paused" });
+        Assert.Equal("Paused", reason?.Title);
+        Assert.Equal("Unfinished files restart from the beginning on resume.", reason?.Detail);
+    }
+
+    [Fact]
+    public void FileRowsShowTheNameOnlyAndSignInFailuresNeedAttention()
+    {
+        Assert.Equal("IMG_2291.jpg", RemoteTransferText.FileLine(new SiteTransferItemDto { Path = "Photos 2025/IMG_2291.jpg", State = "done" }).Name);
+        Assert.True(RemoteTransferText.NeedsAttention(new SiteTransferDto { State = "failed", Problem = SiteProblems.SignInNeeded, SiteName = "Drive" }));
+        Assert.False(RemoteTransferText.NeedsAttention(new SiteTransferDto { State = "failed" }));
+    }
 }

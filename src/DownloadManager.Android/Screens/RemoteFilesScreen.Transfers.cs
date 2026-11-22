@@ -23,7 +23,7 @@ internal sealed partial class RemoteFilesScreen
     // Item paths per transfer id, from sites.transfer.get: they name a card ("session-0503.flac", "Wedding") and fill its Files list.
     private readonly Dictionary<string, List<string>> _transferPaths = new(StringComparer.Ordinal);
     private readonly HashSet<string> _transferBusy = new(StringComparer.Ordinal);
-    private bool _transferLoading, _transferQuiet, _transferErrorRetry;
+    private bool _transferLoading, _transferQuiet, _transferErrorRetry, _transferReloadPending, _transferReloadQuiet = true;
     private int _transfersGen;
     private string? _transferErrorTitle, _transferErrorText;
     private DateTimeOffset _transfersAt;
@@ -55,7 +55,17 @@ internal sealed partial class RemoteFilesScreen
 
     private async Task LoadTransfersAsync(bool quiet = false)
     {
-        if (!SameHost() || _transferLoading) return;
+        if (!SameHost()) return;
+#if INBOUND_TEST_BUILD
+        if (FixtureMode is not null) return;
+#endif
+        if (_transferLoading)
+        {
+            // A look is in flight: ask for one more when it ends, so an action or "Try again" is never dropped.
+            _transferReloadPending = true;
+            _transferReloadQuiet &= quiet;
+            return;
+        }
         int generation = ++_transfersGen;
         _transferLoading = true;
         _transferQuiet = quiet;
@@ -85,26 +95,36 @@ internal sealed partial class RemoteFilesScreen
         {
             if (!_closed && generation == _transfersGen) { _transferLoading = false; UpdateTransfersUi(); }
         }
-        await FetchTransferPathsAsync(generation);
+        if (_transferReloadPending && !_closed && !_transferLoading)
+        {
+            bool again = _transferReloadQuiet;
+            _transferReloadPending = false;
+            _transferReloadQuiet = true;
+            _ = LoadTransfersAsync(again);
+        }
+        _ = FetchTransferPathsAsync(generation); // not awaited: the 3 s loop must not wait for the names
     }
 
     /// <summary>Names for the cards: one sites.transfer.get per transfer not asked about yet (its files do not change).</summary>
+    private bool _fetchingPaths;
+
     private async Task FetchTransferPathsAsync(int generation)
     {
+        if (_fetchingPaths) return;
+        _fetchingPaths = true;
         try
         {
             foreach (var transfer in _transfers.Where(t => !_transferPaths.ContainsKey(t.Id)).Take(20).ToList())
             {
                 var result = await _client.GetTransferAsync(transfer.Id, _life.Token);
-                if (!SameHost() || generation != _transfersGen || !_showTransfers) return;
-                if (result.Ok && result.Items is { Count: > 0 } items)
-                {
-                    _transferPaths[transfer.Id] = [.. items.Select(item => item.Path).Take(2000)];
-                    UpdateTransfersUi();
-                }
+                if (!SameHost() || !_showTransfers || _closed) return;
+                // An answer without items is remembered too (an empty list), so it is not asked again every 3 s.
+                _transferPaths[transfer.Id] = result.Ok && result.Items is { Count: > 0 } items ? [.. items.Select(item => item.Path).Take(2000)] : [];
+                UpdateTransfersUi();
             }
         }
         catch (Exception) { /* A card without a name keeps "N files". */ }
+        finally { _fetchingPaths = false; }
     }
 
     private string TransferTitle(SiteTransferDto t) => RemoteTransferText.Title(t, _transferPaths.GetValueOrDefault(t.Id));
@@ -122,6 +142,8 @@ internal sealed partial class RemoteFilesScreen
     {
         if (_surface.ChildCount == 1 && _tfShell?.Parent == _surface) return;
         _surface.RemoveAllViews();
+        _bannerSig = _chipsSig = null;
+        _cards.Clear();
         _tfShell = new LinearLayout(_activity) { Orientation = Orientation.Vertical };
         _tfShell.SetBackgroundColor(new Color(Attr(Resource.Attribute.colorSurface)));
 
@@ -176,8 +198,13 @@ internal sealed partial class RemoteFilesScreen
         if (_tfSwipe!.Refreshing != spinning) _tfSwipe.Refreshing = spinning;
     }
 
+    private string? _bannerSig;
+
     private void BuildTransfersBanner()
     {
+        string sig = _transferErrorTitle + "|" + _transferErrorText + "|" + _transferErrorRetry;
+        if (sig == _bannerSig) return;
+        _bannerSig = sig;
         _tfBanner!.RemoveAllViews();
         if (_transferErrorTitle is null) { _tfBanner.Visibility = ViewStates.Gone; return; }
         _tfBanner.Visibility = ViewStates.Visible;
@@ -187,14 +214,14 @@ internal sealed partial class RemoteFilesScreen
             var retry = new MaterialButton(_activity, null, Resource.Attribute.borderlessButtonStyle) { Text = "Try again" };
             retry.SetAllCaps(false);
             retry.SetTextColor(new Color(Attr(Resource.Attribute.colorPrimary)));
-            retry.Click += (_, _) => { _transferErrorTitle = null; _ = LoadTransfersAsync(); };
+            retry.Click += (_, _) => { _transferErrorTitle = null; UpdateTransfersUi(); _ = LoadTransfersAsync(); };
             ((LinearLayout)card.GetChildAt(1)!).AddView(retry, new LinearLayout.LayoutParams(-2, Dp(40)) { TopMargin = Dp(4), LeftMargin = Dp(-12) });
         }
         _tfBanner.AddView(card, new LinearLayout.LayoutParams(-1, -2) { LeftMargin = Dp(16), RightMargin = Dp(16), TopMargin = Dp(4), BottomMargin = Dp(4) });
     }
 
     /// <summary>A red (or amber) banner: warning glyph, bold title, text. The text column is child 1.</summary>
-    private LinearLayout TransferBanner(string title, string? text, bool warning)
+    private LinearLayout TransferBanner(string title, string? text, bool warning, int iconRes = 0)
     {
         int tone = _activity.GetColor(warning ? Resource.Color.state_waiting : Resource.Color.state_failed);
         var card = new LinearLayout(_activity) { Orientation = Orientation.Horizontal };
@@ -204,7 +231,7 @@ internal sealed partial class RemoteFilesScreen
         background.SetColor(new Color(Color.GetRedComponent(tone), Color.GetGreenComponent(tone), Color.GetBlueComponent(tone), 48));
         card.Background = background;
         var icon = new ImageView(_activity) { ImportantForAccessibility = ImportantForAccessibility.No };
-        icon.SetImageResource(Resource.Drawable.ic_remote_warning);
+        icon.SetImageResource(iconRes == 0 ? Resource.Drawable.ic_remote_warning : iconRes);
         icon.ImageTintList = ColorStateList.ValueOf(new Color(tone));
         card.AddView(icon, new LinearLayout.LayoutParams(Dp(24), Dp(24)) { RightMargin = Dp(14), TopMargin = Dp(2) });
         var texts = new LinearLayout(_activity) { Orientation = Orientation.Vertical };
@@ -220,10 +247,15 @@ internal sealed partial class RemoteFilesScreen
     private static readonly (string Key, string Label)[] TransferFilters =
         [("all", "All"), ("active", "Active"), ("finished", "Finished"), ("failed", "Failed"), ("canceled", "Canceled")];
 
+    private string? _chipsSig;
+
     private void BuildTransferChips()
     {
-        _tfChips!.RemoveAllViews();
         bool any = _transfers.Count > 0;
+        string sig = any ? _transferFilter + "|" + string.Join(",", TransferFilters.Select(f => _transfers.Count(t => RemoteTransferText.InFilter(t, f.Key)))) : "";
+        if (sig == _chipsSig) return;
+        _chipsSig = sig;
+        _tfChips!.RemoveAllViews();
         _tfChipScroll!.Visibility = any ? ViewStates.Visible : ViewStates.Gone;
         if (!any) return;
         foreach (var (key, label) in TransferFilters)
@@ -241,40 +273,82 @@ internal sealed partial class RemoteFilesScreen
             chip.Background = shape;
             chip.Clickable = true;
             chip.Focusable = true;
-            chip.ContentDescription = label + ", " + count + (on ? ", selected" : "");
+            chip.ContentDescription = label + ", " + count;
+            chip.SetAccessibilityDelegate(new ChipDelegate(on));
             chip.Click += (_, _) => { _transferFilter = key; UpdateTransfersUi(); };
             _tfChips.AddView(chip, new LinearLayout.LayoutParams(-2, Dp(36)) { RightMargin = Dp(8) });
         }
     }
 
+    /// <summary>A built card with the parts that change while it runs, so a refresh updates them in place (focus and ripple stay).</summary>
+    private sealed record CardRef(View Card, string Sig, TextView Status, LinearProgressIndicator? Bar);
+
+    private readonly Dictionary<string, CardRef> _cards = new(StringComparer.Ordinal);
+
+    private string CardSignature(SiteTransferDto t)
+    {
+        var (source, destination) = RemoteTransferText.Route(t, _phoneHost);
+        return string.Join("|", t.State, TransferTitle(t), source, destination, _transferBusy.Contains(t.Id), CardAction(t) is null,
+            t.State is "running" or "paused" && t.Bytes > 0, CanShowTransferFolder(t), RemoteTransferText.NeedsAttention(t));
+    }
+
+    private void UpdateCard(CardRef card, SiteTransferDto t, DateTimeOffset now)
+    {
+        string status = RemoteTransferText.Status(t, now);
+        if (card.Status.Text != status) card.Status.Text = status;
+        if (card.Bar is { } bar) bar.Progress = (int)Math.Min(1000, t.BytesDone * 1000 / Math.Max(1, t.Bytes));
+        var (source, destination) = RemoteTransferText.Route(t, _phoneHost);
+        card.Card.ContentDescription = TransferTitle(t) + ", " + status + ", " + source + " to " + destination + ". Details";
+    }
+
     private void BuildTransferList()
     {
-        _tfList!.RemoveAllViews();
+        if (!_transfersLoaded || _transfers.Count == 0) { _cards.Clear(); _tfList!.RemoveAllViews(); }
         if (!_transfersLoaded)
         {
             if (_transferLoading)
             {
                 var spinner = new CircularProgressIndicator(_activity) { Indeterminate = true };
                 spinner.ContentDescription = "Loading transfers";
-                _tfList.AddView(spinner, new LinearLayout.LayoutParams(-2, -2) { Gravity = GravityFlags.CenterHorizontal, TopMargin = Dp(48) });
+                _tfList!.AddView(spinner, new LinearLayout.LayoutParams(-2, -2) { Gravity = GravityFlags.CenterHorizontal, TopMargin = Dp(48) });
             }
             return;
         }
         if (_transfers.Count == 0)
         {
-            _tfList.AddView(TransfersEmpty(), new LinearLayout.LayoutParams(-1, 0, 1));
+            _tfList!.AddView(TransfersEmpty(), new LinearLayout.LayoutParams(-1, 0, 1));
             return;
         }
         var shown = _transfers.Where(t => RemoteTransferText.InFilter(t, _transferFilter)).OrderByDescending(t => t.CreatedAt).ToList();
         if (shown.Count == 0)
         {
+            _cards.Clear();
+            _tfList!.RemoveAllViews();
             var none = FolderText("No transfers here.", 15, Resource.Attribute.colorOnSurfaceVariant);
             none.SetPadding(Dp(8), Dp(24), Dp(8), 0);
             _tfList.AddView(none);
             return;
         }
         var now = DateTimeOffset.Now;
-        foreach (var transfer in shown) _tfList.AddView(TransferCard(transfer, now), new LinearLayout.LayoutParams(-1, -2) { BottomMargin = Dp(8) });
+        var ordered = new List<CardRef>(shown.Count);
+        var keep = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var transfer in shown)
+        {
+            keep.Add(transfer.Id);
+            string sig = CardSignature(transfer);
+            if (_cards.TryGetValue(transfer.Id, out var existing) && existing.Sig == sig && existing.Card.Parent == _tfList)
+            {
+                UpdateCard(existing, transfer, now);
+                ordered.Add(existing);
+            }
+            else ordered.Add(_cards[transfer.Id] = TransferCard(transfer, now, sig));
+        }
+        foreach (var id in _cards.Keys.Where(id => !keep.Contains(id)).ToList()) _cards.Remove(id);
+        bool same = _tfList!.ChildCount == ordered.Count;
+        for (int i = 0; same && i < ordered.Count; i++) same = ReferenceEquals(_tfList.GetChildAt(i), ordered[i].Card);
+        if (same) return;
+        _tfList.RemoveAllViews();
+        foreach (var card in ordered) _tfList.AddView(card.Card, new LinearLayout.LayoutParams(-1, -2) { BottomMargin = Dp(8) });
     }
 
     private View TransfersEmpty()
@@ -349,7 +423,7 @@ internal sealed partial class RemoteFilesScreen
         {
             "running" => (Resource.Drawable.ic_pause, "Pause " + title, true, () => _ = TransferActionAsync(t.Id, "pause")),
             "paused" => (Resource.Drawable.ic_play, "Resume " + title, false, () => _ = TransferActionAsync(t.Id, "resume")),
-            "failed" => (Resource.Drawable.ic_refresh, "Retry " + title, false, () => _ = TransferActionAsync(t.Id, "retry")),
+            "failed" when !RemoteTransferText.NeedsAttention(t) => (Resource.Drawable.ic_refresh, "Retry " + title, false, () => _ = TransferActionAsync(t.Id, "retry")),
             "queued" => (Resource.Drawable.ic_close, "Cancel " + title, false, () => ConfirmCancelTransfer(t)),
             "done" when CanShowTransferFolder(t) => (Resource.Drawable.ic_remote_folder, "Show " + title + " in folder", false, () => ShowTransferFolder(t, null)),
             _ => null,
@@ -371,7 +445,7 @@ internal sealed partial class RemoteFilesScreen
         return button;
     }
 
-    private View TransferCard(SiteTransferDto t, DateTimeOffset now)
+    private CardRef TransferCard(SiteTransferDto t, DateTimeOffset now, string sig)
     {
         var card = new LinearLayout(_activity) { Orientation = Orientation.Vertical, Clickable = true, Focusable = true };
         var shape = new GradientDrawable();
@@ -410,9 +484,10 @@ internal sealed partial class RemoteFilesScreen
         }
         card.AddView(row, new LinearLayout.LayoutParams(-1, -2));
 
+        LinearProgressIndicator? progress = null;
         if (t.State is "running" or "paused" && t.Bytes > 0)
         {
-            var bar = new LinearProgressIndicator(_activity) { Indeterminate = false, Max = 1000, TrackThickness = Dp(4), TrackCornerRadius = Dp(2) };
+            var bar = progress = new LinearProgressIndicator(_activity) { Indeterminate = false, Max = 1000, TrackThickness = Dp(4), TrackCornerRadius = Dp(2) };
             bar.SetIndicatorColor(t.State == "paused" ? Attr(Resource.Attribute.colorOutline) : Attr(Resource.Attribute.colorPrimary));
             bar.TrackColor = Attr(Resource.Attribute.colorSurfaceContainerHighest);
             bar.Progress = (int)Math.Min(1000, t.BytesDone * 1000 / Math.Max(1, t.Bytes));
@@ -422,7 +497,7 @@ internal sealed partial class RemoteFilesScreen
 
         card.ContentDescription = title + ", " + status + ", " + source + " to " + destination + ". Details";
         card.Click += (_, _) => ShowTransferDetails(t);
-        return card;
+        return new CardRef(card, sig, statusView, progress);
     }
 
     /// <summary>"Source → Destination" on one line; when it is too long the source is shortened first so the destination stays readable.</summary>
@@ -442,12 +517,17 @@ internal sealed partial class RemoteFilesScreen
         row.AddView(from, new LinearLayout.LayoutParams(-2, -2));
         row.AddView(arrow, new LinearLayout.LayoutParams(Dp(16), Dp(16)) { LeftMargin = Dp(6), RightMargin = Dp(6) });
         row.AddView(to, new LinearLayout.LayoutParams(-2, -2));
-        // The source gives way first: after layout it may take only what the arrow and the destination leave.
+        // The source gives way first: after layout it may take only what the arrow and the destination leave; a destination
+        // that alone is too long is cut with an ellipsis as well, leaving the source a little room.
         row.LayoutChange += (_, _) =>
         {
-            int room = row.Width - arrow.Width - Dp(12) - (int)Math.Ceiling(to.Paint!.MeasureText(destination));
-            int wanted = Math.Max(Dp(40), room);
-            if (row.Width > 0 && from.MaxWidth != wanted) from.SetMaxWidth(wanted);
+            if (row.Width <= 0) return;
+            int arrowRoom = arrow.Width + Dp(12);
+            int destinationWidth = (int)Math.Ceiling(to.Paint!.MeasureText(destination));
+            int destinationMax = Math.Min(destinationWidth + 2, Math.Max(Dp(40), row.Width - arrowRoom - Dp(52)));
+            int wanted = Math.Max(Dp(40), row.Width - arrowRoom - destinationMax);
+            if (to.MaxWidth != destinationMax) to.SetMaxWidth(destinationMax);
+            if (from.MaxWidth != wanted) from.SetMaxWidth(wanted);
         };
         row.ContentDescription = source + " to " + destination;
         return row;
@@ -493,10 +573,11 @@ internal sealed partial class RemoteFilesScreen
     private void ConfirmCancelTransfer(SiteTransferDto transfer)
     {
         if (!SameHost() || _confirm is not null) return;
-        var (source, destination) = RemoteTransferText.Route(transfer, _phoneHost);
+        string from = transfer.Direction == "upload" ? (_phoneHost ? "this phone" : _hostName) : transfer.SiteName;
+        string to = transfer.Direction == "download" ? (_phoneHost ? "this phone" : _hostName) : transfer.Direction == "upload" ? transfer.SiteName : transfer.DestinationSiteName ?? "";
         _confirm = new MaterialAlertDialogBuilder(_activity)
             .SetTitle("Cancel this transfer?")!
-            .SetMessage(TransferTitle(transfer) + " · " + source + " to " + destination + "\nA canceled transfer can't be resumed.")!
+            .SetMessage(TransferTitle(transfer) + " · " + from + " to " + to + "\n\nA canceled transfer can't be resumed.")!
             .SetNegativeButton("Keep transfer", (IDialogInterfaceOnClickListener?)null)!
             .SetPositiveButton("Cancel transfer", (_, _) => _ = TransferActionAsync(transfer.Id, "cancel"))!
             .Show();
@@ -591,13 +672,13 @@ internal sealed partial class RemoteFilesScreen
 
         if (RemoteTransferText.Reason(t) is { } reason)
         {
-            var banner = TransferBanner(reason.Title, reason.Detail, reason.Warning);
+            var banner = TransferBanner(reason.Title, reason.Detail, reason.Warning, t.State == "paused" ? Resource.Drawable.ic_pause : 0);
             content.AddView(banner, new LinearLayout.LayoutParams(-1, -2) { LeftMargin = Dp(24), RightMargin = Dp(24), BottomMargin = Dp(12) });
         }
 
         var pills = new LinearLayout(_activity) { Orientation = Orientation.Horizontal };
         pills.SetPadding(Dp(24), 0, Dp(24), Dp(12));
-        if (t.State == "failed") pills.AddView(SheetPill("Retry", Resource.Drawable.ic_refresh, () => _ = TransferActionAsync(t.Id, "retry")), new LinearLayout.LayoutParams(-2, Dp(40)) { RightMargin = Dp(8) });
+        if (t.State == "failed" && !RemoteTransferText.NeedsAttention(t)) pills.AddView(SheetPill("Retry", Resource.Drawable.ic_refresh, () => _ = TransferActionAsync(t.Id, "retry")), new LinearLayout.LayoutParams(-2, Dp(40)) { RightMargin = Dp(8) });
         if (t.State == "paused") pills.AddView(SheetPill("Resume", Resource.Drawable.ic_play, () => _ = TransferActionAsync(t.Id, "resume")), new LinearLayout.LayoutParams(-2, Dp(40)) { RightMargin = Dp(8) });
         if (t.State == "running") pills.AddView(SheetPill("Pause", Resource.Drawable.ic_pause, () => _ = TransferActionAsync(t.Id, "pause")), new LinearLayout.LayoutParams(-2, Dp(40)) { RightMargin = Dp(8) });
         if (CanShowTransferFolder(t))
@@ -628,7 +709,7 @@ internal sealed partial class RemoteFilesScreen
                 line.AddView(IconButton(Resource.Drawable.ic_copy, "Copy transfer ID", () =>
                 {
                     if (_activity.GetSystemService(Context.ClipboardService) is Android.Content.ClipboardManager clipboard) clipboard.PrimaryClip = ClipData.NewPlainText("Transfer ID", value.Replace("\n", ""));
-                    Toast.MakeText(_activity, "Transfer ID copied", ToastLength.Short)?.Show();
+                    if (!OperatingSystem.IsAndroidVersionAtLeast(33)) Toast.MakeText(_activity, "Transfer ID copied", ToastLength.Short)?.Show();
                 }), new LinearLayout.LayoutParams(Dp(44), Dp(44)));
             line.ContentDescription = label + ", " + value;
             info.AddView(line, new LinearLayout.LayoutParams(-1, -2) { TopMargin = Dp(6), BottomMargin = Dp(6) });
@@ -656,7 +737,11 @@ internal sealed partial class RemoteFilesScreen
     {
         try
         {
+#if INBOUND_TEST_BUILD
+            var result = FixtureMode is null ? await _client.GetTransferAsync(t.Id, _life.Token) : new SiteTransferResultDto { Ok = true, Items = FixtureItems(t.Id) };
+#else
             var result = await _client.GetTransferAsync(t.Id, _life.Token);
+#endif
             if (!SameHost() || !dialog.IsShowing || result.Items is not { Count: > 0 } items) return;
             _transferPaths[t.Id] = [.. items.Select(item => item.Path).Take(2000)];
             bool all = false;
@@ -725,7 +810,7 @@ internal sealed partial class RemoteFilesScreen
         lineView.Ellipsize = TextUtils.TruncateAt.End;
         texts.AddView(lineView);
         row.AddView(texts, new LinearLayout.LayoutParams(0, -2, 1));
-        if (item.State == "done" && t.Direction == "download" && _phoneHost)
+        if (item.State == "done" && CanShowTransferFolder(t))
             row.AddView(IconButton(Resource.Drawable.ic_remote_folder, "Show " + name + " in folder", () =>
             {
                 var open = _sheet; _sheet = null; open?.Dismiss();
@@ -733,5 +818,19 @@ internal sealed partial class RemoteFilesScreen
             }), new LinearLayout.LayoutParams(Dp(44), Dp(44)));
         row.ContentDescription = name + ", " + line;
         return row;
+    }
+
+    /// <summary>A filter chip speaks as a toggle button that is checked when it is the shown filter.</summary>
+    private sealed class ChipDelegate(bool on) : View.AccessibilityDelegate
+    {
+        public override void OnInitializeAccessibilityNodeInfo(View host, Android.Views.Accessibility.AccessibilityNodeInfo info)
+        {
+            base.OnInitializeAccessibilityNodeInfo(host, info);
+            info.ClassName = "android.widget.ToggleButton";
+            info.Checkable = true;
+#pragma warning disable CA1422
+            info.Checked = on;
+#pragma warning restore CA1422
+        }
     }
 }

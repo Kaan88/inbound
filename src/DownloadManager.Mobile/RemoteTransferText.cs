@@ -105,7 +105,7 @@ public static class RemoteTransferText
             {
                 var rate = t.Speed > 0 ? " · " + Fmt.Rate(t.Speed) : "";
                 var left = t.Speed > 0 && t.Bytes > t.BytesDone ? " · " + Fmt.Eta((double)(t.Bytes - t.BytesDone) / t.Speed) : "";
-                if (single) return Sizes(t) + rate + left;
+                if (single) return t.Bytes > 0 ? Sizes(t) + rate + left : "Starting" + rate;
                 int done = Math.Min(files, t.FilesDone + t.FilesSkipped);
                 return $"{done} of {files} files" + (t.Bytes > 0 ? " · " + Sizes(t) : "") + rate;
             }
@@ -153,20 +153,38 @@ public static class RemoteTransferText
     /// <summary>The reason banner of the details sheet; null when there is nothing to say.</summary>
     public static (string Title, string? Detail, bool Warning)? Reason(SiteTransferDto t)
     {
-        if (t.State == "paused") return ("Unfinished files restart from the beginning on resume.", null, true);
-        if (t.State != "failed") return null;
+        if (t.State == "paused") return ("Paused", "Unfinished files restart from the beginning on resume.", true);
+        if (t.State != "failed")
+            return t.State == "done" && !string.IsNullOrWhiteSpace(t.Message) ? ("Finished with a note", t.Message, true) : null;
+        string? problem = ProblemText(t);
+        if (problem is not null) return (problem, string.IsNullOrWhiteSpace(t.Message) ? null : t.Message, false);
         int missing = Math.Max(NotCopied(t), t.FilesFailed);
         var detail = missing > 0 ? (missing == 1 ? "Retry sends only the file that is missing." : $"Retry sends only the {missing} files that are missing.") : null;
         return (string.IsNullOrWhiteSpace(t.Message) ? "The transfer stopped" : t.Message!, detail, false);
     }
 
+    /// <summary>True when the failure needs a sign-in or a trust decision first, so Retry alone would fail again.</summary>
+    public static bool NeedsAttention(SiteTransferDto t) => ProblemText(t) is not null;
+
+    private static string? ProblemText(SiteTransferDto t) => t.Problem switch
+    {
+        SiteProblems.SignInNeeded => "Sign in to " + t.SiteName + " again, then retry",
+        SiteProblems.HostKeyChanged => "The server's key changed",
+        SiteProblems.HostKeyNotAccepted => "The server's key is not accepted yet",
+        SiteProblems.CertificateNotTrusted => "The server's certificate is not trusted",
+        _ => null,
+    };
+
+    /// <summary>The file name of a batch item path ("Photos/IMG_1.jpg" is "IMG_1.jpg").</summary>
+    public static string LeafName(string path) => path[(path.LastIndexOf('/') + 1)..];
+
     /// <summary>A file of the details sheet: its name, what happened and whether that is a problem.</summary>
     public static (string Name, string Line, TransferTone Tone) FileLine(SiteTransferItemDto item) => item.State switch
     {
-        "done" => (item.Path, "Copied" + (item.Size > 0 ? " · " + Fmt.Bytes(item.Size) : ""), TransferTone.Done),
-        "skipped" => (item.Path, "Already there", TransferTone.Neutral),
-        "failed" => (item.Path, "Not copied" + (string.IsNullOrWhiteSpace(item.Error) ? "" : " · " + item.Error), TransferTone.Failed),
-        "running" => (item.Path, "Copying" + (item.Size > 0 ? " · " + Fmt.Bytes(item.Size) : ""), TransferTone.Running),
-        _ => (item.Path, "Waiting" + (item.Size > 0 ? " · " + Fmt.Bytes(item.Size) : ""), TransferTone.Neutral),
+        "done" => (LeafName(item.Path), "Copied" + (item.Size > 0 ? " · " + Fmt.Bytes(item.Size) : ""), TransferTone.Done),
+        "skipped" => (LeafName(item.Path), "Already there", TransferTone.Neutral),
+        "failed" => (LeafName(item.Path), "Not copied" + (string.IsNullOrWhiteSpace(item.Error) ? "" : " · " + item.Error), TransferTone.Failed),
+        "running" => (LeafName(item.Path), "Copying" + (item.Size > 0 ? " · " + Fmt.Bytes(item.Size) : ""), TransferTone.Running),
+        _ => (LeafName(item.Path), "Waiting" + (item.Size > 0 ? " · " + Fmt.Bytes(item.Size) : ""), TransferTone.Neutral),
     };
 }

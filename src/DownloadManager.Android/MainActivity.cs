@@ -70,6 +70,7 @@ public sealed partial class MainActivity : AppCompatActivity
         var appearance = new Appearance(_prefs);
 #if INBOUND_TEST_BUILD
         if (Intent?.GetBooleanExtra("skip_first_run", false) == true) _prefs.SetBool(FirstRunKey, true);
+        RemoteFilesScreen.FixtureMode = Intent?.GetStringExtra("x_fixture"); // canned Transfers screen, see RemoteFilesScreen.Fixture.cs
 #endif
 
         // --- Step 6 (ANDROID.7) hook: the connection is the shown host's (this phone, or a paired Inbound), and the host
@@ -115,6 +116,9 @@ public sealed partial class MainActivity : AppCompatActivity
         _model.HostHelloChanged += () =>
         {
             var offered = _model.Hello?.Capabilities.Contains("sites") == true;
+#if INBOUND_TEST_BUILD
+            offered |= RemoteFilesScreen.FixtureMode is not null;
+#endif
             if (!offered && _onRemoteFiles) bottom.SelectedItemId = Resource.Id.nav_downloads;
             bottom.Menu.FindItem(Resource.Id.nav_remote_files)!.SetVisible(offered);
         };
@@ -137,6 +141,13 @@ public sealed partial class MainActivity : AppCompatActivity
         _model.FirstSnapshotShown += () =>
         {
             var remoteFilesOffered = _model.Hello?.Capabilities.Contains("sites") == true;
+#if INBOUND_TEST_BUILD
+            if (RemoteFilesScreen.FixtureMode is not null)
+            {
+                bottom.Menu.FindItem(Resource.Id.nav_remote_files)!.SetVisible(true);
+                bottom.SelectedItemId = Resource.Id.nav_remote_files;
+            }
+#endif
             if (remoteFilesOffered && savedInstanceState?.GetBoolean("on_remote_files") == true)
                 bottom.SelectedItemId = Resource.Id.nav_remote_files;
             foreach (var r in _model.Rows) WatchForFinish(r);
@@ -735,7 +746,7 @@ public sealed partial class MainActivity : AppCompatActivity
         _torBox?.SetVisible(true);
         _addTorrent?.SetVisible(true);
         _remoteFiles?.SetVisible(true);
-        _appVisibleForTracking = true;
+        ResumeTracking();
     }
 
     protected override void OnStop()
@@ -750,7 +761,7 @@ public sealed partial class MainActivity : AppCompatActivity
         _torBox?.SetVisible(false);
         _addTorrent?.SetVisible(false);
         _remoteFiles?.SetVisible(false);
-        _appVisibleForTracking = false;
+        StopTrackingLoop();
         base.OnStop();
     }
 

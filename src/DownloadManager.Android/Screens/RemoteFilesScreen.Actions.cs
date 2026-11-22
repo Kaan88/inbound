@@ -611,7 +611,7 @@ internal sealed partial class RemoteFilesScreen
         UpdateFolderUi();
         // x7: "2 files going to Download/Inbound/Music" with View transfers.
         string place = mode == RemoteTransferMode.Download
-            ? (_phoneHost ? RemoteTransfers.PhoneLabel(target.Path) : _hostName) : TargetPlace(target);
+            ? (_phoneHost ? RemoteTransfers.PhoneLabel(target.Path) : _hostName + " in " + (source.Site?.LocalFolder ?? "its download folder")) : TargetPlace(target);
         string what = items.Count == 1 ? items[0].Name : items.All(item => !item.IsFolder) ? items.Count + " files" : items.Count + " items";
         string message = failure is null ? what + " going to " + place
             : batches > 0 ? $"{batches} started. {failure}" : failure;

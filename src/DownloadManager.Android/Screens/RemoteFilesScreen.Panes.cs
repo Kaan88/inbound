@@ -39,6 +39,11 @@ internal sealed partial class RemoteFilesScreen
         /// <summary>A file outlined for a moment with an Open pill (Show in folder, x9); MarkShown once it has been scrolled to.</summary>
         public string? Mark;
         public bool MarkShown;
+        /// <summary>The folder the mark was made for (set when its rows first arrive) and when it was asked for; a mark that is not found expires.</summary>
+        public string? MarkPath;
+        public long MarkSince;
+        /// <summary>The file whose Open pill stays until the person leaves the folder (the outline fades, the pill does not).</summary>
+        public string? PillMark;
         public RemoteSort Sort = RemoteSort.Name;
         public CancellationTokenSource? Request;
         /// <summary>One token per folder-count request, so a later page's request does not cancel an earlier one; Cancel() ends all of them.</summary>
@@ -90,6 +95,8 @@ internal sealed partial class RemoteFilesScreen
         pane.Listing = pane.Error = null;
         pane.Total = 0;
         pane.Loading = pane.NeedsSignIn = pane.KeyProblem = false;
+        pane.Mark = pane.PillMark = pane.MarkPath = null;
+        pane.MarkShown = false;
     }
 
     private static string PaneRootOf(SiteDto site) => RemoteCrumbs.Normalize(site.RemoteFolder);

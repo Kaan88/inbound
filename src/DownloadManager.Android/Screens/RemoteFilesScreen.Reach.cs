@@ -1,5 +1,4 @@
 using Android.Views;
-using Android.Widget;
 using DownloadManager.Contracts;
 using DownloadManager.Mobile;
 
@@ -44,7 +43,7 @@ internal sealed partial class RemoteFilesScreen
         switch (t.Direction)
         {
             case "download" when _phoneHost:
-                ShowPhoneFolderNow(Join(RemoteTransferText.PhonePath(t.LocalFolder)), mark);
+                ShowPhoneFolderNow(Join(RemoteTransferText.PhonePath(t.LocalFolder)), mark, t.SiteId);
                 break;
             case "upload" when _sites.FirstOrDefault(site => site.Id == t.SiteId) is { } uploadSite:
                 OpenFolderAt(uploadSite, Join(t.RemoteFolder), mark);
@@ -69,13 +68,13 @@ internal sealed partial class RemoteFilesScreen
         ShowPhoneFolderNow(show.Path, show.File);
     }
 
-    private void ShowPhoneFolderNow(string phonePath, string? file) => OpenFolderAt(null, phonePath, file);
+    private void ShowPhoneFolderNow(string phonePath, string? file, string? leftSiteId = null) => OpenFolderAt(null, phonePath, file, leftSiteId);
 
     /// <summary>
     /// Shows the folder view with a folder of <paramref name="site"/> in the left tab, or (null site) the phone's folder in the right tab,
     /// and outlines <paramref name="mark"/> for a moment.
     /// </summary>
-    private void OpenFolderAt(SiteDto? site, string path, string? mark)
+    private void OpenFolderAt(SiteDto? site, string path, string? mark, string? leftSiteId = null)
     {
         if (!SameHost()) return;
         _transfersGen++;
@@ -85,13 +84,15 @@ internal sealed partial class RemoteFilesScreen
         _sheet?.Dismiss();
         _inFolder = true;
         _lastActiveTransfers = _transfers.Count(RemoteTransferText.IsActive);
-        SiteDto? left = site ?? _sites.FirstOrDefault();
+        SiteDto? left = site ?? _sites.FirstOrDefault(s => s.Id == leftSiteId) ?? _sites.FirstOrDefault();
         ResetPane(_panes[0], left, site is null ? null : path);
         ResetPane(_panes[1], null, site is null ? path : "Download");
         _active = site is null ? 1 : 0;
         var shown = Active;
-        shown.Mark = mark;
+        shown.Mark = shown.PillMark = mark;
         shown.MarkShown = false;
+        shown.MarkPath = null;
+        shown.MarkSince = Environment.TickCount64;
         Render();
         _ = BrowsePaneAsync(_panes[0], _panes[0].Site is null ? "Download" : site is null ? null : path, false);
         _ = BrowsePaneAsync(_panes[1], site is null ? path : "Download", false);
@@ -101,14 +102,22 @@ internal sealed partial class RemoteFilesScreen
     private void ApplyMark(Pane pane)
     {
         if (pane.Mark is not { } mark || pane.MarkShown) return;
+        // The mark belongs to the folder whose rows arrived first; another folder never shows it.
+        pane.MarkPath ??= pane.Path;
+        if (pane.MarkPath != pane.Path) { pane.Mark = pane.PillMark = null; return; }
         int index = pane.Rows.FindIndex(row => row.Name == mark);
-        if (index < 0) return;
+        if (index < 0)
+        {
+            // A just-finished file may not be in the phone's media index yet; give up after a while.
+            if (!pane.Loading && Environment.TickCount64 - pane.MarkSince > 10000) pane.Mark = pane.PillMark = null;
+            return;
+        }
         pane.MarkShown = true;
         _folderList!.ScrollToPosition(index);
         _surface.PostDelayed(() =>
         {
             if (_closed || pane.Mark != mark) return;
-            pane.Mark = null;
+            pane.Mark = null; // the outline fades; the Open pill stays until the person leaves the folder
             UpdateFolderUi();
         }, MarkMilliseconds);
     }
@@ -118,7 +127,7 @@ internal sealed partial class RemoteFilesScreen
     {
         int active = _transfers.Count(RemoteTransferText.IsActive);
         var frame = new FrameLayout(_activity);
-        frame.AddView(IconButton(Resource.Drawable.ic_remote_transfers, active > 0 ? "Transfers, " + active + " running" : "Transfers", OpenTransfers),
+        frame.AddView(IconButton(Resource.Drawable.ic_remote_transfers, active > 0 ? "Transfers, " + active + " active" : "Transfers", OpenTransfers),
             new FrameLayout.LayoutParams(Dp(48), Dp(48)));
         if (active > 0)
         {
