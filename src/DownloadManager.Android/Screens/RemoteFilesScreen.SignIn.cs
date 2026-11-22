@@ -370,6 +370,7 @@ internal sealed partial class RemoteFilesScreen
     private void FinishSignInWait(string siteId)
     {
         if (_signInSiteId != siteId) return;
+        if (_retryAfterSignIn is { } stale && stale.SiteId == siteId) _retryAfterSignIn = null;
         _signInSiteId = null;
         _signInAgain = null;
         _signInWait?.Dispose();

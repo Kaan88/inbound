@@ -336,7 +336,10 @@ internal sealed partial class RemoteFilesScreen
             }
         }
         catch (OperationCanceledException) { }
-        catch (Exception) { if (generation == pane.Generation) pane.Total = pane.Items.Count; }
+        catch (Exception)
+        {
+            if (generation == pane.Generation) { pane.Total = pane.Items.Count; pane.RestError = "Could not load the rest of this folder."; }
+        }
         if (!_closed && generation == pane.Generation) UpdateFolderUi();
     }
 
@@ -389,6 +392,7 @@ internal sealed partial class RemoteFilesScreen
     // ---------------------------------------------------------------------------------------------------------------
     // The phone's side: Android's scoped Download folder, with the phone's own sizes and dates.
 
+    internal const string FolderNotAvailable = "This folder is not available.";
     private sealed record PhoneFolder(IReadOnlyList<SiteItemDto> Items, IReadOnlyDictionary<string, Android.Net.Uri> Uris, string? Error);
 
     /// <summary>
@@ -401,7 +405,7 @@ internal sealed partial class RemoteFilesScreen
         if (phonePath.Length == 0)
             return new PhoneFolder([new SiteItemDto { Name = "Download", IsFolder = true }], none, null);
         if (RemoteTransfers.DownloadRelative(phonePath) is not { } relativePath || !SafeRelativeFolder(relativePath))
-            return new PhoneFolder([], none, "This folder is not available.");
+            return new PhoneFolder([], none, FolderNotAvailable);
 
         var files = new Dictionary<string, SiteItemDto>(StringComparer.Ordinal);
         var uris = new Dictionary<string, Android.Net.Uri>(StringComparer.Ordinal);

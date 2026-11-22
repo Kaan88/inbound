@@ -19,6 +19,8 @@ internal sealed partial class RemoteFilesScreen
 {
     private int _addStep;                 // 0 = type picker, 1 = form
     private SiteDto? _editSite;           // set when editing a saved location
+    private SiteDto? _savedSite;         // the saved location while the form is still open after the save
+    private int _formToken;               // bumped when a form opens, so a late key read is dropped
     private string? _savedId;             // saved by this form but not yet confirmed to connect
     private readonly Dictionary<string, string> _fv = new(StringComparer.Ordinal);
     private bool _allowInsecure, _moreOpen, _ownIdOpen;
@@ -92,11 +94,12 @@ internal sealed partial class RemoteFilesScreen
     private void ChooseKeyFile()
     {
         if (!SameHost() || _busy || !_secureHostConnection) return;
-        if (!_activity.PickKeyFile(uri => { if (uri is not null) ReadKeyFile(uri); }))
+        int token = _formToken;
+        if (!_activity.PickKeyFile(uri => { if (uri is not null) ReadKeyFile(uri, token); }))
             _activity.ShowMessage("No file chooser is available on this phone.");
     }
 
-    private void ReadKeyFile(Android.Net.Uri uri)
+    private void ReadKeyFile(Android.Net.Uri uri, int token)
     {
         var resolver = _activity.ContentResolver!;
         _ = Task.Run(() =>
@@ -116,7 +119,9 @@ internal sealed partial class RemoteFilesScreen
                     memory.Write(buffer, 0, read);
                     if (memory.Length > SftpKeyFile.MostKeyBytes) { failure = SftpKeyFile.TooLargeMessage; break; }
                 }
-                if (failure is null) text = new System.Text.UTF8Encoding(false, false).GetString(memory.GetBuffer(), 0, (int)memory.Length);
+                if (failure is null) text = new System.Text.UTF8Encoding(false, false).GetString(memory.GetBuffer(), 0, (int)memory.Length).TrimStart('﻿');
+                System.Security.Cryptography.CryptographicOperations.ZeroMemory(memory.GetBuffer());
+                Array.Clear(buffer);
             }
             catch (Exception e) when (e is IOException or Java.Lang.SecurityException or UnauthorizedAccessException or InvalidOperationException)
             {
@@ -125,7 +130,7 @@ internal sealed partial class RemoteFilesScreen
 
             _activity.RunOnUiThread(() =>
             {
-                if (_closed || !_adding || _addStep != 1 || _addKind != SiteKindCatalog.Sftp) { text = null; return; }
+                if (_closed || _busy || token != _formToken || !_adding || _addStep != 1 || _addKind != SiteKindCatalog.Sftp) { text = null; return; }
                 _passphraseError = null;
                 _keyName = name;
                 if (text is null) { _keyText = null; _keyKind = "Not a private key"; _keyError = failure ?? SftpKeyFile.UnreadableMessage; }
@@ -150,7 +155,7 @@ internal sealed partial class RemoteFilesScreen
         _adding = true;
         _addStep = 0;
         _editSite = null;
-        _savedId = null;
+        _savedId = null; _savedSite = null; _formToken++;
         _allowInsecure = _moreOpen = _ownIdOpen = false;
         ClearKeyState();
         _fv.Clear();
@@ -164,7 +169,7 @@ internal sealed partial class RemoteFilesScreen
         _adding = true;
         _addStep = 1;
         _editSite = site;
-        _savedId = null;
+        _savedId = null; _savedSite = null; _formToken++;
         _addKind = site.Kind;
         _allowInsecure = site.Kind == SiteKindCatalog.WebDav && site.Url?.StartsWith("http://", StringComparison.OrdinalIgnoreCase) == true
             || site.Kind == SiteKindCatalog.Ftp && site.Tls == SiteTlsModes.None;
@@ -198,7 +203,7 @@ internal sealed partial class RemoteFilesScreen
             CancelCurrent();
             ClearPassword();
             _busy = false;
-            _adding = false; _addStep = 0; _editSite = null; _savedId = null;
+            _adding = false; _addStep = 0; _editSite = null; _savedId = null; _savedSite = null;
             _fv.Clear();
             _ = LoadLocationsAsync();
             return;
@@ -214,7 +219,7 @@ internal sealed partial class RemoteFilesScreen
         }
         bool saved = _savedId is not null;
         ClearPassword();
-        _adding = false; _addStep = 0; _editSite = null; _savedId = null;
+        _adding = false; _addStep = 0; _editSite = null; _savedId = null; _savedSite = null;
         _fv.Clear();
         CancelCurrent();
         if (saved) _ = LoadLocationsAsync(); else Render();
@@ -230,7 +235,7 @@ internal sealed partial class RemoteFilesScreen
     private Task FinishFormLoad()
     {
         ClearPassword();
-        _adding = false; _addStep = 0; _editSite = null; _savedId = null;
+        _adding = false; _addStep = 0; _editSite = null; _savedId = null; _savedSite = null;
         _fv.Clear();
         _busy = false;
         return LoadLocationsAsync();
@@ -239,7 +244,7 @@ internal sealed partial class RemoteFilesScreen
     private void FinishForm()
     {
         ClearPassword();
-        _adding = false; _addStep = 0; _editSite = null; _savedId = null;
+        _adding = false; _addStep = 0; _editSite = null; _savedId = null; _savedSite = null;
         _fv.Clear();
         _busy = false;
         _ = LoadLocationsAsync();
@@ -467,8 +472,9 @@ internal sealed partial class RemoteFilesScreen
             if (keyLogin)
             {
                 // y1 to y3: the private key row, its passphrase, and the note.
-                _content.AddView(FolderText("Private key", 14, Resource.Attribute.colorOnSurfaceVariant), new LinearLayout.LayoutParams(-2, -2) { LeftMargin = Dp(4), BottomMargin = Dp(6) });
-                bool savedKey = !KeyChosen && site is { AuthMethod: "key", HasPrivateKey: true };
+                _content.AddView(FolderText("Private key", 13, Resource.Attribute.colorOnSurfaceVariant), new LinearLayout.LayoutParams(-2, -2) { LeftMargin = Dp(4), BottomMargin = Dp(6) });
+                var keySite = site ?? _savedSite;
+                bool savedKey = !KeyChosen && keySite is { AuthMethod: "key", HasPrivateKey: true };
                 _content.AddView(KeyRow(savedKey, secure));
                 if (_keyError is not null)
                 {
@@ -477,7 +483,7 @@ internal sealed partial class RemoteFilesScreen
                     _content.AddView(problem);
                 }
                 bool usable = KeyChosen || savedKey;
-                bool replaceSaved = savedKey && site!.HasKeyPassphrase;
+                bool replaceSaved = savedKey && keySite!.HasKeyPassphrase;
                 var pass = Add(_content, "keypass", savedKey ? "Key passphrase" : "Key passphrase (if the key has one)", password: true,
                     placeholder: replaceSaved ? "Saved; type to replace" : null,
                     changed: _ => { if (_passphraseError is not null && layout0("keypass") is { } l) { _passphraseError = null; SetFieldError(l, null); } });
@@ -621,7 +627,7 @@ internal sealed partial class RemoteFilesScreen
     /// <summary>y1 to y3: "Sign in with" and the Password / Key choice (a 44 dp pill, the chosen half tinted with a check).</summary>
     private void AddAuthChoice(bool key, bool secure)
     {
-        var label = FolderText("Sign in with", 14, Resource.Attribute.colorOnSurfaceVariant);
+        var label = FolderText("Sign in with", 13, Resource.Attribute.colorOnSurfaceVariant);
         label.SetPadding(Dp(4), Dp(2), 0, Dp(6));
         _content.AddView(label);
         var group = new MaterialButtonToggleGroup(_activity) { SingleSelection = true, SelectionRequired = true };
@@ -791,7 +797,8 @@ internal sealed partial class RemoteFilesScreen
         if (kind == SiteKindCatalog.B2 && (V("user").Trim().Length == 0 || !hasPassword)) Fail("user", B2KeysRequired);
         string ownId = V("ownId").Trim(), ownSecret = V("ownSecret");
         if (cloud && ClientIdProblem(ownId, ownSecret) is { } clientProblem) Fail("ownId", clientProblem);
-        if (_editSite is { HasPassword: true } stored && stored.AuthMethod != "key" && V("password").Length == 0 && !SiteKindCatalog.SignsIn(kind))
+        bool keyLogin = kind == SiteKindCatalog.Sftp && V("auth") == "key", keyFailed = false;
+        if (!keyLogin && _editSite is { HasPassword: true } stored && stored.AuthMethod != "key" && V("password").Length == 0 && !SiteKindCatalog.SignsIn(kind))
         {
             bool moved = kind switch
             {
@@ -802,18 +809,17 @@ internal sealed partial class RemoteFilesScreen
             };
             if (moved) Fail("password", "Enter the password again: it isn't kept for a new address.");
         }
-        bool keyLogin = kind == SiteKindCatalog.Sftp && V("auth") == "key", keyFailed = false;
         if (keyLogin)
         {
             // y1 to y3. A chosen file was checked when it was picked; a saved key stays only for the same server and user name.
             if (KeyChosen && _keyText is null) failed = keyFailed = true;
             else if (!KeyChosen)
             {
-                bool keeps = _editSite is { AuthMethod: "key", HasPrivateKey: true } held
+                bool keeps = (_editSite ?? _savedSite) is { AuthMethod: "key", HasPrivateKey: true } held
                     && string.Equals(held.Host, host, StringComparison.OrdinalIgnoreCase) && held.Port == port && held.User == V("user").Trim();
                 if (!keeps)
                 {
-                    _keyError = _editSite is { AuthMethod: "key", HasPrivateKey: true }
+                    _keyError = (_editSite ?? _savedSite) is { AuthMethod: "key", HasPrivateKey: true }
                         ? "Choose the key file again: it isn't kept for a new address or user name."
                         : "Choose the private key file to sign in with.";
                     failed = keyFailed = true;
@@ -886,6 +892,7 @@ internal sealed partial class RemoteFilesScreen
         if (saved is not null) ClearKeyState(); // the Host holds the key now; the phone keeps no copy
         if (saved is null || !SameHost() || generation != _generation) return;
         _savedId = saved.Id;
+        _savedSite = saved;
         string kind = saved.Kind;
         bool editing = _editSite is not null;
         if (SiteKindCatalog.SignsIn(kind))

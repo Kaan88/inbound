@@ -41,7 +41,7 @@ internal sealed partial class RemoteFilesScreen
         }
         if (probe is null)
         {
-            if (_error is not null && _inFolder) Toast.MakeText(_activity, _error, ToastLength.Long)?.Show();
+            if (_error is not null && (_inFolder || _showTransfers)) Toast.MakeText(_activity, _error, ToastLength.Long)?.Show();
             return;
         }
         if (!SameHost() || generation != _generation || _confirm is not null) return;
@@ -123,7 +123,7 @@ internal sealed partial class RemoteFilesScreen
         {
             if (!_closed && generation == _generation) { _busy = _mutation = false; Render(); }
         }
-        if (!saved) { if (_error is not null && _inFolder) Toast.MakeText(_activity, _error, ToastLength.Long)?.Show(); return; }
+        if (!saved) { if (_error is not null && (_inFolder || _showTransfers)) Toast.MakeText(_activity, _error, ToastLength.Long)?.Show(); return; }
         await LoadLocationsAsync();
         if (SameHost()) trusted?.Invoke();
     }

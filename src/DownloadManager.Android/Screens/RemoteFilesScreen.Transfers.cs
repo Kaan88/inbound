@@ -460,9 +460,10 @@ internal sealed partial class RemoteFilesScreen
         switch (attention)
         {
             case TransferAttention.SignIn:
+                _expiredCloudSites.Add(site.Id); // the Host says the sign-in lapsed, whatever the location list still shows
                 if (!CanSignIn(site)) { _activity.ShowMessage("Sign in to " + site.Name + " from the Host."); return; }
-                _retryAfterSignIn = (site.Id, t.Id);
                 BeginCloudSignIn(site, again: true);
+                if (_signInWait is not null && _signInSiteId == site.Id) _retryAfterSignIn = (site.Id, t.Id);
                 break;
             case TransferAttention.ReviewKey:
                 if (!_secureHostConnection) { _activity.ShowMessage("The server key must be reviewed over a secure connection to the Host."); return; }

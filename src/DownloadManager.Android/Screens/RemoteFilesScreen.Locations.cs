@@ -504,7 +504,7 @@ internal sealed partial class RemoteFilesScreen
                 if (fromForm)
                 {
                     ClearPassword();
-                    _adding = false; _addStep = 0; _editSite = null; _savedId = null; _fv.Clear();
+                    _adding = false; _addStep = 0; _editSite = null; _savedId = null; _savedSite = null; _fv.Clear();
                 }
                 _ = RemoveLocationAsync(site.Id);
             })!

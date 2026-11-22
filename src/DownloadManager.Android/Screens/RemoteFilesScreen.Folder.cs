@@ -252,7 +252,7 @@ internal sealed partial class RemoteFilesScreen
         string title = empty || pane.ErrorTitle is null ? message : pane.ErrorTitle;
         string? text = empty || pane.ErrorTitle is null ? null : message;
         int icon = Resource.Drawable.ic_remote_alert, disc = Attr(Resource.Attribute.colorSurfaceContainerHighest), tint = ResColor(Resource.Color.state_failed);
-        if (empty || pane.IsPhone && pane.Error == "This folder is not available.")
+        if (empty || pane.IsPhone && pane.Error == FolderNotAvailable)
         {
             icon = Resource.Drawable.ic_remote_folder; tint = Attr(Resource.Attribute.colorOnSurfaceVariant);
         }
@@ -278,7 +278,7 @@ internal sealed partial class RemoteFilesScreen
             if (_secureHostConnection) AddMessageAction("Review server key", Resource.Drawable.ic_settings_site_key, () =>
                 _ = ReviewSftpKeyAsync(FreshSite(sftp.Id) ?? sftp, () => _ = BrowsePaneAsync(pane, null, true)));
         }
-        else if (!pane.Loading && !(pane.IsPhone && pane.Error == "This folder is not available."))
+        else if (!pane.Loading && !(pane.IsPhone && pane.Error == FolderNotAvailable))
             AddMessageAction("Try again", Resource.Drawable.ic_refresh, () => _ = BrowsePaneAsync(pane, pane.Path, true));
     }
 
