@@ -76,7 +76,8 @@ internal sealed partial class RemoteFilesScreen
         }
         row.AddView(texts, new LinearLayout.LayoutParams(0, -2, 1));
         row.ContentDescription = subtitle is null ? title : title + ", " + subtitle;
-        row.Click += (_, _) => { _sheet?.Dismiss(); click(); };
+        // Clear _sheet now: its dismiss event only fires after the close animation, and click() may start work guarded by it.
+        row.Click += (_, _) => { var open = _sheet; _sheet = null; open?.Dismiss(); click(); };
         parent.AddView(row, new LinearLayout.LayoutParams(-1, Dp(56)));
         return row;
     }
@@ -216,7 +217,7 @@ internal sealed partial class RemoteFilesScreen
         name.SetSingleLine(true);
         name.Ellipsize = TextUtils.TruncateAt.End;
         texts.AddView(name);
-        var parts = new List<string> { item.Size >= 0 ? Fmt.Bytes(item.Size) : "Size unknown" };
+        var parts = new List<string> { item.Size >= 0 ? RemoteFileList.Size(item.Size) : "Size unknown" };
         if (item.Modified is { } modified) parts.Add(modified.ToLocalTime().ToString("d MMM yyyy", System.Globalization.CultureInfo.InvariantCulture));
         if (OnPhoneText(pane, item) is { } where) parts.Add(where);
         var sub = FolderText(string.Join(" · ", parts), 13, Resource.Attribute.colorOnSurfaceVariant);
@@ -471,7 +472,15 @@ internal sealed partial class RemoteFilesScreen
     {
         if (!SameHost() || _mutation || _sheet is not null || items.Count is 0 or > 100 || items.Any(item => !SafeName(item.Name))) return Task.CompletedTask;
         var mode = RemoteTransfers.Mode(source.IsPhone, target.IsPhone);
-        var clashing = RemoteConflicts.Clashes(items, TargetListing(mode, target));
+        var listing = TargetListing(mode, target);
+        var clashing = RemoteConflicts.Clashes(items, listing);
+        // A listing that is only partly loaded cannot rule a clash out, so ask unless the rows seen already say it.
+        if (clashing.Count == 0 && listing is not null && target.Items.Count < target.Total)
+        {
+            ShowConflictSheet($"{(items.Count == 1 ? items[0].Name : items.Count + " items")} may already exist in {TargetPlace(target)}",
+                conflict => _ = StartTransferCoreAsync(source, target, items, conflict));
+            return Task.CompletedTask;
+        }
         if (clashing.Count == 0) return StartTransferCoreAsync(source, target, items, RemoteConflicts.Skip);
         ShowConflictSheet(RemoteConflicts.Title(clashing, TargetPlace(target)), conflict => _ = StartTransferCoreAsync(source, target, items, conflict));
         return Task.CompletedTask;
@@ -595,7 +604,7 @@ internal sealed partial class RemoteFilesScreen
             // A transfer that just finished changes a folder on the other side; show it without moving the user.
             if (_inFolder && !_showTransfers && !_adding && active < _lastActiveTransfers)
                 foreach (var pane in _panes)
-                    if (!pane.Loading && pane.Selected.Count == 0 && pane.Error is null) _ = BrowsePaneAsync(pane, pane.Path, true);
+                    if (!pane.Loading && pane.Selected.Count == 0 && pane.Error is null) _ = BrowsePaneAsync(pane, pane.Path, true, keepView: true);
             _lastActiveTransfers = active;
         }
         catch (Exception) { /* A missing count must not disturb the folder. */ }

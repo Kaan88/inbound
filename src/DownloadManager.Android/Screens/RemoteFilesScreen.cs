@@ -273,9 +273,11 @@ internal sealed partial class RemoteFilesScreen : IDisposable
         {
             using var timer = new PeriodicTimer(TimeSpan.FromSeconds(3));
             while (await timer.WaitForNextTickAsync(token))
+            {
                 if (_busy || _adding || _showTransfers || !_surface.IsShown) continue;
                 if (_inFolder) await RefreshTransfersQuietAsync();
                 else await RefreshLocationTransfersAsync(_generation);
+            }
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }
     }

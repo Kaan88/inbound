@@ -240,13 +240,18 @@ internal sealed partial class RemoteFilesScreen
         var active = _transfers.Where(t => t.State is "queued" or "running" or "paused").ToArray();
         int uploads = active.Count(t => t.Direction == "upload");
         int downloads = active.Count(t => t.Direction == "download");
+        int copies = active.Count(t => t.Direction == "copy");
+        var directions = new List<string>();
+        if (uploads > 0) directions.Add(uploads + " up");
+        if (downloads > 0) directions.Add(downloads + " down");
+        if (copies > 0) directions.Add(copies + (copies == 1 ? " copy" : " copies"));
         long rate = active.Where(t => t.State == "running").Aggregate(0L, (total, t) =>
             total + Math.Min(long.MaxValue - total, Math.Max(0, t.Speed)));
         string summary = !_transfersLoaded
             ? "Transfer status unavailable"
             : active.Length == 0
             ? "No active transfers"
-            : $"{active.Length} {(active.Length == 1 ? "transfer" : "transfers")} · {uploads} up, {downloads} down";
+            : $"{active.Length} {(active.Length == 1 ? "transfer" : "transfers")} · {string.Join(", ", directions)}";
         if (_transfersLoaded && active.Any(t => t.State == "running"))
             summary += " · " + Fmt.Rate(rate);
         _locationTransferText.Text = summary;

@@ -17,6 +17,8 @@ internal sealed partial class RemoteFilesScreen
     private const int FirstPage = 100;
     private const int LaterPage = 500;
     private const int RowCap = 5000;
+    /// <summary>The most items one transfer or delete request takes.</summary>
+    private const int MaxSelected = 100;
 
     /// <summary>A pane's location, folder and rows. A null <see cref="Site"/> is this phone, whose path is "", "Download" or "Download/…".</summary>
     private sealed class Pane
@@ -31,10 +33,26 @@ internal sealed partial class RemoteFilesScreen
         public readonly HashSet<string> Selected = new(StringComparer.Ordinal);
         public string? Listing, Error;
         public int Total, Generation;
+        /// <summary>Changes when the pane shows a different folder or reloads from scratch (not on a quiet refresh); the list scrolls to the top on a change.</summary>
+        public int ViewEpoch;
         public bool Loading, NeedsSignIn, KeyProblem;
         public RemoteSort Sort = RemoteSort.Name;
-        public CancellationTokenSource? Request, Counts;
+        public CancellationTokenSource? Request;
+        /// <summary>One token per folder-count request, so a later page's request does not cancel an earlier one; Cancel() ends all of them.</summary>
+        public readonly CountRequests Counts = new();
         public bool IsPhone => Site is null;
+    }
+
+    private sealed class CountRequests
+    {
+        private readonly List<CancellationTokenSource> _open = [];
+        public void Add(CancellationTokenSource source) => _open.Add(source);
+        public void Remove(CancellationTokenSource source) => _open.Remove(source);
+        public void Cancel()
+        {
+            foreach (var source in _open.ToArray()) source.Cancel();
+            _open.Clear();
+        }
     }
 
     private readonly Pane[] _panes = [new Pane(), new Pane()];
@@ -57,6 +75,7 @@ internal sealed partial class RemoteFilesScreen
         pane.Request?.Cancel();
         pane.Counts?.Cancel();
         pane.Generation++;
+        pane.ViewEpoch++;
         pane.Site = site;
         pane.Path = path ?? (site is null ? "Download" : PaneRootOf(site));
         pane.Items.Clear();
@@ -138,7 +157,8 @@ internal sealed partial class RemoteFilesScreen
     // ---------------------------------------------------------------------------------------------------------------
     // Listing
 
-    private async Task BrowsePaneAsync(Pane pane, string? path, bool refresh)
+    /// <param name="keepView">A quiet refresh: the rows stay shown (and the scroll position and selection kept) until the new ones replace them.</param>
+    private async Task BrowsePaneAsync(Pane pane, string? path, bool refresh, bool keepView = false)
     {
         if (!SameHost()) return;
         pane.Request?.Cancel();
@@ -150,12 +170,16 @@ internal sealed partial class RemoteFilesScreen
         pane.Loading = true;
         pane.Error = null;
         pane.NeedsSignIn = pane.KeyProblem = false;
-        pane.Selected.Clear();
-        pane.Items.Clear();
-        pane.Rows = [];
-        pane.PhoneUris.Clear();
-        pane.Total = 0;
-        pane.Listing = null;
+        if (!keepView)
+        {
+            pane.ViewEpoch++;
+            pane.Selected.Clear();
+            pane.Items.Clear();
+            pane.Rows = [];
+            pane.PhoneUris.Clear();
+            pane.Total = 0;
+            pane.Listing = null;
+        }
         pane.Path = path ?? (site is null ? "Download" : PaneRootOf(site));
         UpdateFolderUi();
         long started = Environment.TickCount64, replied = -1;
@@ -167,6 +191,7 @@ internal sealed partial class RemoteFilesScreen
                 var phone = await Task.Run(() => ReadPhoneFolder(pane.Path));
                 if (_closed || generation != pane.Generation) return;
                 pane.Error = phone.Error;
+                if (keepView) { pane.Items.Clear(); pane.PhoneUris.Clear(); }
                 pane.Items.AddRange(phone.Items);
                 foreach (var pair in phone.Uris) pane.PhoneUris[pair.Key] = pair.Value;
                 pane.Total = pane.Items.Count;
@@ -211,6 +236,7 @@ internal sealed partial class RemoteFilesScreen
                 _knownListings[ListingKey(site.Id, path)] = result.Listing;
                 _knownListings[ListingKey(site.Id, result.Path)] = result.Listing;
             }
+            if (keepView) pane.Items.Clear();
             pane.Items.AddRange(result.Items);
             pane.Total = result.Items.Count == 0 ? pane.Items.Count : Math.Max(result.Total, pane.Items.Count);
             if (pane.Total > pane.Items.Count && string.IsNullOrEmpty(pane.Listing))
@@ -234,6 +260,7 @@ internal sealed partial class RemoteFilesScreen
             {
                 pane.Loading = false;
                 Resort(pane);
+                if (keepView) pane.Selected.RemoveWhere(name => pane.Items.All(item => item.Name != name));
                 UpdateFolderUi();
                 // Remote Files speed work: reply and first drawn rows, no names or paths.
                 Android.Util.Log.Info(InboundApplication.Tag, $"Remote Files browse: reply {replied} ms, rows drawn {Environment.TickCount64 - started} ms, {pane.Items.Count} rows");
@@ -279,35 +306,46 @@ internal sealed partial class RemoteFilesScreen
         if (!_closed && generation == pane.Generation) UpdateFolderUi();
     }
 
-    /// <summary>Folder counts for rows already shown, from the listing the Host still holds (review P1).</summary>
+    /// <summary>
+    /// Folder counts for rows already shown, from the listing the Host still holds (review P1). The Host caps the counts it
+    /// computes per request, so the request repeats for the same rows while folders are still missing a count and the last
+    /// reply filled at least one.
+    /// </summary>
     private async Task FillCountsAsync(Pane pane, int generation, string siteId, string path, string listing, int offset, int count)
     {
         var counts = CancellationTokenSource.CreateLinkedTokenSource(_life.Token);
-        pane.Counts?.Cancel();
-        pane.Counts = counts;
+        pane.Counts.Add(counts);
         try
         {
-            var result = await _client.BrowseAsync(new SiteBrowseRequest
+            for (int round = 0; round < 200; round++)
             {
-                Id = siteId, Path = path, Offset = offset, Limit = count, Listing = listing, IncludeFolderCounts = true
-            }, counts.Token);
-            if (_closed || generation != pane.Generation || !result.Ok || result.Listing != listing || result.Offset != offset) return;
-            bool changed = false;
-            for (int i = 0; i < result.Items.Count && offset + i < pane.Items.Count; i++)
-            {
-                var shown = pane.Items[offset + i];
-                var counted = result.Items[i];
-                if (!shown.IsFolder || counted.ChildCount is not { } children || shown.Name != counted.Name || shown.ChildCount == children) continue;
-                shown.ChildCount = children;
-                changed = true;
+                var result = await _client.BrowseAsync(new SiteBrowseRequest
+                {
+                    Id = siteId, Path = path, Offset = offset, Limit = count, Listing = listing, IncludeFolderCounts = true
+                }, counts.Token);
+                if (_closed || generation != pane.Generation || !result.Ok || result.Listing != listing || result.Offset != offset) return;
+                int filled = 0;
+                for (int i = 0; i < result.Items.Count && offset + i < pane.Items.Count; i++)
+                {
+                    var shown = pane.Items[offset + i];
+                    var counted = result.Items[i];
+                    if (!shown.IsFolder || counted.ChildCount is not { } children || shown.Name != counted.Name || shown.ChildCount is not null) continue;
+                    shown.ChildCount = children;
+                    filled++;
+                }
+                if (filled > 0) UpdateFolderUi();
+                bool missing = false;
+                for (int i = offset; i < offset + count && i < pane.Items.Count && !missing; i++)
+                    missing = pane.Items[i].IsFolder && pane.Items[i].ChildCount is null;
+                if (filled == 0 || !missing) break;
             }
-            if (changed) UpdateFolderUi();
         }
         catch (OperationCanceledException) { }
         catch (Exception) { /* Counts are optional; the folder stays as shown. */ }
         finally
         {
-            if (ReferenceEquals(pane.Counts, counts)) pane.Counts = null;
+            pane.Counts.Remove(counts);
+            counts.Dispose();
         }
     }
 
@@ -463,8 +501,16 @@ internal sealed partial class RemoteFilesScreen
         }
         if (site.Kind == SiteKindCatalog.Sftp && (site.HostKeys.Count == 0 || _changedSftpKeys.Contains(site.Id)))
         {
-            if (_secureHostConnection && _confirm is null)
-                _ = ReviewSftpKeyAsync(site, () => { if (FreshSite(site.Id) is { } fresh) ChoosePaneLocation(index, fresh); });
+            if (_secureHostConnection)
+            {
+                if (_confirm is null)
+                    _ = ReviewSftpKeyAsync(site, () => { if (FreshSite(site.Id) is { } fresh) ChoosePaneLocation(index, fresh); });
+                return;
+            }
+            // The key review needs a secure connection to the Host: show the pane on this site with the reason instead of doing nothing.
+            ResetPane(pane, site, null);
+            pane.Error = "This server's key must be reviewed over a secure connection to the Host.";
+            UpdateFolderUi();
             return;
         }
         if (NeedsCloudSignIn(site))
@@ -516,14 +562,20 @@ internal sealed partial class RemoteFilesScreen
     private void ToggleSelected(Pane pane, SiteItemDto item)
     {
         if (!SafeName(item.Name)) return;
-        if (!pane.Selected.Remove(item.Name) && pane.Selected.Count < 100) pane.Selected.Add(item.Name);
+        if (!pane.Selected.Remove(item.Name))
+        {
+            if (pane.Selected.Count < MaxSelected) pane.Selected.Add(item.Name);
+            else Toast.MakeText(_activity, $"{MaxSelected} selected, the most at once.", ToastLength.Short)?.Show();
+        }
         UpdateFolderUi();
     }
 
     private void SelectAll(Pane pane)
     {
         pane.Selected.Clear();
-        foreach (var item in pane.Rows.Where(item => SafeName(item.Name)).Take(100)) pane.Selected.Add(item.Name);
+        var selectable = pane.Rows.Where(item => SafeName(item.Name)).ToList();
+        foreach (var item in selectable.Take(MaxSelected)) pane.Selected.Add(item.Name);
+        if (selectable.Count > MaxSelected) Toast.MakeText(_activity, $"{MaxSelected} selected, the most at once.", ToastLength.Long)?.Show();
         UpdateFolderUi();
     }
 

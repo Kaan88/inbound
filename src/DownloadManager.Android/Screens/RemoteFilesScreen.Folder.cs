@@ -219,7 +219,7 @@ internal sealed partial class RemoteFilesScreen
 
     private void BuildRows(Pane pane)
     {
-        string identity = _active + "|" + (pane.Site?.Id ?? "phone") + "|" + pane.Path + "|" + pane.Generation + "|" + pane.Sort;
+        string identity = _active + "|" + (pane.Site?.Id ?? "phone") + "|" + pane.Path + "|" + pane.ViewEpoch + "|" + pane.Sort;
         bool reset = identity != _listIdentity;
         _listIdentity = identity;
         _folderAdapter!.NotifyDataSetChanged();
@@ -480,6 +480,8 @@ internal sealed partial class RemoteFilesScreen
         foreach (var (sort, label) in new[] { (RemoteSort.Name, "Name"), (RemoteSort.Newest, "Newest first"), (RemoteSort.Largest, "Largest first") })
             Item(0, label, () => { pane.Sort = sort; Resort(pane); UpdateFolderUi(); }, sub: true, on: pane.Sort == sort);
         if (CanMakeFolder(pane)) Item(Resource.Drawable.ic_remote_newfolder, "New folder", () => ShowNewFolderDialog(pane));
+        if (pane.Selected.Count == 1 && CanChange(pane) && SelectedItems(pane) is [var renamable])
+            Item(Resource.Drawable.ic_remote_edit, "Rename", () => ShowRenameDialog(pane, renamable));
         Item(Resource.Drawable.ic_remote_selall, "Select all", () => SelectAll(pane));
         int active = _transfers.Count(t => t.State is "queued" or "running" or "paused");
         Item(Resource.Drawable.ic_remote_transfers, "Transfers", OpenTransfers, active > 0 ? active.ToString() : null);
