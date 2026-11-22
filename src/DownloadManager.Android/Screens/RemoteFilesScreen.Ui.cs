@@ -1,0 +1,263 @@
+using Android.Content;
+using Android.Graphics.Drawables;
+using Android.Text;
+using Android.Views;
+using Android.Widget;
+using Google.Android.Material.Button;
+using Google.Android.Material.TextField;
+using Color = Android.Graphics.Color;
+using ColorStateList = Android.Content.Res.ColorStateList;
+
+namespace Inbound.App.Screens;
+
+/// <summary>Shared pieces of the x11 to x31 screens: banners, icon menu, copy boxes, outlined fields, pills and footers.</summary>
+internal sealed partial class RemoteFilesScreen
+{
+    private enum BannerKind { Info, Warn, Fail }
+
+    private int ResColor(int id) => _activity.GetColor(id);
+
+    private static GradientDrawable Rounded(int color, int radiusPx)
+    {
+        var drawable = new GradientDrawable();
+        drawable.SetColor(color);
+        drawable.SetCornerRadius(radiusPx);
+        return drawable;
+    }
+
+    /// <summary>Info (blue), warn (amber) or fail (red) banner. The leading view defaults to the icon; an action is a text button.</summary>
+    private LinearLayout Banner(BannerKind kind, string title, string? body, int icon, string? actionText = null, Action? action = null, View? leading = null)
+    {
+        int background, tint, text;
+        switch (kind)
+        {
+            case BannerKind.Warn:
+                background = ResColor(Resource.Color.state_waiting_container); tint = ResColor(Resource.Color.state_waiting);
+                text = Attr(Resource.Attribute.colorOnSurface); break;
+            case BannerKind.Fail:
+                background = ResColor(Resource.Color.state_failed_container); tint = ResColor(Resource.Color.state_failed);
+                text = Attr(Resource.Attribute.colorOnSurface); break;
+            default:
+                background = Attr(Resource.Attribute.colorPrimaryContainer); tint = Attr(Resource.Attribute.colorPrimary);
+                text = Attr(Resource.Attribute.colorOnPrimaryContainer); break;
+        }
+        var box = new LinearLayout(_activity) { Orientation = Orientation.Horizontal };
+        box.Background = Rounded(background, Dp(16));
+        box.SetPadding(Dp(16), Dp(14), Dp(16), Dp(14));
+        if (leading is null)
+        {
+            var glyph = new ImageView(_activity) { ImportantForAccessibility = ImportantForAccessibility.No };
+            glyph.SetImageResource(icon);
+            glyph.ImageTintList = ColorStateList.ValueOf(new Color(tint));
+            leading = glyph;
+            box.AddView(leading, new LinearLayout.LayoutParams(Dp(24), Dp(24)) { RightMargin = Dp(14), TopMargin = Dp(1) });
+        }
+        else box.AddView(leading, new LinearLayout.LayoutParams(-2, -2) { RightMargin = Dp(8) });
+        var column = new LinearLayout(_activity) { Orientation = Orientation.Vertical };
+        var heading = new TextView(_activity) { Text = title, TextSize = 16 };
+        heading.SetTextColor(new Color(text));
+        heading.SetTypeface(null, Android.Graphics.TypefaceStyle.Bold);
+        column.AddView(heading);
+        if (body is not null)
+        {
+            var detail = new TextView(_activity) { Text = body, TextSize = 14 };
+            detail.SetTextColor(new Color(text));
+            column.AddView(detail);
+        }
+        if (actionText is not null && action is not null)
+        {
+            var button = new MaterialButton(_activity, null, Resource.Attribute.borderlessButtonStyle) { Text = actionText };
+            button.SetAllCaps(false);
+            button.SetPadding(0, 0, 0, 0);
+            button.SetMinimumWidth(0);
+            button.Click += (_, _) => action();
+            column.AddView(button, new LinearLayout.LayoutParams(-2, Dp(44)) { TopMargin = Dp(6) });
+        }
+        box.AddView(column, new LinearLayout.LayoutParams(0, -2, 1));
+        box.LayoutParameters = new LinearLayout.LayoutParams(-1, -2) { BottomMargin = Dp(12) };
+        return box;
+    }
+
+    /// <summary>The x11b menu: icon and text per row, anchored under the button.</summary>
+    private void ShowIconMenu(View anchor, params (int Icon, string Text, Action Click)[] items)
+    {
+        var list = new LinearLayout(_activity) { Orientation = Orientation.Vertical };
+        list.Background = Rounded(Attr(Resource.Attribute.colorSurfaceContainer), Dp(16));
+        list.SetPadding(0, Dp(8), 0, Dp(8));
+        PopupWindow? popup = null;
+        foreach (var (icon, label, click) in items)
+        {
+            var row = new LinearLayout(_activity) { Orientation = Orientation.Horizontal, Clickable = true, Focusable = true };
+            row.SetGravity(GravityFlags.CenterVertical);
+            row.SetPadding(Dp(16), 0, Dp(24), 0);
+            row.Background = new TypedValueHolder(_activity).SelectableBackground();
+            row.AddView(SheetIcon(icon, Resource.Attribute.colorOnSurface), new LinearLayout.LayoutParams(Dp(24), Dp(24)) { RightMargin = Dp(16) });
+            row.AddView(FolderText(label, 16, Resource.Attribute.colorOnSurface));
+            row.ContentDescription = label;
+            var action = click;
+            row.Click += (_, _) => { popup?.Dismiss(); action(); };
+            list.AddView(row, new LinearLayout.LayoutParams(-1, Dp(52)));
+        }
+        popup = new PopupWindow(list, Dp(260), -2, true) { Elevation = Dp(8) };
+        popup.SetBackgroundDrawable(new ColorDrawable(Color.Transparent));
+        popup.ShowAsDropDown(anchor, 0, 0, GravityFlags.End);
+    }
+
+    private void CopyText(string text)
+    {
+        try
+        {
+            if (_activity.GetSystemService(Context.ClipboardService) is Android.Content.ClipboardManager clipboard)
+                clipboard.PrimaryClip = ClipData.NewPlainText("Inbound", text);
+            _activity.ShowMessage("Copied");
+        }
+        catch (Exception) { /* No clipboard: nothing to say. */ }
+    }
+
+    /// <summary>A monospace box with a copy button beside it (keys, fingerprints, the rclone command).</summary>
+    private View CopyBox(string text, string copyLabel, string? caption = null, string? copyText = null)
+    {
+        var holder = new LinearLayout(_activity) { Orientation = Orientation.Vertical };
+        if (caption is not null)
+        {
+            var cap = FolderText(caption, 14, Resource.Attribute.colorOnSurfaceVariant);
+            cap.SetPadding(Dp(4), Dp(8), 0, Dp(4));
+            holder.AddView(cap);
+        }
+        var row = new LinearLayout(_activity) { Orientation = Orientation.Horizontal };
+        row.SetGravity(GravityFlags.Top);
+        var mono = new TextView(_activity) { Text = text, TextSize = 12 };
+        mono.SetTypeface(Android.Graphics.Typeface.Monospace, Android.Graphics.TypefaceStyle.Normal);
+        mono.SetTextIsSelectable(true);
+        mono.SetTextColor(new Color(Attr(Resource.Attribute.colorOnSurface)));
+        mono.Background = Rounded(Attr(Resource.Attribute.colorSurfaceContainerHighest), Dp(16));
+        mono.SetPadding(Dp(16), Dp(12), Dp(16), Dp(12));
+        row.AddView(mono, new LinearLayout.LayoutParams(0, -2, 1));
+        row.AddView(IconButton(Resource.Drawable.ic_copy, copyLabel, () => CopyText(copyText ?? text)), new LinearLayout.LayoutParams(Dp(48), Dp(48)) { LeftMargin = Dp(4) });
+        holder.AddView(row);
+        holder.LayoutParameters = new LinearLayout.LayoutParams(-1, -2) { BottomMargin = Dp(6) };
+        return holder;
+    }
+
+    /// <summary>Outlined Material field from the app's field style. <paramref name="onChange"/> sees every edit.</summary>
+    private (TextInputLayout Layout, TextInputEditText Edit) OutlinedField(string label, string text, InputTypes type, bool password = false,
+        Action<string>? onChange = null, string? placeholder = null)
+    {
+        var layout = (TextInputLayout)LayoutInflater.From(_activity)!.Inflate(Resource.Layout.remote_field, null, false)!;
+        var edit = (TextInputEditText)layout.EditText!;
+        layout.Hint = label;
+        edit.SaveEnabled = false;
+        edit.InputType = type;
+        edit.ContentDescription = label;
+        if (placeholder is not null) edit.Hint = placeholder;
+        if (password)
+        {
+            edit.InputType = InputTypes.ClassText | InputTypes.TextVariationPassword;
+            layout.EndIconMode = TextInputLayout.EndIconPasswordToggle;
+            layout.EndIconContentDescription = "Show or hide " + label.ToLowerInvariant();
+        }
+        edit.Text = text;
+        if (onChange is not null) edit.TextChanged += (_, _) => onChange(edit.Text ?? "");
+        layout.LayoutParameters = new LinearLayout.LayoutParams(-1, -2) { BottomMargin = Dp(8) };
+        return (layout, edit);
+    }
+
+    private static void SetFieldError(TextInputLayout layout, string? message)
+    {
+        layout.Error = message;
+        layout.ErrorEnabled = message is not null;
+    }
+
+    private View HostPill()
+    {
+        var pill = new LinearLayout(_activity) { Orientation = Orientation.Horizontal };
+        pill.SetGravity(GravityFlags.CenterVertical);
+        pill.Background = Rounded(Attr(Resource.Attribute.colorPrimaryContainer), Dp(24));
+        pill.SetPadding(Dp(14), 0, Dp(16), 0);
+        pill.AddView(SheetIcon(Resource.Drawable.ic_host_desktop, Resource.Attribute.colorPrimary), new LinearLayout.LayoutParams(Dp(20), Dp(20)) { RightMargin = Dp(8) });
+        var name = FolderText(_hostName, 16, Resource.Attribute.colorOnPrimaryContainer);
+        name.SetSingleLine(true);
+        pill.AddView(name);
+        pill.ContentDescription = "Host " + _hostName;
+        return pill;
+    }
+
+    /// <summary>The top bar of a full-screen form: back or X, title, Host pill on a paired Host.</summary>
+    private View FormBar(string title, bool close, Action back)
+    {
+        var bar = new LinearLayout(_activity) { Orientation = Orientation.Horizontal };
+        bar.SetGravity(GravityFlags.CenterVertical);
+        var button = IconButton(close ? Resource.Drawable.ic_close : Resource.Drawable.ic_arrow_back, close ? "Close" : "Back", back);
+        bar.AddView(button, new LinearLayout.LayoutParams(Dp(48), Dp(48)));
+        var heading = FolderText(title, 24, Resource.Attribute.colorOnSurface);
+        heading.SetSingleLine(true);
+        heading.Ellipsize = TextUtils.TruncateAt.End;
+        heading.SetPadding(Dp(12), 0, 0, 0);
+        bar.AddView(heading, new LinearLayout.LayoutParams(0, -2, 1));
+        if (!_phoneHost) bar.AddView(HostPill(), new LinearLayout.LayoutParams(-2, Dp(44)));
+        bar.LayoutParameters = new LinearLayout.LayoutParams(-1, -2) { BottomMargin = Dp(14) };
+        return bar;
+    }
+
+    /// <summary>a5's footer: Cancel and the primary button on a 104 dp surface band over the scrolling form.</summary>
+    private MaterialButton FormFooter(string primaryText, int primaryIcon, Action cancel, Action primary, bool enabled = true)
+    {
+        var band = new LinearLayout(_activity) { Orientation = Orientation.Horizontal };
+        band.SetGravity(GravityFlags.CenterVertical);
+        band.SetBackgroundColor(new Color(Attr(Resource.Attribute.colorSurfaceContainer)));
+        band.SetPadding(Dp(16), 0, Dp(16), 0);
+        var cancelButton = new MaterialButton(_activity, null, Resource.Attribute.materialButtonOutlinedStyle) { Text = "Cancel", CornerRadius = Dp(32) };
+        cancelButton.SetAllCaps(false);
+        cancelButton.Click += (_, _) => cancel();
+        band.AddView(cancelButton, new LinearLayout.LayoutParams(-2, Dp(64)));
+        var ok = new MaterialButton(_activity) { Text = primaryText, CornerRadius = Dp(32), Enabled = enabled };
+        ok.SetAllCaps(false);
+        ok.SetIconResource(primaryIcon);
+        ok.IconGravity = MaterialButton.IconGravityTextStart;
+        ok.Click += (_, _) => primary();
+        band.AddView(ok, new LinearLayout.LayoutParams(0, Dp(64), 1) { LeftMargin = Dp(12) });
+        _surface.AddView(band, new FrameLayout.LayoutParams(-1, Dp(104), GravityFlags.Bottom));
+        return ok;
+    }
+
+    /// <summary>A bottom-sheet footer with Cancel and a primary pill, as in x20c, x26, x27 and x29.</summary>
+    private MaterialButton SheetButtons(LinearLayout parent, string primaryText, int primaryIcon, Action? primary, Action? cancel = null)
+    {
+        var row = new LinearLayout(_activity) { Orientation = Orientation.Horizontal };
+        row.SetPadding(Dp(24), Dp(12), Dp(24), 0);
+        var cancelButton = new MaterialButton(_activity, null, Resource.Attribute.materialButtonOutlinedStyle) { Text = "Cancel", CornerRadius = Dp(32) };
+        cancelButton.SetAllCaps(false);
+        cancelButton.Click += (_, _) => { var open = _sheet; _sheet = null; open?.Dismiss(); cancel?.Invoke(); };
+        row.AddView(cancelButton, new LinearLayout.LayoutParams(-2, Dp(64)));
+        var ok = new MaterialButton(_activity) { Text = primaryText, CornerRadius = Dp(32) };
+        ok.SetAllCaps(false);
+        if (primaryIcon != 0) { ok.SetIconResource(primaryIcon); ok.IconGravity = MaterialButton.IconGravityTextStart; }
+        ok.Click += (_, _) => { var open = _sheet; _sheet = null; open?.Dismiss(); primary?.Invoke(); };
+        row.AddView(ok, new LinearLayout.LayoutParams(0, Dp(64), 1) { LeftMargin = Dp(12) });
+        parent.AddView(row);
+        return ok;
+    }
+
+    private TextView SheetTitle(LinearLayout parent, string title, params string[] lines)
+    {
+        var heading = FolderText(title, 26, Resource.Attribute.colorOnSurface);
+        heading.SetPadding(Dp(24), 0, Dp(24), Dp(6));
+        parent.AddView(heading);
+        foreach (var line in lines)
+        {
+            var sub = FolderText(line, 16, Resource.Attribute.colorOnSurfaceVariant);
+            sub.SetPadding(Dp(24), Dp(2), Dp(24), Dp(2));
+            parent.AddView(sub);
+        }
+        return heading;
+    }
+
+    private void AddInset(LinearLayout parent, View view)
+    {
+        var existing = view.LayoutParameters as LinearLayout.LayoutParams ?? new LinearLayout.LayoutParams(-1, -2);
+        existing.LeftMargin = Dp(24); existing.RightMargin = Dp(24);
+        if (existing.TopMargin == 0) existing.TopMargin = Dp(8);
+        view.LayoutParameters = existing;
+        parent.AddView(view);
+    }
+}

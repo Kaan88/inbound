@@ -35,7 +35,15 @@ it, since this branch does not merge into `main` without the owner's say-so.
   save test (wrong passphrase refused, nothing stored; right one stored without passphrase or PuTTY text); 24 keys from a
   Python writer that reproduces PuTTY's four vectors byte for byte, all converted, each signing a file that `ssh-keygen -Y`
   verifies against the original public key, and 12 of them signing in to `rclone serve sftp` (an unknown key refused).
-  Left: the Android key UI (y1-y3, awaiting the owner), Fable.
+  Left: the Android key UI (y1-y3), Fable.
+- **Owner, 2026-11-22: "all mockups are fine."** So y1-y3 (SFTP key login on Android, `y-sftp-key.html`) are approved
+  as drawn, with x1-x33.
+- Drafts merged into this branch: Transfers and get-there (x1-x10, x33; `android-x-mockups-draft`, review fixes
+  `206f7363`) and locations and forms (x11-x31; `android-x-forms-draft`, review fixes `d94f457f`). One conflict in
+  `RemoteFilesScreen.Render` (Transfers keeps its own bar; forms reset it). Emulator test build clean, Mobile tests 718/718.
+  Open: x10b (the Downloads-tab folder page, with the FAB-lifted snackbar and the Torrent/TorBox actions), x32 pane
+  messages, the sign-in/trust action in place of Retry on a transfer that needs it, y1-y3 on Android; then captures
+  side by side with the mockups, the S24 on real data, Fable, release.
 - Owner, 2026-11-22: "have an agent look at existing extension adaptability to mobile edge for capturing links, or other
   solutions. non critical or required for release." Research done (sources only, nothing tried on a device):
   - Edge for Android runs extensions only from Microsoft's allowlist (store listing, mobile value, QA test cases, a

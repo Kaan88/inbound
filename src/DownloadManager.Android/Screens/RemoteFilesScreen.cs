@@ -50,7 +50,6 @@ internal sealed partial class RemoteFilesScreen : IDisposable
     private bool _started, _closed, _busy, _listLoaded;
     private bool _adding;
     private string _addKind = SiteKindCatalog.WebDav;
-    private string _addName = "";
     private bool _showTransfers, _mutation, _transfersLoaded;
     private bool _summaryRequestInFlight;
     private List<SiteTransferDto> _transfers = [];
@@ -132,11 +131,7 @@ internal sealed partial class RemoteFilesScreen : IDisposable
         }
         if (_adding)
         {
-            ClearPassword();
-            _adding = false;
-            _addName = "";
-            CancelCurrent();
-            Render();
+            CloseForm();
             return true;
         }
         if (_inFolder) return FolderBack();
@@ -210,7 +205,7 @@ internal sealed partial class RemoteFilesScreen : IDisposable
             _ = FetchSftpFreeSpaceAsync(generation);
         }
         catch (OperationCanceledException) when (_life.IsCancellationRequested) { return; }
-        catch (Exception) { if (!_closed && generation == _generation) _error = "Could not load Remote Files from this Host. Check the connection and try again."; }
+        catch (Exception) { if (!_closed && generation == _generation) _error = LoadErrorText; }
         finally
         {
             if (!_closed && generation == _generation) { _busy = false; Render(); ApplyPendingShow(); }
@@ -221,9 +216,9 @@ internal sealed partial class RemoteFilesScreen : IDisposable
     {
         if (_closed) return;
         bool folder = !_showTransfers && !_adding && _inFolder;
-        bool full = folder || _showTransfers;
-        SetFolderFullScreen(full);
-        if (!full) ResetChrome();
+        // Transfers draws its own bar; a folder and the add/edit forms take the whole screen too.
+        SetFolderFullScreen(folder || _showTransfers || _adding);
+        if (!folder && !_showTransfers) ResetChrome();
         _content.RemoveAllViews();
         if (_showTransfers) RenderTransfers();
         else if (_adding) RenderAddLocation();
@@ -295,340 +290,7 @@ internal sealed partial class RemoteFilesScreen : IDisposable
         _password = null;
         if (_clientSecret is not null) _clientSecret.Text = "";
         _clientSecret = null;
-    }
-
-    internal const string OwnClientIdNote =
-        "Optional: your own app registration (client ID and secret) from the provider's developer console, instead of rclone's shared one, which rclone says is being retired.";
-
-    /// <summary>The desktop's rules for an own app registration (SitesRules.SignInRequest); null when it is fine.</summary>
-    internal static string? ClientIdProblem(string clientId, string secret) =>
-        clientId.Length > 256 || !clientId.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '-' or '_')
-            ? "A client ID is letters, digits, dots, dashes and underscores."
-            : clientId.Length == 0 && secret.Length > 0 ? "A client secret needs its client ID." : null;
-
-    private void RenderAddLocation()
-    {
-        Heading("Add location");
-        string kind = _addKind;
-        bool cloud = SiteKindCatalog.SignsIn(kind);
-        AddText(cloud
-            ? "When you sign in, " + _hostName + " will store the authorization."
-            : "Credentials will be sent to " + _hostName + " and stored by that Host.", 14, Resource.Attribute.colorOnSurfaceVariant);
-        if (_busy) { AddText("Saving…", 16, Resource.Attribute.colorOnSurfaceVariant); return; }
-        if (_error is not null) AddText(_error, 16, Resource.Attribute.colorOnSurfaceVariant);
-        bool s3 = kind == SiteKindCatalog.S3;
-        bool sftp = kind == SiteKindCatalog.Sftp;
-        var kinds = new[] { (SiteKindCatalog.WebDav, "WebDAV"), (SiteKindCatalog.Drive, "Google Drive"),
-            (SiteKindCatalog.OneDrive, "OneDrive"), (SiteKindCatalog.Dropbox, "Dropbox"), (SiteKindCatalog.S3, "S3"),
-            (SiteKindCatalog.Sftp, "SFTP") };
-        AddButton("Location type: " + kinds.First(item => item.Item1 == kind).Item2, () =>
-        {
-            if (!SameHost() || _busy || _confirm is not null) return;
-            _confirm = new MaterialAlertDialogBuilder(_activity).SetTitle("Location type")!
-                .SetItems(kinds.Select(item => item.Item2).ToArray(), (_, e) =>
-                {
-                    if (!SameHost()) return;
-                    string selectedKind = kinds[e.Which].Item1;
-                    if (_addKind == selectedKind) return;
-                    ClearPassword();
-                    _addKind = selectedKind;
-                    _error = null;
-                    Render();
-                })!.Create();
-            _confirm.DismissEvent += (_, _) => _confirm = null;
-            _confirm.Show();
-        });
-
-        EditText Field(string hint, InputTypes inputType)
-        {
-            var field = new EditText(_activity) { Hint = hint, SaveEnabled = false };
-            field.SetSingleLine(true);
-            field.InputType = inputType;
-            field.ContentDescription = hint;
-            _content.AddView(field);
-            return field;
-        }
-
-        var name = Field("Location name", InputTypes.ClassText);
-        name.Text = _addName;
-        Spinner? providerPicker = null;
-        var providers = SiteKindCatalog.Find(SiteKindCatalog.S3)!.Choices[SiteFields.Provider];
-        if (s3)
-        {
-            _content.AddView(Label("S3 provider", 14, Resource.Attribute.colorOnSurfaceVariant));
-            providerPicker = new Spinner(_activity) { ContentDescription = "S3 provider", SaveEnabled = false };
-            var adapter = new ArrayAdapter<string>(_activity, Android.Resource.Layout.SimpleSpinnerItem,
-                providers.Select(provider => provider.Title).ToArray());
-            adapter.SetDropDownViewResource(Android.Resource.Layout.SimpleSpinnerDropDownItem);
-            providerPicker.Adapter = adapter;
-            _content.AddView(providerPicker, new LinearLayout.LayoutParams(-1, Motion.Dp(_activity, 48)));
-        }
-        var address = cloud || sftp ? null : Field(s3 ? "S3 endpoint (optional for Amazon S3)" : "WebDAV address (https://…)",
-            InputTypes.ClassText | InputTypes.TextVariationUri);
-        var server = sftp ? Field("SFTP server name or address", InputTypes.ClassText) : null;
-        var portField = sftp ? Field("Port", InputTypes.ClassNumber) : null;
-        if (portField is not null) portField.Text = "22";
-        var remoteFolder = sftp || s3 ? Field("Starting folder (optional)", InputTypes.ClassText) : null;
-        var region = s3 ? Field("Region (optional)", InputTypes.ClassText) : null;
-        var localFolder = _phoneHost ? null : Field("Host download folder (optional)", InputTypes.ClassText);
-        if (localFolder is not null) localFolder.ContentDescription = "Download folder on the selected Host (optional)";
-        var user = cloud ? null : Field(sftp ? "SFTP user name" : s3 ? "Access key ID" : "User name (optional)", InputTypes.ClassText);
-        var password = _password = cloud ? null : Field(s3 ? "Secret access key" : "Password (optional)",
-            InputTypes.ClassText | InputTypes.TextVariationPassword);
-        if (password is not null) password.Enabled = _secureHostConnection;
-        if (!_secureHostConnection)
-            AddText("Locations cannot be added over an unencrypted or unverified Host connection. Connect to this Host with HTTPS first.", 14, Resource.Attribute.colorOnSurfaceVariant);
-        if (password is not null && Android.OS.Build.VERSION.SdkInt >= Android.OS.BuildVersionCodes.O)
-            password.ImportantForAutofill = ImportantForAutofill.No;
-        if (cloud) AddText(OwnClientIdNote, 14, Resource.Attribute.colorOnSurfaceVariant);
-        var clientId = cloud ? Field("Your own client ID (optional)", InputTypes.ClassText) : null;
-        var clientSecret = _clientSecret = cloud ? Field("Its client secret (optional)",
-            InputTypes.ClassText | InputTypes.TextVariationPassword) : null;
-        if (clientSecret is not null)
-        {
-            clientSecret.Enabled = _secureHostConnection;
-            if (Android.OS.Build.VERSION.SdkInt >= Android.OS.BuildVersionCodes.O)
-                clientSecret.ImportantForAutofill = ImportantForAutofill.No;
-        }
-        var allowHttp = new CheckBox(_activity)
-        {
-            Text = "Allow HTTP: not encrypted. Credentials and files can be read or changed in transit.",
-            SaveEnabled = false
-        };
-        if (address is not null) _content.AddView(allowHttp);
-        if (cloud) AddText("Save the location, then choose Sign in from Remote Files.", 14, Resource.Attribute.colorOnSurfaceVariant);
-        const string nameRequired = "Enter a location name.";
-        const string sftpServerRequired = "Enter an SFTP server address.";
-        const string sftpPortInvalid = "Enter a port from 1 to 65535.";
-        const string sftpUserRequired = "Enter an SFTP user name.";
-        const string s3KeysRequired = "Enter the access key ID and secret access key.";
-        const string s3EndpointRequired = "Enter the S3 endpoint for this provider.";
-        const string invalidEndpoint = "Enter an HTTP or HTTPS address without credentials, a query, or a fragment.";
-        const string httpConsentRequired = "HTTP is not encrypted. Tick the warning to allow it.";
-        var validation = Label("", 14, Resource.Attribute.colorError);
-        validation.AccessibilityLiveRegion = AccessibilityLiveRegion.Polite;
-        _content.AddView(validation);
-        name.TextChanged += (_, _) =>
-        {
-            _addName = name.Text ?? "";
-            if (!string.IsNullOrWhiteSpace(_addName) && validation.Text == nameRequired) validation.Text = "";
-        };
-        if (address is not null)
-        {
-            address.TextChanged += (_, _) =>
-            {
-                allowHttp.Checked = false;
-                if (validation.Text is invalidEndpoint or httpConsentRequired or s3EndpointRequired) validation.Text = "";
-            };
-            allowHttp.CheckedChange += (_, e) =>
-            {
-                if (e.IsChecked && validation.Text == httpConsentRequired) validation.Text = "";
-            };
-        }
-        if (providerPicker is not null)
-        {
-            void ClearS3KeysError()
-            {
-                if (validation.Text == s3KeysRequired && !string.IsNullOrWhiteSpace(user?.Text)
-                    && !string.IsNullOrWhiteSpace(password?.Text))
-                    validation.Text = "";
-            }
-
-            user!.TextChanged += (_, _) => ClearS3KeysError();
-            password!.TextChanged += (_, _) => ClearS3KeysError();
-            providerPicker.ItemSelected += (_, e) =>
-            {
-                if (validation.Text == s3EndpointRequired && e.Position >= 0 && e.Position < providers.Count
-                    && providers[e.Position].Value == SiteKindCatalog.AwsProvider)
-                    validation.Text = "";
-            };
-        }
-        bool TrySftpPort(out int port) => int.TryParse(portField?.Text, out port) && port is >= 1 and <= 65535;
-        if (sftp)
-        {
-            server!.TextChanged += (_, _) =>
-            {
-                if (validation.Text == sftpServerRequired && !string.IsNullOrWhiteSpace(server.Text)) validation.Text = "";
-            };
-            portField!.TextChanged += (_, _) =>
-            {
-                if (validation.Text == sftpPortInvalid && TrySftpPort(out _)) validation.Text = "";
-            };
-            user!.TextChanged += (_, _) =>
-            {
-                if (validation.Text == sftpUserRequired && !string.IsNullOrWhiteSpace(user.Text)) validation.Text = "";
-            };
-        }
-        AddButton("Save location", () =>
-        {
-            if (!SameHost() || _busy) return;
-            if (!_secureHostConnection)
-            { validation.Text = "Adding a location requires a secure Host connection."; return; }
-            var text = address?.Text?.Trim() ?? "";
-            var provider = providerPicker is { SelectedItemPosition: >= 0 } picker
-                ? providers[picker.SelectedItemPosition].Value : SiteKindCatalog.AwsProvider;
-            if (string.IsNullOrWhiteSpace(name.Text))
-            { validation.Text = nameRequired; return; }
-            var ownClientId = clientId?.Text?.Trim() ?? "";
-            var ownSecret = clientSecret?.Text ?? "";
-            if (cloud && ClientIdProblem(ownClientId, ownSecret) is { } clientProblem)
-            { validation.Text = clientProblem; return; }
-            if (s3 && (string.IsNullOrWhiteSpace(user?.Text) || string.IsNullOrWhiteSpace(password?.Text)))
-            { validation.Text = s3KeysRequired; return; }
-            if (s3 && provider != SiteKindCatalog.AwsProvider && text.Length == 0)
-            { validation.Text = s3EndpointRequired; return; }
-            int port = 22;
-            if (sftp)
-            {
-                if (string.IsNullOrWhiteSpace(server?.Text))
-                { validation.Text = sftpServerRequired; return; }
-                if (!TrySftpPort(out port))
-                { validation.Text = sftpPortInvalid; return; }
-                if (string.IsNullOrWhiteSpace(user?.Text))
-                { validation.Text = sftpUserRequired; return; }
-            }
-            if (address is not null && (!s3 || text.Length > 0))
-            {
-                if (!Uri.TryCreate(text, UriKind.Absolute, out var uri) ||
-                    (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp) ||
-                    string.IsNullOrWhiteSpace(uri.Host) || !string.IsNullOrEmpty(uri.UserInfo) ||
-                    !string.IsNullOrEmpty(uri.Query) || !string.IsNullOrEmpty(uri.Fragment))
-                { validation.Text = invalidEndpoint; return; }
-                if (uri.Scheme == Uri.UriSchemeHttp && !allowHttp.Checked)
-                { validation.Text = httpConsentRequired; return; }
-            }
-            var request = new SiteSaveRequest
-            {
-                Name = name.Text!.Trim(), Kind = kind, Url = !s3 && address is not null ? text : null,
-                Vendor = !s3 && address is not null ? "other" : null,
-                Provider = s3 ? provider : null, Endpoint = s3 && text.Length > 0 ? text : null,
-                Region = string.IsNullOrWhiteSpace(region?.Text) ? null : region.Text.Trim(),
-                Host = server?.Text?.Trim() ?? "", Port = port, RemoteFolder = remoteFolder?.Text?.Trim() ?? "",
-                LocalFolder = string.IsNullOrWhiteSpace(localFolder?.Text) ? null : localFolder.Text.Trim(),
-                User = user?.Text?.Trim() ?? "", Password = string.IsNullOrEmpty(password?.Text) ? null : password.Text,
-                ClientId = cloud && ownClientId.Length > 0 ? ownClientId : null,
-                ClientSecret = cloud && ownSecret.Length > 0 ? ownSecret : null,
-            };
-            ClearPassword();
-            _ = SaveLocationAsync(request);
-        });
-        AddButton("Cancel", () => HandleBack());
-    }
-
-    private async Task SaveLocationAsync(SiteSaveRequest request)
-    {
-        if (!SameHost() || _busy || !_secureHostConnection) { request.Password = null; request.ClientSecret = null; return; }
-        int generation = ++_generation;
-        _busy = true; _error = null;
-        Render();
-        try
-        {
-            var result = await _client.SaveAsync(request, _life.Token);
-            if (_closed || generation != _generation) return;
-            if (!result.Ok)
-            {
-                _error = "The Host could not save this location. Check the details and try again.";
-                return;
-            }
-            _adding = false;
-            _addName = "";
-            _busy = false;
-            _ = LoadLocationsAsync();
-        }
-        catch (OperationCanceledException) when (_life.IsCancellationRequested) { }
-        catch (Exception)
-        {
-            if (!_closed && generation == _generation)
-                _error = "Could not confirm the save. Refresh the location list before trying again.";
-        }
-        finally
-        {
-            request.Password = null;
-            request.ClientSecret = null;
-            if (!_closed && generation == _generation) { _busy = false; Render(); }
-        }
-    }
-
-    private void ConfirmDisable()
-    {
-        if (!SameHost() || _busy || _confirm is not null) return;
-        _confirm = new MaterialAlertDialogBuilder(_activity)
-            .SetTitle("Disable Remote Files?")!
-            .SetMessage("Host: " + _hostDisplay + "\nRunning Remote Files transfers will pause.")!
-            .SetNegativeButton("Cancel", (Android.Content.IDialogInterfaceOnClickListener?)null)!
-            .SetPositiveButton("Disable", (_, _) => _ = SetEnabledAsync(false))!
-            .Show();
-        if (_confirm is { } dialog) dialog.DismissEvent += (_, _) => { if (ReferenceEquals(_confirm, dialog)) _confirm = null; };
-    }
-
-    private async Task SetEnabledAsync(bool enabled)
-    {
-        if (!SameHost() || _busy) return;
-        int generation = ++_generation;
-        _busy = true; _error = null;
-        Render();
-        try
-        {
-            var status = await _client.SetEnabledAsync(enabled, _life.Token);
-            if (_closed || generation != _generation) return;
-            if (status.Enabled != enabled)
-            {
-                _error = "The Host did not change Remote Files. Refresh to check its state.";
-                return;
-            }
-            _busy = false;
-            _ = LoadLocationsAsync();
-        }
-        catch (OperationCanceledException) when (_life.IsCancellationRequested) { }
-        catch (Exception)
-        {
-            if (!_closed && generation == _generation)
-                _error = "Could not change Remote Files. Refresh to check the Host's state.";
-        }
-        finally
-        {
-            if (!_closed && generation == _generation) { _busy = false; Render(); }
-        }
-    }
-
-    private void ConfirmRemove(SiteDto site)
-    {
-        if (!SameHost() || _busy || _confirm is not null) return;
-        int generation = _generation;
-        _confirm = new MaterialAlertDialogBuilder(_activity)
-            .SetTitle("Remove location?")!
-            .SetMessage("Remove " + site.Name + " from " + _hostName + "? Remote files will not be deleted.")!
-            .SetNegativeButton("Cancel", (Android.Content.IDialogInterfaceOnClickListener?)null)!
-            .SetPositiveButton("Remove", (_, _) => { if (SameHost() && generation == _generation) _ = RemoveLocationAsync(site.Id); })!
-            .Create();
-        _confirm!.DismissEvent += (_, _) => _confirm = null;
-        _confirm.Show();
-    }
-
-    private async Task RemoveLocationAsync(string id)
-    {
-        if (_closed || _busy) return;
-        int generation = ++_generation;
-        _busy = true; _error = null;
-        Render();
-        try
-        {
-            var result = await _client.RemoveAsync(id, _life.Token);
-            if (_closed || generation != _generation) return;
-            if (!result.Ok) { _error = "The Host could not remove this location."; return; }
-            _busy = false;
-            _ = LoadLocationsAsync();
-        }
-        catch (OperationCanceledException) when (_life.IsCancellationRequested) { }
-        catch (Exception)
-        {
-            if (!_closed && generation == _generation)
-                _error = "Could not confirm removal. Refresh to check the location list.";
-        }
-        finally
-        {
-            if (!_closed && generation == _generation) { _busy = false; Render(); }
-        }
+        ClearFormSecrets();
     }
 
     private static bool SafeName(string name) =>

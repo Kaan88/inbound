@@ -5,6 +5,7 @@ using Android.Widget;
 using DownloadManager.Contracts;
 using Google.Android.Material.Button;
 using Google.Android.Material.Dialog;
+using Google.Android.Material.TextField;
 
 namespace Inbound.App.Screens;
 
@@ -29,8 +30,11 @@ internal sealed partial class RemoteFilesScreen
     private bool NeedsCloudSignIn(SiteDto site) =>
         IsSignInKind(site.Kind) && (!site.SignedIn || _expiredCloudSites.Contains(site.Id));
 
+    private string? _signInAgain;
+    private Uri? _signInUri;
+
     private bool CanSignIn(SiteDto site) =>
-        SameHost() && !_busy && _secureHostConnection && !site.SigningIn && NeedsCloudSignIn(site);
+        SameHost() && !_busy && _secureHostConnection && !site.SigningIn && (NeedsCloudSignIn(site) || _signInAgain == site.Id);
 
     private static bool IsSignInKind(string? kind) =>
         string.Equals(kind, SignInKindDrive, StringComparison.OrdinalIgnoreCase)
@@ -56,9 +60,10 @@ internal sealed partial class RemoteFilesScreen
         return button;
     }
 
-    private void BeginCloudSignIn(SiteDto site)
+    private void BeginCloudSignIn(SiteDto site, bool again = false)
     {
-        if (!CanSignIn(site) || _signInWait is not null) return;
+        _signInAgain = again ? site.Id : null;
+        if (!CanSignIn(site) || _signInWait is not null) { _signInAgain = null; return; }
         _signInSiteId = site.Id;
         _signInWait = CancellationTokenSource.CreateLinkedTokenSource(_life.Token);
         _signInCancellation = _signInWait.Token.Register(() =>
@@ -108,6 +113,7 @@ internal sealed partial class RemoteFilesScreen
                     _ = CancelCloudSignInOnHostAsync(site.Id);
                     return;
                 }
+                _signInUri = authUri;
                 _activity.StartActivity(new Intent(Intent.ActionView, Android.Net.Uri.Parse(authUri.AbsoluteUri)));
             }
             catch (Exception e) when (e is ActivityNotFoundException or InvalidOperationException or Java.Lang.SecurityException)
@@ -153,21 +159,44 @@ internal sealed partial class RemoteFilesScreen
         finally { FinishSignInWait(site.Id); }
     }
 
+    /// <summary>x28: spinner, "Signing in to X", the browser instruction, Open browser again and Cancel.</summary>
     private void ShowPhoneSignInWait(SiteDto site)
     {
         if (!SameHost()) return;
         var body = new LinearLayout(_activity) { Orientation = Orientation.Vertical };
-        body.SetPadding(Motion.Dp(_activity, 20), Motion.Dp(_activity, 8), Motion.Dp(_activity, 20), 0);
-        body.AddView(Label($"Sign in to {site.Name} in the browser. This closes when the phone finishes.", 15,
-            Resource.Attribute.colorOnSurfaceVariant));
-        _phoneWaitDialog = new MaterialAlertDialogBuilder(_activity)
-            .SetTitle("Signing in")!
+        body.SetGravity(GravityFlags.CenterHorizontal);
+        body.SetPadding(Dp(24), Dp(24), Dp(24), 0);
+        var spinner = new ProgressBar(_activity) { Indeterminate = true, ContentDescription = "Signing in" };
+        body.AddView(spinner, new LinearLayout.LayoutParams(Dp(48), Dp(48)) { Gravity = GravityFlags.CenterHorizontal });
+        var heading = FolderText($"Signing in to {site.Name}", 24, Resource.Attribute.colorOnSurface);
+        heading.Gravity = GravityFlags.Center;
+        heading.SetPadding(0, Dp(16), 0, Dp(8));
+        body.AddView(heading, new LinearLayout.LayoutParams(-1, -2));
+        var message = FolderText("Finish signing in with the browser. This closes by itself when the phone has the authorization.", 16,
+            Resource.Attribute.colorOnSurfaceVariant);
+        message.Gravity = GravityFlags.Center;
+        body.AddView(message, new LinearLayout.LayoutParams(-1, -2));
+        var dialog = new MaterialAlertDialogBuilder(_activity)
             .SetView(body)!
+            .SetNeutralButton("Open browser again", (Android.Content.IDialogInterfaceOnClickListener?)null)!
             .SetNegativeButton("Cancel", (_, _) => CancelCloudSignIn(site.Id))!
             .Create();
-        _phoneWaitDialog.DismissEvent += (_, _) => _phoneWaitDialog = null;
-        _phoneWaitDialog.CancelEvent += (_, _) => CancelCloudSignIn(site.Id);
-        _phoneWaitDialog.Show();
+        _phoneWaitDialog = dialog;
+        dialog.ShowEvent += (_, _) => dialog.GetButton((int)Android.Content.DialogButtonType.Neutral)!.Click += (_, _) =>
+        {
+            try
+            {
+                if (_signInUri is { } uri)
+                    _activity.StartActivity(new Intent(Intent.ActionView, Android.Net.Uri.Parse(uri.AbsoluteUri)));
+            }
+            catch (Exception e) when (e is ActivityNotFoundException or InvalidOperationException or Java.Lang.SecurityException)
+            {
+                _activity.ShowMessage("No browser could open the sign-in link.");
+            }
+        };
+        dialog.DismissEvent += (_, _) => { if (ReferenceEquals(_phoneWaitDialog, dialog)) _phoneWaitDialog = null; };
+        dialog.CancelEvent += (_, _) => CancelCloudSignIn(site.Id);
+        dialog.Show();
     }
 
     private async Task WaitForPhoneSignInAsync(SiteDto site, CancellationToken cancellationToken)
@@ -217,45 +246,55 @@ internal sealed partial class RemoteFilesScreen
         await LoadLocationsAsync();
     }
 
+    /// <summary>x29 and x29b: the command in a monospace box with copy, the token field with paste, Cancel and Sign in.</summary>
     private void ShowPasteTokenDialog(SiteDto site, string command)
     {
         if (!SameHost()) return;
         _signInDialog?.Dismiss();
         _signInDialog = null;
-        var body = new LinearLayout(_activity) { Orientation = Orientation.Vertical };
-        body.SetPadding(Motion.Dp(_activity, 20), Motion.Dp(_activity, 8), Motion.Dp(_activity, 20), 0);
-        body.AddView(Label(site.ClientId is null
-            ? $"The token will be sent to {_hostDisplay}. Run this command on a computer with rclone and a browser, then paste the output between ---> and <---End paste. The token gives access to your account."
-            : $"The token will be sent to {_hostDisplay}. Use your own app registration credentials in place of the literal placeholders on a computer with rclone and a browser. Never paste your client secret here. Then paste rclone's output between ---> and <---End paste.", 14,
-            Resource.Attribute.colorOnSurfaceVariant));
-        var commandField = new EditText(_activity) { Text = command, SaveEnabled = false, Enabled = false };
-        commandField.SetSingleLine(false);
-        body.AddView(commandField);
-        var token = _signInToken = new EditText(_activity)
+        bool own = site.ClientId is not null;
+        var dialog = NewSheet(out var column);
+        SheetTitle(column, $"Sign in to {site.Name}");
+        string text = own
+            ? $"On a computer with rclone and a browser, replace the two placeholders with your own client ID and secret and run this command. Then paste everything between ---> and <---End paste. The token is sent to {_hostName} and gives access to your account."
+            : $"On a computer with rclone and a browser, run this command. Then paste everything between ---> and <---End paste. The token is sent to {_hostName} and gives access to your account.";
+        AddInset(column, FolderText(text, 16, Resource.Attribute.colorOnSurfaceVariant));
+        AddInset(column, CopyBox(command, "Copy command"));
+        if (own)
         {
-            Hint = "Paste authorization token",
-            SaveEnabled = false
-        };
-        token.SetSingleLine(true);
-        token.InputType = InputTypes.ClassText | InputTypes.TextVariationPassword;
-        token.ImportantForAutofill = Android.OS.Build.VERSION.SdkInt >= Android.OS.BuildVersionCodes.O
-            ? ImportantForAutofill.No : token.ImportantForAutofill;
-        body.AddView(token);
-
-        _signInDialog = new MaterialAlertDialogBuilder(_activity)
-            .SetTitle($"Sign in to {site.Name}")!
-            .SetView(body)!
-            .SetNegativeButton("Cancel", (_, _) => ClearSignInToken())!
-            .SetPositiveButton("Sign in", (_, _) =>
+            var never = FolderText("Never paste your client secret here.", 13, Resource.Attribute.colorOnSurfaceVariant);
+            never.SetPadding(Dp(4), 0, 0, Dp(4));
+            AddInset(column, never);
+        }
+        var (layout, token) = OutlinedField("Authorization token", "", InputTypes.ClassText, password: true);
+        _signInToken = token;
+        token.ImportantForAutofill = ImportantForAutofill.No;
+        layout.EndIconMode = TextInputLayout.EndIconCustom;
+        layout.SetEndIconDrawable(Resource.Drawable.ic_paste);
+        layout.EndIconContentDescription = "Paste token";
+        layout.SetEndIconOnClickListener(new ClickAction(() =>
+        {
+            try
             {
-                string pasted = token.Text ?? "";
-                ClearSignInToken();
-                _ = SubmitCloudTokenAsync(site, pasted);
-            })!
-            .Create();
-        _signInDialog.DismissEvent += (_, _) => { ClearSignInToken(); _signInDialog = null; };
-        _signInDialog.CancelEvent += (_, _) => CancelCloudSignIn(site.Id);
-        _signInDialog.Show();
+                if (_activity.GetSystemService(Context.ClipboardService) is Android.Content.ClipboardManager { PrimaryClip: { ItemCount: > 0 } clip }
+                    && clip.GetItemAt(0)?.Text is { } pasted)
+                    token.Text = pasted;
+            }
+            catch (Exception) { /* Nothing to paste. */ }
+        }));
+        AddInset(column, layout);
+        var ok = SheetButtons(column, "Sign in", 0, null, () => CancelCloudSignIn(site.Id));
+        ok.SetOnClickListener(new ClickAction(() =>
+        {
+            string pasted = token.Text ?? "";
+            if (string.IsNullOrWhiteSpace(pasted)) { SetFieldError(layout, "Paste the authorization token."); return; }
+            ClearSignInToken();
+            var open = _sheet; _sheet = null; open?.Dismiss();
+            _ = SubmitCloudTokenAsync(site, pasted);
+        }));
+        dialog.DismissEvent += (_, _) => ClearSignInToken();
+        dialog.CancelEvent += (_, _) => CancelCloudSignIn(site.Id);
+        ShowSheet(dialog);
     }
 
     private async Task SubmitCloudTokenAsync(SiteDto site, string token)
@@ -295,6 +334,7 @@ internal sealed partial class RemoteFilesScreen
         _phoneWaitDialog?.Dismiss();
         _phoneWaitDialog = null;
         ClearSignInToken();
+        _signInAgain = null;
         FinishSignInWait(siteId);
     }
 
@@ -320,6 +360,7 @@ internal sealed partial class RemoteFilesScreen
     {
         if (_signInSiteId != siteId) return;
         _signInSiteId = null;
+        _signInAgain = null;
         _signInWait?.Dispose();
         _signInWait = null;
         _signInCancellation.Dispose();
