@@ -26,6 +26,10 @@ public sealed class AndroidUpdater
     public AndroidUpdateStatus Status { get { lock (_sync) return _status; } }
     public AndroidUpdateReady? ReadyOffer { get { lock (_sync) return _ready; } }
     public event Action<AndroidUpdateStatus>? Changed;
+    /// <summary>Raised after a staged update is withdrawn because a verified feed no longer offers it.</summary>
+    public event Action<AndroidUpdateReady>? Withdrawn;
+    /// <summary>Optional diagnostic sink (no URLs or secrets are ever passed).</summary>
+    public Action<string>? Log { get; set; }
 
     public Task CheckAsync(CancellationToken ct = default)
     {
@@ -107,6 +111,12 @@ public sealed class AndroidUpdater
                 return;
             }
             AndroidUpdateTrust.Validate(manifest, _publicKey);
+            if (cached is not null && AndroidUpdateWithdrawal.IsPulled(cached.Manifest.VersionCode, manifest.VersionCode))
+            {
+                // Only a signed, verified feed answer gets here; the feed went back to an older release.
+                Withdraw(cached);
+                cached = null;
+            }
             if (cached is not null && manifest.VersionCode <= cached.Manifest.VersionCode) { Set(ReadyStatus(cached)); return; }
             if (manifest.VersionCode <= _installed) { Set(new(AndroidUpdateStage.Current, "Inbound is up to date.")); return; }
             part = Path.Combine(_root, "download.part");
@@ -229,6 +239,21 @@ public sealed class AndroidUpdater
             try { File.Delete(path); File.Delete(Path.ChangeExtension(path, ".json")); }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
         }
+    }
+
+    private void Withdraw(AndroidUpdateReady stale)
+    {
+        lock (_sync) { if (_ready?.Manifest.VersionCode == stale.Manifest.VersionCode) _ready = null; }
+        foreach (var path in new[] { stale.Path, Path.Combine(_root, $"update-{stale.Manifest.VersionCode}.json"), Path.Combine(_root, "ready.json") })
+        {
+            try { File.Delete(path); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+        }
+        Log?.Invoke($"Update {stale.Manifest.VersionName} (code {stale.Manifest.VersionCode}) was withdrawn: the signed feed no longer offers it.");
+        var listeners = Withdrawn;
+        if (listeners is not null)
+            foreach (Action<AndroidUpdateReady> listener in listeners.GetInvocationList())
+                try { listener(stale); } catch (Exception) { /* a UI listener cannot fail the update */ }
     }
 
     private string ApkPath(long code) => Path.Combine(_root, $"update-{code}.apk");

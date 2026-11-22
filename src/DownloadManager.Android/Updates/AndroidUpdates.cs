@@ -45,6 +45,8 @@ internal static partial class AndroidUpdates
             else if (status.Stage == AndroidUpdateStage.Current)
                 ((NotificationManager)_app.GetSystemService(Context.NotificationService)!).Cancel(NotificationId);
         };
+        Service.Log = message => Android.Util.Log.Info("InboundUpdates", message);
+        Service.Withdrawn += _ => ((NotificationManager)_app.GetSystemService(Context.NotificationService)!).Cancel(NotificationId);
         var scheduler = (JobScheduler)_app.GetSystemService(Context.JobSchedulerService)!;
         // A pending job from an older version with another definition is replaced (review A7).
         var pending = scheduler.GetPendingJob(DailyJobId);

@@ -114,6 +114,45 @@ public sealed class AndroidUpdaterTests : IDisposable
         var selected = await updater.ReadyForInstallAsync(2, old.Sha256, CancellationToken.None);
         Assert.NotNull(selected); Assert.Equal(2, selected.Manifest.VersionCode); Assert.Equal(3, updater.ReadyOffer?.Manifest.VersionCode);
     }
+    [Fact] public async Task PulledReleaseIsWithdrawnWhenVerifiedFeedGoesBack()
+    {
+        Serve(Offer(3, "3.0")); var updater = Create(); await updater.CheckAsync();
+        var apk = Path.Combine(_root, "update-3.apk"); Assert.True(File.Exists(apk));
+        var logs = new List<string>(); var withdrawn = new List<long>(); updater.Log = logs.Add; updater.Withdrawn += r => withdrawn.Add(r.Manifest.VersionCode);
+        Serve(Offer(2, "2.0")); await updater.CheckAsync();
+        Assert.False(File.Exists(apk)); Assert.False(File.Exists(Path.Combine(_root, "update-3.json")));
+        Assert.Equal(new long[] { 3 }, withdrawn); Assert.Single(logs);
+        Assert.Equal(2, updater.ReadyOffer?.Manifest.VersionCode); // the older, still newer-than-installed release is offered
+        Assert.Null(await Create().ReadyForInstallAsync(3, null, CancellationToken.None));
+    }
+    [Fact] public async Task PulledReleaseBackToInstalledClearsOffer()
+    {
+        Serve(Offer(3, "3.0")); var updater = Create(); await updater.CheckAsync();
+        Serve(Offer(1, "1.0")); await updater.CheckAsync();
+        Assert.Null(updater.ReadyOffer); Assert.Equal(AndroidUpdateStage.Current, updater.Status.Stage);
+        Assert.False(File.Exists(Path.Combine(_root, "update-3.apk"))); Assert.False(File.Exists(Path.Combine(_root, "ready.json")));
+    }
+    [Fact] public async Task FeedFailureOrUnsignedFeedKeepsStagedUpdate()
+    {
+        Serve(Offer(3, "3.0")); var updater = Create(); await updater.CheckAsync();
+        _feed.FailRead = true; await updater.CheckAsync();
+        Assert.Equal(3, updater.ReadyOffer?.Manifest.VersionCode); Assert.True(File.Exists(Path.Combine(_root, "update-3.apk")));
+        _feed.FailRead = false; var forged = Offer(2, "2.0"); forged.VersionName = "9.9"; Serve(forged); await updater.CheckAsync();
+        Assert.Equal(3, updater.ReadyOffer?.Manifest.VersionCode); Assert.True(File.Exists(Path.Combine(_root, "update-3.apk")));
+        Serve(null!); await updater.CheckAsync(); // 404 is not a signed answer
+        Assert.Equal(3, updater.ReadyOffer?.Manifest.VersionCode); Assert.Equal(AndroidUpdateStage.Ready, updater.Status.Stage);
+    }
+    [Fact] public async Task SameVersionKeepsStagedUpdateAndNewerSupersedes()
+    {
+        var same = Offer(3, "3.0"); Serve(same); var updater = Create(); await updater.CheckAsync();
+        var withdrawn = 0; updater.Withdrawn += _ => withdrawn++;
+        await updater.CheckAsync(); Assert.Equal(3, updater.ReadyOffer?.Manifest.VersionCode); Assert.Equal(0, withdrawn); Assert.Equal(1, _feed.Downloads);
+        Serve(Offer(4, "4.0")); await updater.CheckAsync();
+        Assert.Equal(4, updater.ReadyOffer?.Manifest.VersionCode); Assert.Equal(0, withdrawn); Assert.True(File.Exists(Path.Combine(_root, "update-3.apk")));
+    }
+    [Theory] [InlineData(3, 2, true)] [InlineData(3, 3, false)] [InlineData(3, 4, false)]
+    public void WithdrawalRuleOnlyFiresForOlderFeed(long staged, long feed, bool expected) =>
+        Assert.Equal(expected, AndroidUpdateWithdrawal.IsPulled(staged, feed));
     [Theory] [InlineData(false)] [InlineData(true)]
     public async Task MissingOrCorruptSidecarFallsBackToMatchingReadyAfterRestart(bool corrupt)
     {
