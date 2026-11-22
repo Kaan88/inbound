@@ -91,21 +91,17 @@ public sealed partial class SiteTransfersEndToEndTests
 
         Assert.Contains("into itself", (await Refused(Copy(from, "/pub/docs/deep"))).Message);
         Assert.Contains("into itself", (await Refused(Copy(from, "/pub/docs"))).Message);
-        Assert.Contains("the folder the files are in", (await Refused(Copy(from, "/pub", name: "readme.txt"))).Message);
-        // Keep both in the same folder would number each file inside the folder, not copy the folder (audit RF-3).
-        Assert.Contains("can't be copied into the folder it is in", (await Refused(Copy(from, "/pub", SiteTransferConflicts.KeepBoth))).Message);
+        // SITES.13 (main's rule since the 2026-11-23 merge): never into the folder the files are in, files or folders.
+        Assert.Contains("that is the same folder", (await Refused(Copy(from, "/pub", name: "readme.txt"))).Message);
+        Assert.Contains("that is the same folder", (await Refused(Copy(from, "/pub", SiteTransferConflicts.KeepBoth))).Message);
         Assert.Contains("no longer exists", (await Refused(Copy("0123456789abcdef0123456789abcdef", "/x"))).Message);
         Assert.Contains("no longer exists", (await Refused(Copy("", "/x"))).Message);
 
-        // The same site, another folder: rclone copies it there. Keep both in the same folder makes a second copy.
+        // The same site, another folder: rclone copies it there.
         var same = await Call<SiteTransferResultDto>(commands, SitesMessageTypes.TransferStart, Copy(from, "/pub/copied", name: "readme.txt"));
         Assert.True(same.Ok, same.Message);
         Assert.Equal(SiteTransferStates.Done, (await WaitForAsync(commands, same.Transfer!.Id, t => SiteTransferStates.IsFinished(t.State))).State);
         AssertSame(Path.Combine(Served, "pub", "readme.txt"), Path.Combine(Served, "pub", "copied", "readme.txt"));
-        var twin = await Call<SiteTransferResultDto>(commands, SitesMessageTypes.TransferStart, Copy(from, "/pub", SiteTransferConflicts.KeepBoth, "readme.txt"));
-        Assert.True(twin.Ok, twin.Message);
-        Assert.Equal(SiteTransferStates.Done, (await WaitForAsync(commands, twin.Transfer!.Id, t => SiteTransferStates.IsFinished(t.State))).State);
-        AssertSame(Path.Combine(Served, "pub", "readme.txt"), Path.Combine(Served, "pub", "readme (2).txt"));
     }
 
     [SiteTransfersFact]
@@ -143,7 +139,7 @@ public sealed partial class SiteTransfersEndToEndTests
         Assert.True(removed.Ok, removed.Message);
         var canceled = await WaitForAsync(commands, started.Id, t => SiteTransferStates.IsFinished(t.State));
         Assert.Equal(SiteTransferStates.Canceled, canceled.State);
-        Assert.Contains("site was removed", canceled.Message);
+        Assert.Contains("remote was removed", canceled.Message);
     }
 
     private async Task<(SitesCommands Commands, string From, string To)> OpenTwoSitesAsync(bool slowSource)

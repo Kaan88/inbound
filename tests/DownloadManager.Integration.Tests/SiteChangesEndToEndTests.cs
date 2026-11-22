@@ -160,10 +160,10 @@ public sealed partial class SiteTransfersEndToEndTests
         var edited = await Call<SiteResultDto>(commands, SitesMessageTypes.Save, new SiteSaveRequest
         {
             Id = siteId, Name = "Edited location", Kind = SiteKinds.Sftp, Host = "localhost", Port = port,
-            User = User, RemoteFolder = "/pub"
+            // Another endpoint takes the password again: a saved one is only sent to the server it was saved for.
+            User = User, Password = Password, RemoteFolder = "/pub"
         });
         Assert.True(edited.Ok, edited.Message);
-        Assert.False(edited.Site!.HasPassword);
         var result = await Call<SiteChangeResultDto>(commands, SitesMessageTypes.DeleteFiles, new SiteChangeRequest
         {
             Id = siteId, Path = "/pub", Listing = listed.Listing,
