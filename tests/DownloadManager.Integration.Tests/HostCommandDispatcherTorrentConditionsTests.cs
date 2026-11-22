@@ -141,6 +141,12 @@ public sealed partial class HostCommandDispatcherTests
         await service.SetNetworkCellularAsync(true);
         var back = await UntilAsync(() => service.GetSnapshot().Jobs.FirstOrDefault(j => j.Id == job.Id && j.State == "queued" && j.Torrent!.WaitingFor is not null));
         Assert.Equal(DownloadManagerService.TorrentWaitingForWifi, back.Torrent!.WaitingFor);
+        Assert.True(service.TorrentsWaitingForNetwork);
+
+        // A torrent the user paused would not start on Wi-Fi, so nothing waits for the network (Fable, 2026-11-22).
+        await service.PauseAsync(job.Id);
+        await UntilAsync(() => service.GetSnapshot().Jobs.FirstOrDefault(j => j.Id == job.Id && j.State == "paused"));
+        Assert.False(service.TorrentsWaitingForNetwork);
     }
 
     [Fact]

@@ -190,6 +190,8 @@ internal sealed partial class RemoteFilesScreen
             {
                 var phone = await Task.Run(() => ReadPhoneFolder(pane.Path));
                 if (_closed || generation != pane.Generation) return;
+                // A quiet refresh that fails leaves the rows as they were; the next real refresh says why.
+                if (keepView && phone.Error is not null) return;
                 pane.Error = phone.Error;
                 if (keepView) { pane.Items.Clear(); pane.PhoneUris.Clear(); }
                 pane.Items.AddRange(phone.Items);
@@ -210,6 +212,7 @@ internal sealed partial class RemoteFilesScreen
             if (_closed || generation != pane.Generation) return;
             if (!result.Ok)
             {
+                if (keepView) return;
                 if (result.Problem == SiteProblems.SignInNeeded && IsSignInKind(site.Kind))
                 {
                     _expiredCloudSites.Add(site.Id);
@@ -236,7 +239,17 @@ internal sealed partial class RemoteFilesScreen
                 _knownListings[ListingKey(site.Id, path)] = result.Listing;
                 _knownListings[ListingKey(site.Id, result.Path)] = result.Listing;
             }
-            if (keepView) pane.Items.Clear();
+            if (keepView)
+            {
+                // A refreshed listing comes without folder counts: carry the known ones over by name, so the rows don't
+                // lose them and fill again after every finished transfer.
+                var counted = new Dictionary<string, int>(StringComparer.Ordinal);
+                foreach (var old in pane.Items)
+                    if (old.IsFolder && old.ChildCount is { } children) counted.TryAdd(old.Name, children);
+                foreach (var item in result.Items)
+                    if (item.IsFolder && item.ChildCount is null && counted.TryGetValue(item.Name, out var children)) item.ChildCount = children;
+                pane.Items.Clear();
+            }
             pane.Items.AddRange(result.Items);
             pane.Total = result.Items.Count == 0 ? pane.Items.Count : Math.Max(result.Total, pane.Items.Count);
             if (pane.Total > pane.Items.Count && string.IsNullOrEmpty(pane.Listing))
@@ -244,13 +257,13 @@ internal sealed partial class RemoteFilesScreen
                 pane.Error = "This Host did not provide a listing token. Refresh to try again.";
                 pane.Total = pane.Items.Count;
             }
-            else if (lazyCounts && !string.IsNullOrEmpty(pane.Listing) && result.Items.Any(item => item.IsFolder))
+            else if (lazyCounts && !string.IsNullOrEmpty(pane.Listing) && result.Items.Any(item => item.IsFolder && item.ChildCount is null))
                 fillListing = pane.Listing;
         }
         catch (OperationCanceledException) when (request.IsCancellationRequested) { return; }
         catch (Exception)
         {
-            if (!_closed && generation == pane.Generation) pane.Error = "Could not load this folder. Check the connection and try again.";
+            if (!_closed && generation == pane.Generation && !keepView) pane.Error = "Could not load this folder. Check the connection and try again.";
         }
         finally
         {
@@ -317,7 +330,8 @@ internal sealed partial class RemoteFilesScreen
         pane.Counts.Add(counts);
         try
         {
-            for (int round = 0; round < 200; round++)
+            // One empty round is allowed: a slow server can run out of the Host's time budget once and count more next time.
+            for (int round = 0, empty = 0; round < 200; round++)
             {
                 var result = await _client.BrowseAsync(new SiteBrowseRequest
                 {
@@ -337,7 +351,9 @@ internal sealed partial class RemoteFilesScreen
                 bool missing = false;
                 for (int i = offset; i < offset + count && i < pane.Items.Count && !missing; i++)
                     missing = pane.Items[i].IsFolder && pane.Items[i].ChildCount is null;
-                if (filled == 0 || !missing) break;
+                if (!missing) break;
+                if (filled == 0 && ++empty > 1) break;
+                if (filled > 0) empty = 0;
             }
         }
         catch (OperationCanceledException) { }

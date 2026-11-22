@@ -12,7 +12,22 @@ it, since this branch does not merge into `main` without the owner's say-so.
 ## Android 0.1.0: redesign merged, Fable audit, fixes, 2026-11-22
 
 - Owner, 2026-11-22: "have an agent look at existing extension adaptability to mobile edge for capturing links, or other
-  solutions. non critical or required for release." A research agent is looking (ROADMAP ANDROID.15); not a release gate.
+  solutions. non critical or required for release." Research done (sources only, nothing tried on a device):
+  - Edge for Android runs extensions only from Microsoft's allowlist (store listing, mobile value, QA test cases, a
+    request form, no promise of approval; microsoft/MicrosoftEdge-Extensions issues 529 and 732). Sideloading a crx works
+    only in Edge Canary's developer menu. Edge lists no `nativeMessaging`, `contextMenus` or `windows` on Android, so our
+    extension would need a trimmed build (server pairing only, no menu, no popup windows), and that sends links to a paired
+    PC or server Host, not the phone's own app. Edge's own download manager can't be replaced.
+  - Firefox for Android is the only mainstream browser that installs our own add-on (unlisted AMO signing); no native
+    messaging there either. A handoff to the phone app would be an `inbound://add?url=` link opened on a tap, with an add
+    confirmation in the app. A localhost listener on the phone is not recommended (any page or app could post to it).
+  - Recommendation: nothing more for now; share and Open with from Edge, plus the built-in browser, already cover it. If
+    automatic catching is wanted later: a Firefox for Android add-on (about half a day's on-device spike first, then 3-5
+    days). Edge stays out unless Microsoft's allowlist is worth pursuing. Owner's call; not part of 0.1.0.
+- Fable's four minor points on the fixes, done: a quiet refresh that fails keeps the rows and sets no error; folder
+  counts carry over a refresh by name and a refresh only asks for missing ones; a paused or failed torrent no longer holds
+  back the network report (test added); a folder whose count the server refused is skipped for that listing, and the app
+  allows one empty counting round. Mobile 709, Integration torrent/Sites/browse 371 pass (real rclone), emulator build OK.
 - Signed 0.1.0 candidate (clean Release, permanent key, `check-apk.py --release` passes; APK SHA-256
   `509dabbc35dfa01a9e40ab168f01f693536f157a73af888b36734a8beb27f50e`) installed in place on the S24 over 0.0.11.
 - Merged `android-remote-files-redesign` (`6ab63b17`); the two capability-list conflicts resolved as in the trial. Full

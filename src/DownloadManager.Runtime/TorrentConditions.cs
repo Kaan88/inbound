@@ -62,7 +62,8 @@ public sealed partial class DownloadManagerService
         {
             lock (_sync)
                 return TorrentNetworkLimitedLocked() && (_seedHeld.Count > 0 ||
-                    _settings.TorrentOnlyOnUnmeteredNetwork && _jobs.Values.Any(r => r.Job.Torrent is not null && !r.Job.IsTerminal));
+                    _settings.TorrentOnlyOnUnmeteredNetwork && _jobs.Values.Any(r => r.Job.Torrent is not null && !r.Job.IsTerminal &&
+                    r.Job.State is not DownloadState.Paused and not DownloadState.Failed));
         }
     }
 

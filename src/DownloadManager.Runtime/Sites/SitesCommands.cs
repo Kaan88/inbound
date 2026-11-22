@@ -61,6 +61,11 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
     {
         /// <summary>When the server was read; <see cref="At"/> moves with each page read, this does not.</summary>
         public DateTimeOffset ListedAt { get; init; } = At;
+        /// <summary>
+        /// Folders whose count the server refused (under <c>_listings</c>): skipped by later counts requests for this listing, so
+        /// they don't take the places of folders that can still be counted (Fable, 2026-11-22). Shared by the copies `with` makes.
+        /// </summary>
+        public HashSet<string> Uncountable { get; init; } = new(StringComparer.Ordinal);
     }
 
     /// <summary>Folders kept per site, newest first, so Back and a breadcrumb tap can show one again without the server.</summary>
@@ -887,7 +892,7 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
         if (request.IncludeFolderCounts)
         {
             var countsStarted = timing.Now;
-            await AddFolderCountsAsync(site, path, page, cancellationToken).ConfigureAwait(false);
+            await AddFolderCountsAsync(site, path, page, listing.Uncountable, cancellationToken).ConfigureAwait(false);
             timing.CountsMs = timing.Now - countsStarted;
             // Kept with the listing, so the folder shown again has its counts at once. By position: a cloud folder can hold
             // two folders of the same name.
@@ -936,9 +941,13 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
 
     private const int FolderCountsAtOnce = 4;
 
-    private async Task AddFolderCountsAsync(SiteRecord site, string path, List<SiteItemDto> page, CancellationToken cancellationToken)
+    private async Task AddFolderCountsAsync(SiteRecord site, string path, List<SiteItemDto> page, HashSet<string> uncountable,
+        CancellationToken cancellationToken)
     {
-        var folders = page.Where(item => item.IsFolder && item.ChildCount is null && SitePaths.NameProblem(item.Name) is null).Take(8).ToArray();
+        SiteItemDto[] folders;
+        lock (_listings)
+            folders = page.Where(item => item.IsFolder && item.ChildCount is null && SitePaths.NameProblem(item.Name) is null
+                && !uncountable.Contains(item.Name)).Take(8).ToArray();
         if (folders.Length == 0) return;
         using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         budget.CancelAfter(TimeSpan.FromSeconds(2));
@@ -961,7 +970,11 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
                     }, budget.Token).ConfigureAwait(false);
                     if (reply["list"] is JsonArray items) folder.ChildCount = items.Count;
                 }
-                catch (RcloneCallException) { /* Count is optional; keep the folder browsable. */ }
+                catch (RcloneCallException)
+                {
+                    // Count is optional; keep the folder browsable, and don't ask for it again in this listing.
+                    lock (_listings) uncountable.Add(folder.Name);
+                }
                 finally { slots.Release(); }
             })).ConfigureAwait(false);
         }
