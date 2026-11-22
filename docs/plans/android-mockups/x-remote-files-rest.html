@@ -1,0 +1,1107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=412">
+<title>Remote Files, the rest</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+<!-- Remote Files screens that r1-r6 do not cover: Transfers, "get to the file", the locations list extras,
+     Add / edit location, server keys and cloud sign-in. Drafted 2026-11-22 for the owner's approval.
+     Same tokens and components as r-remote-files-redesign.html, t- and i-. Render one screen per hash
+     (#x1 ... #x33, plus lettered variants such as #x2b) at 412x892, device scale 3. Add "-light" to the hash (#x1-light) for the light theme,
+     which uses the app's real light colours (values/themes.xml, values/hosts.xml). -->
+<style>
+:root{--bg:#181818;--surface:#202020;--raised:#2a2a2a;--icon:#383838;--line:#343434;--div:#2a2a2a;--sel:#2b3a4f;--on-sel:#dfe9f6;--card-blue:#2c3f57;
+  --blue:#4aa3f0;--on-blue:#0e1b2a;--text:#f2f2f2;--muted:#a3a3a3;--chiptext:#cfcfcf;--field:#4a4a4a;--outbtn:#5a5a5a;
+  --danger:#f08a80;--amber:#e0a93e;--green:#7ccf8a;--violet:#b79cff;--img:#7fc8a9;--vid:#e88f8f;
+  --ok-bg:#1e3a27;--fail-bg:#3d2323;--warn-bg:#3d2f14;--ok-text:#c9d8cc;--warn-text:#e6d4b4;--fail-text:#ecc8c3;
+  --strip:#4a3117;--strip-fg:#f6cfa6;--scrim:rgba(0,0,0,.55);--snack:#e6e6e6;--snack-fg:#1a1a1a;--snack-act:#1f6fc5;
+  --grab:#5a5a5a;--home:#e6e6e6;--cb:#8f8f8f;--shadow:rgba(0,0,0,.5);--mono:#d9d9d9;--dim:#6f6f6f}
+:root[data-theme=light]{--bg:#f7f7f8;--surface:#ededed;--raised:#e6e6e6;--icon:#e2e2e2;--line:#dadada;--div:#dadada;--sel:#dce9f7;--on-sel:#0b2a4a;--card-blue:#dce9f7;
+  --blue:#1f6fc5;--on-blue:#ffffff;--text:#1a1a1a;--muted:#666666;--chiptext:#1a1a1a;--field:#8a8a8a;--outbtn:#8a8a8a;
+  --danger:#c42b1c;--amber:#8a5a00;--green:#1b7130;--violet:#7b4fb8;--img:#1b7130;--vid:#c42b1c;
+  --ok-bg:#d5ebdb;--fail-bg:#f6d9d5;--warn-bg:#f6e6c4;--ok-text:#2b2b2b;--warn-text:#2b2b2b;--fail-text:#2b2b2b;
+  --strip:#fbe3cc;--strip-fg:#6b3a00;--scrim:rgba(0,0,0,.32);--snack:#2c2c2c;--snack-fg:#f2f2f2;--snack-act:#4aa3f0;
+  --grab:#c4c4c4;--home:#1a1a1a;--cb:#8a8a8a;--shadow:rgba(0,0,0,.18);--mono:#2b2b2b;--dim:#9a9a9a}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:412px;height:892px;overflow:hidden;background:var(--bg);color:var(--text);font-family:Roboto,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+.screen{position:relative;width:412px;height:892px;display:none;overflow:hidden}
+.screen.on{display:block}
+svg{display:block;flex:none}
+.status{height:36px;display:flex;align-items:center;justify-content:space-between;padding:0 22px 0 24px;font-size:14px}
+.status .r{display:flex;gap:8px;align-items:center}
+.appbar{height:64px;display:flex;align-items:center;padding:0 8px 0 12px;gap:12px}
+.appbar.r{height:72px}
+.appbar .t{font-size:22px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ib{width:48px;height:48px;display:grid;place-items:center;border-radius:24px;flex:none;position:relative}
+.badge{position:absolute;top:6px;right:5px;min-width:18px;height:18px;border-radius:9px;background:var(--blue);color:var(--on-blue);font-size:11px;font-weight:700;display:grid;place-items:center;padding:0 4px}
+.headline{display:flex;align-items:center;padding:27px 8px 14px 16px}
+.headline .t{font-size:32px;flex:1}
+.hostline{font-size:13px;color:var(--muted);padding:0 16px 10px}
+.appbar + .hostline{padding:0 16px 8px 72px;margin-top:-10px}
+/* r-style folder view */
+.tabs{display:flex;height:46px}
+.tab{flex:1;display:flex;align-items:center;justify-content:center;position:relative;font-size:15px;color:var(--muted);gap:4px}
+.tab.on{color:var(--blue)}
+.tab.on::after{content:"";position:absolute;bottom:0;left:50%;width:48px;margin-left:-24px;height:3px;border-radius:3px 3px 0 0;background:var(--blue)}
+.crumbs{display:flex;align-items:center;gap:6px;padding:10px 16px 6px;white-space:nowrap;overflow:hidden}
+.crumbs.end{justify-content:flex-end}
+.chip{height:32px;padding:0 12px;border:1px solid var(--line);border-radius:8px;display:flex;align-items:center;font-size:14px;color:var(--chiptext);gap:6px;flex:none}
+.chip.on{background:var(--sel);border-color:var(--sel);color:var(--on-sel)}
+.chips{display:flex;gap:8px;padding:6px 16px 4px;white-space:nowrap;overflow:hidden}
+.chev{color:var(--muted)}
+.row{height:62px;display:flex;align-items:center;gap:16px;padding:0 24px;position:relative}
+.row.sel{background:var(--sel);border-radius:16px;margin:0 16px;padding:0 8px}
+.row.hl{border-radius:16px;margin:0 16px;padding:0 8px 0 8px;box-shadow:inset 0 0 0 2px var(--blue)}
+.ico{width:40px;height:40px;border-radius:11px;background:var(--icon);display:grid;place-items:center;flex:none;color:var(--text)}
+.ico.rnd{border-radius:20px}
+.nm{font-size:15px;line-height:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sb{font-size:12.5px;color:var(--muted);line-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.txt{min-width:0;flex:1}
+.bottom{position:absolute;left:0;right:0;bottom:0;height:104px;background:var(--surface);display:flex;align-items:center;padding:0 16px 16px 16px;gap:8px}
+.bottom .c{flex:1;min-width:0}
+.bottom .c b{font-size:16px;font-weight:500;display:block}
+.bottom .c span{font-size:13px;color:var(--muted);display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.primary{height:56px;border-radius:28px;background:var(--blue);color:var(--on-blue);display:flex;align-items:center;gap:10px;padding:0 20px 0 18px;font-size:15px;font-weight:500;white-space:nowrap}
+.homebar{position:absolute;left:50%;bottom:6px;width:108px;margin-left:-54px;height:4px;border-radius:2px;background:var(--home);z-index:9}
+.scrim{position:absolute;inset:0;background:var(--scrim)}
+.sheet{position:absolute;left:0;right:0;bottom:0;background:var(--surface);border-radius:28px 28px 0 0;padding:10px 0 34px}
+.grab{width:32px;height:4px;border-radius:2px;background:var(--grab);margin:4px auto 14px}
+.sheet h3{font-size:14px;font-weight:500;color:var(--muted);padding:6px 24px 10px;letter-spacing:.2px}
+.sheet h2{font-size:22px;font-weight:400;padding:0 24px 6px}
+.sheet p{font-size:14px;color:var(--muted);line-height:20px;padding:0 24px}
+.sheet .in{padding:0 24px}
+.srow{height:56px;display:flex;align-items:center;gap:16px;padding:0 24px;font-size:16px}
+.srow .nm{font-size:16px}
+.srow .sb{font-size:13px}
+.divider{height:1px;background:var(--line);margin:8px 24px}
+.danger{color:var(--danger)}
+.head{display:flex;gap:16px;align-items:center;padding:4px 24px 14px}
+.menu{position:absolute;right:10px;top:52px;width:236px;background:var(--raised);border-radius:8px;padding:8px 0;box-shadow:0 8px 24px var(--shadow)}
+.mi{height:48px;display:flex;align-items:center;gap:14px;padding:0 16px;font-size:15px}
+.mi .end{margin-left:auto;color:var(--muted);font-size:13px}
+/* cards (Downloads pattern) */
+.card{background:var(--surface);border-radius:18px;margin:8px 16px 0;padding:16px}
+.dl{display:flex;align-items:center;gap:14px}
+.card .nm{font-size:16px;line-height:21px;font-weight:500}
+.card .sb{font-size:13px;line-height:18px}
+.route{display:flex;align-items:center;gap:5px;font-size:13px;color:var(--muted);line-height:18px;white-space:nowrap;overflow:hidden}
+.route span{overflow:hidden;text-overflow:ellipsis}
+.route span{white-space:nowrap}
+.route span:first-child{flex:0 1 auto;min-width:24px}
+.route span:last-child{flex:0 0 auto;max-width:74%}
+.round{width:40px;height:40px;border-radius:20px;background:var(--sel);display:grid;place-items:center;color:var(--on-sel);flex:none}
+.round.n{background:var(--icon);color:var(--text)}
+:root[data-theme=light] .round{color:var(--blue)}
+:root[data-theme=light] .round.n{color:var(--text)}
+.bar{height:5px;border-radius:3px;background:var(--icon);margin-top:10px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--blue);border-radius:3px}
+.bar.g i{background:var(--green)}.bar.a i{background:var(--amber)}.bar.p i{background:var(--cb)}.bar.r i{background:var(--danger)}
+.g{color:var(--green)}.a{color:var(--amber)}.bl{color:var(--blue)}.rd{color:var(--danger)}.mu{color:var(--muted)}
+.dimc{opacity:.55}
+.snack{position:absolute;left:16px;right:16px;bottom:120px;background:var(--snack);color:var(--snack-fg);border-radius:12px;min-height:52px;padding:8px 8px 8px 16px;display:flex;align-items:center;gap:8px;font-size:14.5px;line-height:20px;box-shadow:0 4px 14px var(--shadow);z-index:5}
+.snack .m{flex:1;min-width:0}
+.snack b{font-weight:500;color:var(--snack-act);padding:8px 10px;flex:none}
+.nav{position:absolute;left:0;right:0;bottom:0;height:104px;background:var(--surface);display:flex;padding:10px 0 0}
+.nav div{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;font-size:12.5px;color:var(--muted)}
+.nav .on{color:var(--text);font-weight:500}
+.nav .on svg{background:var(--sel);border-radius:16px;width:64px;padding:4px 20px;height:32px}
+.nav svg{height:32px;width:24px;padding:4px 0}
+.fab{position:absolute;right:16px;bottom:120px;height:56px;border-radius:16px;background:var(--blue);color:var(--on-blue);display:flex;align-items:center;gap:10px;padding:0 20px 0 16px;font-size:16px;font-weight:500;box-shadow:0 4px 12px var(--shadow)}
+.strip{margin:0 16px 12px;height:44px;border-radius:24px;background:var(--strip);color:var(--strip-fg);display:flex;align-items:center;gap:12px;padding:0 16px 0 18px;font-size:15px;font-weight:500}
+.strip.n{background:var(--surface);color:var(--text);font-weight:400}
+.loc{background:var(--surface);border-radius:18px;margin:0 16px 8px;height:66px;display:flex;align-items:center;gap:16px;padding:0 16px}
+.loc .nm{font-size:16px}
+.loc .sb{font-size:13px}
+.small{height:36px;padding:0 16px;border-radius:18px;background:var(--sel);color:var(--on-sel);display:flex;align-items:center;gap:6px;font-size:14px;font-weight:500;flex:none}
+.small.fill{background:var(--blue);color:var(--on-blue)}
+:root[data-theme=light] .small{color:var(--on-sel)}
+:root[data-theme=light] .small.fill{color:var(--on-blue)}
+.search{height:56px;margin:4px 16px 0;border-radius:28px;background:var(--surface);display:flex;align-items:center;gap:12px;padding:0 8px 0 18px;color:var(--muted);font-size:16px}
+.search .v{color:var(--text);flex:1}
+.hostpill{margin-left:auto;height:40px;border-radius:20px;background:var(--sel);color:var(--on-sel);display:flex;align-items:center;gap:6px;padding:0 12px;font-size:14px;font-weight:500}
+.sum{background:var(--card-blue);border-radius:24px;margin:12px 16px 0;padding:18px;display:flex;align-items:center}
+.sum .big{font-size:46px;font-weight:500;letter-spacing:-1px;line-height:50px}
+.sum .s{font-size:14px;color:var(--muted);margin-top:4px}
+:root[data-theme=light] .sum .big,:root[data-theme=light] .sum .s{color:#0b2a4a}
+.sum2{background:var(--card-blue);border-radius:24px;margin:12px 16px 0;padding:20px 20px 0;height:143px;overflow:hidden}
+.sum2 .top{display:flex;align-items:center}
+.sum2 .big{font-size:34px;font-weight:500;line-height:40px;color:var(--on-sel)}
+.sum2 .s{font-size:15px;line-height:20px;color:var(--on-sel);margin-top:2px}
+.spark{display:block;width:100%;height:61px;margin-top:0}
+.circ{width:48px;height:48px;border-radius:24px;background:var(--blue);color:var(--on-blue);display:grid;place-items:center;margin-left:auto}
+/* forms */
+.form{padding:4px 16px 0}
+.field{border:1px solid var(--field);border-radius:8px;padding:9px 14px;display:flex;align-items:center;gap:10px;margin-bottom:10px;min-height:58px}
+.field .l{font-size:12px;color:var(--muted)}
+.field .v{font-size:15.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.field .v.ph{color:var(--muted)}
+.field .txt{flex:1;min-width:0}
+.field.f{border:2px solid var(--blue);padding:8px 13px}
+.field.f .l{color:var(--blue)}
+.field.e{border:2px solid var(--danger);padding:8px 13px;margin-bottom:4px}
+.field.e .l{color:var(--danger)}
+.field.off{opacity:.5}
+.err{font-size:12.5px;color:var(--danger);margin:0 14px 10px;line-height:17px}
+.two{display:flex;gap:10px}.two .field{flex:1}
+.lbl{font-size:13px;color:var(--muted);margin:8px 2px 8px}
+.seg{display:flex;border:1px solid var(--field);border-radius:24px;height:44px;overflow:hidden;margin-bottom:12px}
+.seg div{flex:1;display:flex;align-items:center;justify-content:center;gap:8px;font-size:14.5px;font-weight:500}
+.seg div+div{border-left:1px solid var(--field)}
+.seg .on{background:var(--sel);color:var(--on-sel)}
+.hint{font-size:12.5px;color:var(--muted);line-height:17px;margin:2px 2px 10px}
+.banner{border-radius:12px;padding:12px 14px;display:flex;gap:12px;align-items:flex-start;margin:4px 0 12px}
+.banner b{font-weight:500;font-size:14.5px;display:block}
+.banner span{font-size:12.5px;line-height:17px;color:var(--ok-text);display:block;margin-top:2px}
+.banner.ok{background:var(--ok-bg)}.banner.ok svg{color:var(--green)}
+.banner.warn{background:var(--warn-bg)}.banner.warn span{color:var(--warn-text)}.banner.warn svg{color:var(--amber)}
+.banner.fail{background:var(--fail-bg)}.banner.fail span{color:var(--fail-text)}.banner.fail svg{color:var(--danger)}
+.banner.info{background:var(--sel)}.banner.info span{color:var(--on-sel)}.banner.info b{color:var(--on-sel)}.banner.info svg{color:var(--blue)}
+.banner .tbtn{margin:6px 0 -6px -12px;display:inline-flex}
+.banner .act{margin-top:10px}
+.exp{display:flex;align-items:center;gap:12px;padding:10px 2px 8px}
+.exp .t{font-size:16px}.exp .d{font-size:13px;color:var(--muted);margin-top:2px}
+.cbrow{display:flex;align-items:flex-start;gap:14px;font-size:14.5px;line-height:20px;margin:4px 2px 12px}
+.cb{width:20px;height:20px;border-radius:5px;border:2px solid var(--cb);display:grid;place-items:center;flex:none;margin-top:1px}
+.cb.on{background:var(--blue);border-color:var(--blue);color:var(--on-blue)}
+.banner .cb.on svg{color:var(--on-blue)}
+.foot{position:absolute;left:0;right:0;bottom:0;height:104px;background:var(--surface);display:flex;align-items:center;gap:12px;padding:0 16px 16px}
+.btn{height:56px;border-radius:28px;display:flex;align-items:center;justify-content:center;gap:10px;font-size:15.5px;font-weight:500;white-space:nowrap}
+.btn.out{border:1px solid var(--outbtn);color:var(--blue);padding:0 24px}
+.btn.fill{background:var(--blue);color:var(--on-blue);flex:1}
+.btn.fill.dis{background:var(--icon);color:var(--dim)}
+/* settings-style group cards */
+.group{font-size:13px;color:var(--blue);font-weight:500;margin:16px 28px 6px}
+.set{background:var(--surface);border-radius:20px;margin:0 16px;overflow:hidden}
+.sr{display:flex;align-items:center;gap:16px;padding:10px 16px;min-height:62px}
+.sr + .sr{border-top:1px solid var(--div)}
+.sr .t{font-size:16px}
+.sr .d{font-size:13px;color:var(--muted);line-height:18px;margin-top:1px}
+.sr .ico{border-radius:20px}
+/* dialogs */
+.dlg{position:absolute;left:24px;right:24px;top:50%;transform:translateY(-50%);background:var(--raised);border-radius:28px;padding:24px 24px 16px;box-shadow:0 8px 24px var(--shadow)}
+:root[data-theme=light] .dlg{background:#f7f7f8}
+.dlg .di{display:grid;place-items:center;margin-bottom:14px}
+.dlg h2{font-size:22px;font-weight:400;margin-bottom:12px;line-height:28px}
+.dlg h2.c{text-align:center}
+.dlg p{font-size:14px;color:var(--muted);line-height:20px;margin-bottom:10px}
+.dbtns{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
+.tbtn{height:40px;padding:0 12px;color:var(--blue);font-weight:500;font-size:14.5px;display:flex;align-items:center;border-radius:20px}
+.tbtn.d{color:var(--danger)}
+.tbtn.dis{color:var(--dim)}
+.keyb{background:var(--surface);border-radius:12px;padding:10px 12px;font-family:"Roboto Mono",Consolas,monospace;font-size:12.5px;line-height:18px;color:var(--mono);margin:6px 0 10px}
+:root[data-theme=light] .keyb{background:#ededed}
+.sheet .keyb{background:var(--bg)}
+:root[data-theme=light] .sheet .keyb,:root[data-theme=light] .kv{background:var(--icon)}
+.keyrow{display:flex;gap:4px;align-items:flex-start}.keyrow .keyb{flex:1;min-width:0;user-select:text}.keyrow .ib{width:40px;height:40px;margin-top:6px;color:var(--muted)}
+.keyb.wrap{white-space:normal;overflow-wrap:anywhere}
+.sheet .hl2{font-size:13px;padding-top:2px}
+.acts{display:flex;gap:8px;padding:0 24px 12px;flex-wrap:wrap}
+.frow{height:44px;display:flex;align-items:center;gap:14px;padding:0 24px}
+.frow .nm{font-size:14.5px}.frow .sb{font-size:12.5px}
+.frow .ico{width:32px;height:32px;border-radius:9px}
+.sheet h3.row2{display:flex;align-items:center;padding:8px 12px 4px 24px}.sheet h3.row2 .tbtn{margin-left:auto}
+.kv{background:var(--bg);border-radius:18px;margin:4px 16px 0;padding:6px 16px}
+.kv div{display:flex;padding:8px 0;font-size:14.5px}
+.kv div span:first-child{width:96px;color:var(--muted);flex:none}
+.kv div span:last-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.empty{position:absolute;left:32px;right:32px;top:250px;text-align:center}
+.empty .bigico{width:88px;height:88px;border-radius:44px;background:var(--surface);display:grid;place-items:center;margin:0 auto 20px;color:var(--blue)}
+:root[data-theme=light] .empty .bigico{background:var(--sel)}
+:root .empty .bigico.err{background:var(--fail-bg);color:var(--danger)}
+:root .empty .bigico.warn{background:var(--warn-bg);color:var(--amber)}
+.empty .small{display:inline-flex;margin-top:20px}
+.empty b{font-size:20px;font-weight:400;display:block;margin-bottom:8px}
+.empty span{font-size:14px;color:var(--muted);line-height:20px;display:block}
+.empty .btn{margin:22px auto 0;display:inline-flex;padding:0 24px}
+.msg{margin:28px 24px 0;text-align:center}
+.msg b{font-size:16px;font-weight:400;display:block;margin-bottom:6px}
+.msg span{font-size:13.5px;color:var(--muted);line-height:19px;display:block}
+.msg .small{display:inline-flex;margin-top:16px}
+.ptr{position:absolute;left:50%;top:150px;margin-left:-20px;width:40px;height:40px;border-radius:20px;background:var(--raised);display:grid;place-items:center;color:var(--blue);box-shadow:0 2px 8px var(--shadow)}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="M20 12H5M11 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.8" fill="currentColor"/><circle cx="12" cy="12" r="1.8" fill="currentColor"/><circle cx="12" cy="19" r="1.8" fill="currentColor"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4l2 2h9A1.5 1.5 0 0 1 21 9.5v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-music" viewBox="0 0 24 24"><path d="M9 18V6l11-2v12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="6.5" cy="18" r="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="17.5" cy="16" r="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
+    <symbol id="i-doc" viewBox="0 0 24 24"><path d="M7 3h7l5 5v12a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z M14 3v5h5 M9 13h6M9 16.5h6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/></symbol>
+    <symbol id="i-zip" viewBox="0 0 24 24"><rect x="6" y="3" width="12" height="18" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M11 3v2h2v2h-2v2h2v2h-2" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="10" y="13" width="4" height="4" rx="1" fill="none" stroke="currentColor" stroke-width="1.6"/></symbol>
+    <symbol id="i-image" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="9" cy="10" r="1.7" fill="currentColor"/><path d="M4 18l5-5 4 4 3-3 4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+    <symbol id="i-video" viewBox="0 0 24 24"><rect x="3" y="6" width="13" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M16 10.5l5-3v9l-5-3z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 4v11M7 10.5l5 5 5-5M5 20h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 16V5M7 9.5l5-5 5 5M5 20h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><path d="M5 12h12M12 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M4 12h15M14 7l5 5-5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 6.5h16M9 6.5V4.5h6v2M6.5 6.5l1 13a1 1 0 0 0 1 .9h7a1 1 0 0 0 1-.9l1-13M10 10.5v6M14 10.5v6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-open" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z M13.5 6.5l4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 11v5.5M12 7.6v.2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3.5l9.5 16.5h-19z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 10v4.5M12 17.2v.2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-caret" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-phone" viewBox="0 0 24 24"><rect x="6.5" y="2.5" width="11" height="19" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M10.5 18.5h3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+    <symbol id="i-pc" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="12" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M9 20h6M12 16.5V20" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+    <symbol id="i-server" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="4" y="13" width="16" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M7.5 7.5h3M7.5 16.5h3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3.5 12h17M12 3.5c2.5 2.6 3.6 5.4 3.6 8.5S14.5 17.9 12 20.5M12 3.5C9.5 6.1 8.4 8.9 8.4 12s1.1 5.9 3.6 8.5" fill="none" stroke="currentColor" stroke-width="1.6"/></symbol>
+    <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M7 18.5h10.5a4 4 0 0 0 .6-7.95A6 6 0 0 0 6.6 9.6 4.5 4.5 0 0 0 7 18.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+    <symbol id="i-box" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="4.5" rx="1" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M5 9v9.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9M10 12.5h4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+    <symbol id="i-ftp" viewBox="0 0 24 24"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4l2 2h9A1.5 1.5 0 0 1 21 9.5v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M9 11.5h6M13 9.8l2 1.7-2 1.7M15 15.5H9M11 13.8l-2 1.7 2 1.7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3M19.5 4.5v4.5H15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-retry" viewBox="0 0 24 24"><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3M4.5 4.5v4.5H9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-transfers" viewBox="0 0 24 24"><path d="M8 20V5M4 9l4-4 4 4M16 4v15M12 15l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><path d="M9 6v12M15 6v12" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13l10.5-6.5z" fill="currentColor"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6" fill="none" stroke="currentColor" stroke-width="2"/><path d="M15 15l5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-queue" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24"><path d="M9.17 5.16 L9.81 4.93 L10.09 2.59 L13.91 2.59 L14.19 4.93 L14.83 5.16 L15.45 5.45 L17.30 4.00 L20.00 6.70 L18.55 8.55 L18.84 9.17 L19.07 9.81 L21.41 10.09 L21.41 13.91 L19.07 14.19 L18.84 14.83 L18.55 15.45 L20.00 17.30 L17.30 20.00 L15.45 18.55 L14.83 18.84 L14.19 19.07 L13.91 21.41 L10.09 21.41 L9.81 19.07 L9.17 18.84 L8.55 18.55 L6.70 20.00 L4.00 17.30 L5.45 15.45 L5.16 14.83 L4.93 14.19 L2.59 13.91 L2.59 10.09 L4.93 9.81 L5.16 9.17 L5.45 8.55 L4.00 6.70 L6.70 4.00 L8.55 5.45Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="1.7"/></symbol>
+    <symbol id="i-clearall" viewBox="0 0 24 24"><path d="M5 7h14M7 12h12M9 17h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="12" r="3.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M11.5 12H21M17.5 12v3M20 12v2.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
+    <symbol id="i-unlock" viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8 10.5V8a4 4 0 0 1 7.6-1.7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+    <symbol id="i-paste" viewBox="0 0 24 24"><rect x="6" y="4.5" width="12" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="9" y="3" width="6" height="3.5" rx="1" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
+    <symbol id="i-cpy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M16 8V5.5A1.5 1.5 0 0 0 14.5 4h-9A1.5 1.5 0 0 0 4 5.5v9A1.5 1.5 0 0 0 5.5 16H8" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
+    <symbol id="i-power" viewBox="0 0 24 24"><path d="M12 3.5v8M7 6.3a7.5 7.5 0 1 0 10 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+    <symbol id="i-wifi" viewBox="0 0 24 24"><path d="M2.5 9a14 14 0 0 1 19 0M5.5 12.3a9.5 9.5 0 0 1 13 0M8.6 15.5a5 5 0 0 1 6.8 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="19" r="1.4" fill="currentColor"/></symbol>
+    <symbol id="i-batt" viewBox="0 0 24 24"><rect x="2.5" y="7" width="17" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="5" y="9.5" width="8" height="5" rx=".8" fill="currentColor"/><path d="M21.5 10.5v3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-disc" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="12" r="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
+  </defs>
+</svg>
+
+<template id="status"><div class="status"><span>9:30</span><span class="r"><svg width="20" height="20"><use href="#i-wifi"/></svg><svg width="22" height="22"><use href="#i-batt"/></svg></span></div></template>
+<template id="nav-rf"><div class="nav"><div><svg><use href="#i-down"/></svg>Downloads</div><div><svg><use href="#i-queue"/></svg>Queues</div><div class="on"><svg><use href="#i-cloud"/></svg>Remote Files</div><div><svg><use href="#i-gear"/></svg>Settings</div></div></template>
+<template id="nav-dl"><div class="nav"><div class="on"><svg><use href="#i-down"/></svg>Downloads</div><div><svg><use href="#i-queue"/></svg>Queues</div><div><svg><use href="#i-cloud"/></svg>Remote Files</div><div><svg><use href="#i-gear"/></svg>Settings</div></div></template>
+
+<!-- Reusable Transfers list body (this phone is the Host). -->
+<template id="tlist">
+  <div class="card"><div class="dl"><div class="ico bl"><i data-i="down"></i></div><div class="txt"><div class="nm">session-0503.flac</div><div class="sb">212 of 455 MB · 9.8 MB/s · 25 s left</div><div class="route"><span>Home NAS</span><i data-i="arrow" data-s="14"></i><span>Download/Inbound/Music</span></div></div><div class="round"><i data-i="pause"></i></div></div><div class="bar"><i style="width:47%"></i></div></div>
+  <div class="card"><div class="dl"><div class="ico bl"><i data-i="copy"></i></div><div class="txt"><div class="nm">Wedding</div><div class="sb">118 of 640 files · 1.2 of 6.4 GB · 4.1 MB/s</div><div class="route"><span>Google Drive</span><i data-i="arrow" data-s="14"></i><span>Home NAS · photos</span></div></div><div class="round"><i data-i="pause"></i></div></div><div class="bar"><i style="width:19%"></i></div></div>
+  <div class="card"><div class="dl"><div class="ico bl"><i data-i="up"></i></div><div class="txt"><div class="nm">cover-scan.jpg</div><div class="sb">Queued</div><div class="route"><span>Download/Scans</span><i data-i="arrow" data-s="14"></i><span>Work files · shared</span></div></div><div class="round n"><i data-i="close"></i></div></div></div>
+  <div class="card"><div class="dl"><div class="ico bl"><i data-i="down"></i></div><div class="txt"><div class="nm">rehearsal-take-3.mp4</div><div class="sb a">Paused · 310 MB of 1.4 GB</div><div class="route"><span>Home NAS</span><i data-i="arrow" data-s="14"></i><span>Download/Inbound/Video</span></div></div><div class="round n"><i data-i="play"></i></div></div><div class="bar p"><i style="width:22%"></i></div></div>
+  <div class="card"><div class="dl"><div class="ico rd"><i data-i="up"></i></div><div class="txt"><div class="nm">Photos 2025 · 24 files</div><div class="sb rd">Failed · 3 of 24 not copied</div><div class="route"><span>Download/Photos 2025</span><i data-i="arrow" data-s="14"></i><span>Home NAS · backup</span></div></div><div class="round n"><i data-i="retry"></i></div></div></div>
+  <div class="card"><div class="dl"><div class="ico g"><i data-i="down"></i></div><div class="txt"><div class="nm">setlist.pdf</div><div class="sb g">Finished · 220 KB · 13:52</div><div class="route"><span>Work files</span><i data-i="arrow" data-s="14"></i><span>Download</span></div></div><div class="round n"><i data-i="folder"></i></div></div></div>
+  <div class="card"><div class="dl"><div class="ico g"><i data-i="copy"></i></div><div class="txt"><div class="nm">Invoices · 14 files</div><div class="sb g">Finished · 14 files, 2 already there</div><div class="route"><span>Dropbox</span><i data-i="arrow" data-s="14"></i><span>Backups · invoices</span></div></div><div class="round n"><i data-i="folder"></i></div></div></div>
+  <div class="card"><div class="dl"><div class="ico mu"><i data-i="down"></i></div><div class="txt"><div class="nm">old-mixes</div><div class="sb">Canceled · 3 of 12 files</div><div class="route"><span>Home NAS</span><i data-i="arrow" data-s="14"></i><span>Download/Inbound</span></div></div></div></div>
+</template>
+
+<template id="tbar"><div class="appbar"><div class="ib"><i data-i="back" data-s="24"></i></div><div class="t">Transfers</div><div class="ib"><i data-i="more" data-s="24"></i></div></div>
+  <div class="chips"><div class="chip on">All 8</div><div class="chip">Active 4</div><div class="chip">Finished 2</div><div class="chip">Failed 1</div><div class="chip">Canceled 1</div></div></template>
+
+<!-- Locations list (this phone is the Host), used under scrims. -->
+<template id="loclist">
+  <div class="headline"><div class="t">Remote Files</div><div class="ib"><i data-i="search" data-s="24"></i></div><div class="ib"><i data-i="more" data-s="24"></i></div></div>
+  <div class="strip n"><i data-i="transfers" data-s="22" class="g"></i><span style="flex:1">Transfers · 3 finished today</span><i data-i="chev" data-s="20" class="mu"></i></div>
+  <div class="loc"><div class="ico rnd"><i data-i="server"></i></div><div class="txt"><div class="nm">Home NAS</div><div class="sb">SFTP · nas.local · 1.2 TB free</div></div><i data-i="chev" data-s="22" class="mu"></i></div>
+  <div class="loc"><div class="ico rnd"><i data-i="globe"></i></div><div class="txt"><div class="nm">Work files</div><div class="sb">WebDAV · files.example.com</div></div><i data-i="chev" data-s="22" class="mu"></i></div>
+  <div class="loc"><div class="ico rnd"><i data-i="cloud"></i></div><div class="txt"><div class="nm">Google Drive</div><div class="sb">Signed in</div></div><i data-i="chev" data-s="22" class="mu"></i></div>
+  <div class="loc"><div class="ico rnd"><i data-i="cloud"></i></div><div class="txt"><div class="nm">OneDrive</div><div class="sb">Sign-in has run out</div></div><div class="small">Sign in</div></div>
+  <div class="loc"><div class="ico rnd"><i data-i="box"></i></div><div class="txt"><div class="nm">Backups</div><div class="sb">S3 · eu-central</div></div><i data-i="chev" data-s="22" class="mu"></i></div>
+  <div class="loc"><div class="ico rnd"><i data-i="server"></i></div><div class="txt"><div class="nm">Print shop</div><div class="sb">FTP · ftp.example.org · Not encrypted</div></div><i data-i="chev" data-s="22" class="mu"></i></div>
+  <div class="fab"><i data-i="plus" data-s="24"></i>Add location</div>
+</template>
+
+<!-- Filled SFTP form (x19), used under the key sheet. -->
+<template id="sftpform">
+  <div class="appbar"><div class="ib"><i data-i="back" data-s="24"></i></div><div class="t">SFTP location</div></div>
+  <div class="form">
+    <div class="field"><div class="txt"><div class="l">Location name</div><div class="v">Home NAS</div></div></div>
+    <div class="two"><div class="field" style="flex:2.3"><div class="txt"><div class="l">Server name or address</div><div class="v">nas.local</div></div></div><div class="field"><div class="txt"><div class="l">Port</div><div class="v">22</div></div></div></div>
+    <div class="field"><div class="txt"><div class="l">User name</div><div class="v">media</div></div></div>
+    <div class="field"><div class="txt"><div class="l">Password (optional)</div><div class="v">••••••••••</div></div><i data-i="eye" data-s="24" class="mu"></i></div>
+    <div class="hint">Credentials are stored by this phone's Host.</div>
+  </div>
+  <div class="foot"><div class="btn out">Cancel</div><div class="btn fill"><i data-i="check" data-s="20"></i>Add location</div></div>
+</template>
+
+<!-- X1: Transfers, mixed states. Opened from the Transfers row, the folder's transfers button or a snackbar's View transfers. -->
+<section class="screen" id="x1">
+  <div data-status></div>
+  <div data-tpl="tbar"></div>
+  <div data-tpl="tlist"></div>
+  <div class="homebar"></div>
+</section>
+
+<!-- X2: tapping a failed transfer opens its details sheet (expanded): reason, actions, details, the files. -->
+<section class="screen" id="x2">
+  <div data-status></div>
+  <div data-tpl="tbar"></div>
+  <div data-tpl="tlist"></div>
+  <div class="scrim"></div>
+  <div class="sheet" style="padding-bottom:26px">
+    <div class="grab"></div>
+    <div class="head" style="padding-bottom:10px"><div class="ico rd"><i data-i="up"></i></div><div class="txt"><div class="nm" style="font-size:16px;font-weight:500">Photos 2025 · 24 files</div><div class="sb rd" style="font-size:13px">Failed · 3 of 24 not copied</div></div></div>
+    <div class="in"><div class="banner fail" style="margin-top:0;margin-bottom:10px"><i data-i="alert" data-s="24"></i><div><b>The connection to Home NAS was lost</b><span>Retry sends only the 3 files that are missing.</span></div></div></div>
+    <div class="acts"><div class="small"><i data-i="retry" data-s="18"></i>Retry</div><div class="small"><i data-i="folder" data-s="18"></i>Show in Home NAS</div></div>
+    <div class="kv">
+      <div><span>From</span><span>Download/Photos 2025</span></div>
+      <div><span>To</span><span>Home NAS · backup</span></div>
+      <div><span>Size</span><span>96 of 112 MB · today 13:31</span></div>
+      <div style="align-items:flex-start"><span>Transfer ID</span><span style="white-space:normal;word-break:break-all;font-family:Consolas,monospace;font-size:13px;line-height:18px;flex:1">94bbf4e07a3c4d51<br>b8e2f60c19d7c21a</span><svg width="20" height="20" class="mu" style="margin-left:8px"><use href="#i-cpy"/></svg></div>
+    </div>
+    <h3 class="row2" style="margin-top:6px">Files<div class="tbtn">All 24</div></h3>
+    <div class="frow"><div class="ico rd"><i data-i="image" data-s="18"></i></div><div class="txt"><div class="nm">IMG_2291.jpg</div><div class="sb rd">Not copied · connection lost</div></div></div>
+    <div class="frow"><div class="ico rd"><i data-i="image" data-s="18"></i></div><div class="txt"><div class="nm">IMG_2292.jpg</div><div class="sb rd">Not copied · connection lost</div></div></div>
+    <div class="frow"><div class="ico g"><i data-i="image" data-s="18"></i></div><div class="txt"><div class="nm">IMG_2201.jpg</div><div class="sb g">Copied · 4.1 MB</div></div><svg width="22" height="22" class="mu"><use href="#i-folder"/></svg></div>
+    <div class="divider"></div>
+    <div class="srow"><i data-i="clearall" data-s="24"></i><div class="nm">Remove from list</div></div>
+    <div class="srow danger"><i data-i="close" data-s="24"></i><div class="nm">Cancel transfer</div></div>
+  </div>
+  <div class="homebar"></div>
+</section>
+
+<!-- X2b: details sheet for a paused transfer: the resume note sits in the banner slot. -->
+<section class="screen" id="x2b">
+  <div data-status></div>
+  <div data-tpl="tbar"></div>
+  <div data-tpl="tlist"></div>
+  <div class="scrim"></div>
+  <div class="sheet">
+    <div class="grab"></div>
+    <div class="head" style="padding-bottom:10px"><div class="ico bl"><i data-i="down"></i></div><div class="txt"><div class="nm" style="font-size:16px;font-weight:500">rehearsal-take-3.mp4</div><div class="sb a" style="font-size:13px">Paused · 310 MB of 1.4 GB</div></div></div>
+    <div class="in"><div class="banner warn" style="margin-top:0;margin-bottom:10px"><i data-i="pause" data-s="24"></i><div><b>Paused</b><span>Unfinished files restart from the beginning on resume.</span></div></div></div>
+    <div class="acts"><div class="small"><i data-i="play" data-s="18"></i>Resume</div></div>
+    <div class="kv">
+      <div><span>From</span><span>Home NAS · media/rehearsals</span></div>
+      <div><span>To</span><span>Download/Inbound/Video</span></div>
+      <div><span>Size</span><span>310 MB of 1.4 GB · today 13:40</span></div>
+      <div style="align-items:flex-start"><span>Transfer ID</span><span style="white-space:normal;word-break:break-all;font-family:Consolas,monospace;font-size:13px;line-height:18px;flex:1">5d0e81c2b74a4f0f<br>9e33a1d6c8b2e0f7</span><svg width="20" height="20" class="mu" style="margin-left:8px"><use href="#i-cpy"/></svg></div>
+    </div>
+    <div class="divider" style="margin-top:12px"></div>
+    <div class="srow danger"><i data-i="close" data-s="24"></i><div class="nm">Cancel transfer</div></div>
+  </div>
+  <div class="homebar"></div>
+</section>
+
+<!-- X3: Cancel asks first; a canceled transfer can't be resumed. -->
+<section class="screen" id="x3">
+  <div data-status></div>
+  <div data-tpl="tbar"></div>
+  <div data-tpl="tlist"></div>
+  <div class="scrim"></div>
+  <div class="dlg">
+    <h2>Cancel this transfer?</h2>
+    <p>Wedding · Google Drive to Home NAS</p>
+    <p>A canceled transfer can't be resumed.</p>
+    <div class="dbtns"><div class="tbtn">Keep transfer</div><div class="tbtn d">Cancel transfer</div></div>
+  </div>
+  <div class="homebar"></div>
+</section>
+
+<!-- X4: no transfers on this Host. -->
+<section class="screen" id="x4">
+  <div data-status></div>
+  <div class="appbar"><div class="ib"><i data-i="back" data-s="24"></i></div><div class="t">Transfers</div><div class="ib"><i data-i="more" data-s="24"></i></div></div>
+  <div class="empty"><div class="bigico"><i data-i="transfers" data-s="40"></i></div><b>No transfers on this phone</b><span>Files you move with Remote Files show up here with their progress.</span></div>
+  <div class="homebar"></div>
+</section>
+
+<!-- X5: the overflow menu. -->
+<section class="screen" id="x5">
+  <div data-status></div>
+  <div data-tpl="tbar"></div>
+  <div data-tpl="tlist"></div>
+  <div class="menu" style="width:248px">
+    <div class="mi"><i data-i="refresh"></i>Refresh</div>
+    <div class="mi"><i data-i="clearall"></i>Clear ended transfers<span class="end">4</span></div>
+  </div>
+  <div class="homebar"></div>
+</section>
+
+<!-- X5b: pull-to-refresh. -->
+<section class="screen" id="x5b">
+  <div data-status></div>
+  <div data-tpl="tbar"></div>
+  <div style="height:56px"></div>
+  <div data-tpl="tlist"></div>
+  <div class="ptr" style="top:146px"><svg width="24" height="24" viewBox="0 0 24 24"><path d="M19.5 12a7.5 7.5 0 1 1-4-6.6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg></div>
+  <div class="homebar"></div>
+</section>
+
+<!-- X6: refresh failed on a paired PC Host. Rows stay at full contrast; the banner dates them. -->
+<section class="screen" id="x6">
+  <div data-status></div>
+  <div class="appbar"><div class="ib"><i data-i="back" data-s="24"></i></div><div class="t">Transfers</div><div class="ib"><i data-i="more" data-s="24"></i></div></div>
+  <div class="hostline">On Office PC</div>
+  <div style="padding:0 16px"><div class="banner fail" style="margin:0 0 4px"><i data-i="alert" data-s="24"></i><div style="flex:1"><b>Could not refresh transfers</b><span>Their current state is unknown. Shown as of 13:52.</span><div class="tbtn">Try again</div></div></div></div>
+  <div class="card"><div class="dl"><div class="ico bl"><i data-i="down"></i></div><div class="txt"><div class="nm">session-0503.flac</div><div class="sb">212 of 455 MB · 9.8 MB/s · 25 s left</div><div class="route"><span>Home NAS</span><i data-i="arrow" data-s="14"></i><span>D:\Downloads\Music</span></div></div><div class="round"><i data-i="pause"></i></div></div><div class="bar"><i style="width:47%"></i></div></div>
+  <div class="card"><div class="dl"><div class="ico bl"><i data-i="copy"></i></div><div class="txt"><div class="nm">Wedding</div><div class="sb">118 of 640 files · 1.2 of 6.4 GB · 4.1 MB/s</div><div class="route"><span>Google Drive</span><i data-i="arrow" data-s="14"></i><span>Home NAS · photos</span></div></div><div class="round"><i data-i="pause"></i></div></div><div class="bar"><i style="width:19%"></i></div></div>
+  <div class="card"><div class="dl"><div class="ico rd"><i data-i="up"></i></div><div class="txt"><div class="nm">Photos 2025 · 24 files</div><div class="sb rd">Failed · 3 of 24 not copied</div><div class="route"><span>D:\Photos\2025</span><i data-i="arrow" data-s="14"></i><span>Home NAS · backup</span></div></div><div class="round n"><i data-i="retry"></i></div></div></div>
+  <div class="card"><div class="dl"><div class="ico g"><i data-i="down"></i></div><div class="txt"><div class="nm">setlist.pdf</div><div class="sb g">Finished · 220 KB · 13:20</div><div class="route"><span>Work files</span><i data-i="arrow" data-s="14"></i><span>D:\Downloads</span></div></div></div></div>
+  <div class="homebar"></div>
+</section>
+
+<!-- X7: right after "To this phone": snackbar with View transfers, and the transfers button with its count in the app bar. -->
+<section class="screen" id="x7">
+  <div data-status></div>
+  <div class="appbar r"><div class="ib"><i data-i="back" data-s="24"></i></div><div class="t">Home NAS</div><div class="ib"><i data-i="transfers" data-s="24"></i><span class="badge">2</span></div><div class="ib"><i data-i="more" data-s="24"></i></div></div>
+  <div class="tabs"><div class="tab on">Home NAS<i data-i="caret" data-s="18"></i></div><div class="tab">This phone</div></div>
+  <div class="crumbs"><div class="chip">media</div><i data-i="chev" data-s="18" class="chev"></i><div class="chip">recordings</div><i data-i="chev" data-s="18" class="chev"></i><div class="chip on">2026</div></div>
+  <div class="row"><div class="ico bl"><i data-i="folder"></i></div><div class="txt"><div class="nm">masters</div><div class="sb">Folder · 12 items</div></div></div>
+  <div class="row"><div class="ico bl"><i data-i="folder"></i></div><div class="txt"><div class="nm">stems</div><div class="sb">Folder · 48 items</div></div></div>
+  <div class="row"><div class="ico" style="color:var(--violet)"><i data-i="music"></i></div><div class="txt"><div class="nm">session-0412.flac</div><div class="sb">412 MB · 12 Apr</div></div></div>
+  <div class="row"><div class="ico" style="color:var(--violet)"><i data-i="music"></i></div><div class="txt"><div class="nm">session-0419.flac</div><div class="sb">388 MB · 19 Apr</div></div></div>
+  <div class="row"><div class="ico" style="color:var(--violet)"><i data-i="music"></i></div><div class="txt"><div class="nm">session-0503.flac</div><div class="sb">455 MB · 3 May</div></div></div>
+  <div class="row"><div class="ico bl"><i data-i="doc"></i></div><div class="txt"><div class="nm">notes.pdf</div><div class="sb">1.1 MB · 3 May</div></div></div>
+  <div class="row"><div class="ico a"><i data-i="zip"></i></div><div class="txt"><div class="nm">artwork.zip</div><div class="sb">64 MB · 9 May</div></div></div>
+  <div class="snack" style="bottom:32px"><div class="m">2 files going to Download/Inbound/Music</div><b>View transfers</b></div>
+  <div class="homebar"></div>
+</section>
+
+<!-- X8: a download to the phone finished while the user is still in the folder: snackbar with Show in folder. -->
+<section class="screen" id="x8">
+  <div data-status></div>
+  <div class="appbar r"><div class="ib"><i data-i="back" data-s="24"></i></div><div class="t">Home NAS</div><div class="ib"><i data-i="transfers" data-s="24"></i><span class="badge">1</span></div><div class="ib"><i data-i="more" data-s="24"></i></div></div>
+  <div class="tabs"><div class="tab on">Home NAS<i data-i="caret" data-s="18"></i></div><div class="tab">This phone</div></div>
+  <div class="crumbs"><div class="chip">media</div><i data-i="chev" data-s="18" class="chev"></i><div class="chip">recordings</div><i data-i="chev" data-s="18" class="chev"></i><div class="chip on">2026</div></div>
+  <div class="row"><div class="ico bl"><i data-i="folder"></i></div><div class="txt"><div class="nm">masters</div><div class="sb">Folder · 12 items</div></div></div>
+  <div class="row"><div class="ico bl"><i data-i="folder"></i></div><div class="txt"><div class="nm">stems</div><div class="sb">Folder · 48 items</div></div></div>
+  <div class="row"><div class="ico" style="color:var(--violet)"><i data-i="music"></i></div><div class="txt"><div class="nm">session-0412.flac</div><div class="sb">412 MB · 12 Apr</div></div></div>
+  <div class="row"><div class="ico" style="color:var(--violet)"><i data-i="music"></i></div><div class="txt"><div class="nm">session-0419.flac</div><div class="sb">388 MB · 19 Apr</div></div></div>
+  <div class="row"><div class="ico" style="color:var(--violet)"><i data-i="music"></i></div><div class="txt"><div class="nm">session-0503.flac</div><div class="sb">455 MB · 3 May</div></div></div>
+  <div class="row"><div class="ico bl"><i data-i="doc"></i></div><div class="txt"><div class="nm">notes.pdf</div><div class="sb">1.1 MB · 3 May</div></div></div>
+  <div class="row"><div class="ico a"><i data-i="zip"></i></div><div class="txt"><div class="nm">artwork.zip</div><div class="sb">64 MB · 9 May</div></div></div>
+  <div class="snack" style="bottom:32px"><div class="m">session-0503.flac is on this phone</div><b>Show in folder</b></div>
+  <div class="homebar"></div>
+</section>
+
+<!-- X9: Show in folder: the This phone pane opens at the file's folder; the file is outlined for about 3 s (not a selection), with Open beside it. -->
+<section class="screen" id="x9">
+  <div data-status></div>
+  <div class="appbar r"><div class="ib"><i data-i="back" data-s="24"></i></div><div class="t">Home NAS</div><div class="ib"><i data-i="transfers" data-s="24"></i><span class="badge">1</span></div><div class="ib"><i data-i="more" data-s="24"></i></div></div>
+  <div class="tabs"><div class="tab">Home NAS</div><div class="tab on">This phone<i data-i="caret" data-s="18"></i></div></div>
+  <div class="crumbs end"><div class="chip">Phone</div><i data-i="chev" data-s="18" class="chev"></i><div class="chip">Download</div><i data-i="chev" data-s="18" class="chev"></i><div class="chip">Inbound</div><i data-i="chev" data-s="18" class="chev"></i><div class="chip on">Music</div></div>
+  <div class="row"><div class="ico" style="color:var(--violet)"><i data-i="music"></i></div><div class="txt"><div class="nm">demo-0301.m4a</div><div class="sb">18 MB · 1 Mar</div></div></div>
+  <div class="row hl"><div class="ico" style="color:var(--violet)"><i data-i="music"></i></div><div class="txt"><div class="nm">session-0503.flac</div><div class="sb">455 MB · Just now</div></div><div class="small"><i data-i="open" data-s="18"></i>Open</div></div>
+  <div class="row"><div class="ico" style="color:var(--violet)"><i data-i="music"></i></div><div class="txt"><div class="nm">session-0419.flac</div><div class="sb">388 MB · 20 Apr</div></div></div>
+  <div class="row"><div class="ico" style="color:var(--violet)"><i data-i="music"></i></div><div class="txt"><div class="nm">voice-memo-0517.m4a</div><div class="sb">24 MB · 17 May</div></div></div>
+  <div class="homebar"></div>
+</section>
+
+<!-- X10: main Downloads (a1) after Add: the new card is outlined with its folder; the snackbar's Show in folder opens X10b. -->
+<section class="screen" id="x10">
+  <div data-status></div>
+  <div class="search" style="margin-top:16px"><i data-i="search" data-s="24"></i>Search downloads<div class="hostpill"><i data-i="phone" data-s="18" class="bl"></i>This phone<i data-i="caret" data-s="18"></i></div></div>
+  <div class="sum2"><div class="top"><div><div class="big">11.2 MB/s</div><div class="s">2 active · about 3 min left</div></div><div class="circ"><i data-i="pause" data-s="24"></i></div></div>
+    <svg class="spark" viewBox="0 0 340 61" preserveAspectRatio="none"><path d="M0 46L31 43L62 46L93 35L124 38L155 28L186 30L217 24L248 26L279 18L310 21L340 17V61H0Z" fill="var(--blue)" opacity=".10"/><path d="M0 46L31 43L62 46L93 35L124 38L155 28L186 30L217 24L248 26L279 18L310 21L340 17" fill="none" stroke="var(--blue)" stroke-width="2.4" stroke-linejoin="round"/></svg></div>
+  <div class="chips" style="padding:14px 16px 4px"><div class="chip on">All 13</div><div class="chip">Active 2</div><div class="chip">Queued 0</div><div class="chip">Finished 9</div><div class="chip">Failed</div></div>
+  <div class="card" style="box-shadow:inset 0 0 0 2px var(--blue)"><div class="dl"><div class="ico bl"><i data-i="doc"></i></div><div class="txt"><div class="nm">manual-v2.pdf</div><div class="sb">1.2 of 8.4 MB · 2.1 MB/s · 4 s left</div><div class="route"><i data-i="folder" data-s="14"></i><span>Download/Inbound</span></div></div><div class="round"><i data-i="pause"></i></div></div><div class="bar"><i style="width:14%"></i></div></div>
+  <div class="card"><div class="dl"><div class="ico bl"><i data-i="disc"></i></div><div class="txt"><div class="nm">ubuntu-26.10-desktop-amd64.iso</div><div class="sb">4.3 of 6.1 GB · 9.1 MB/s · 3 min left</div></div><div class="round"><i data-i="pause"></i></div></div><div class="bar"><i style="width:70%"></i></div></div>
+  <div class="card"><div class="dl"><div class="ico a"><i data-i="zip"></i></div><div class="txt"><div class="nm">field-recordings-vol3.zip</div><div class="sb g">Finished · 640 MB · 14:07</div></div><div class="round n"><i data-i="folder"></i></div></div></div>
+  <div class="fab" style="bottom:188px"><i data-i="plus" data-s="24"></i>Add</div>
+  <div class="snack"><div class="m">Download added · saving to Download/Inbound</div><b>Show in folder</b></div>
+  <div data-tpl="nav-dl"></div>
+  <div class="homebar"></div>
+</section>
+
+<!-- X10b: Show in folder from Downloads: the app's own folder page over the Downloads tab, file outlined with Open. Back returns to the list. -->
+<section class="screen" id="x10b">
+  <div data-status></div>
+  <div class="appbar r"><div class="ib"><i data-i="back" data-s="24"></i></div><div class="t">Inbound</div><div class="ib"><i data-i="more" data-s="24"></i></div></div>
+  <div class="crumbs" style="padding-top:0"><div class="chip">Phone</div><i data-i="chev" data-s="18" class="chev"></i><div class="chip">Download</div><i data-i="chev" data-s="18" class="chev"></i><div class="chip on">Inbound</div></div>
+  <div class="row"><div class="ico bl"><i data-i="folder"></i></div><div class="txt"><div class="nm">Music</div><div class="sb">Folder · 4 items</div></div></div>
+  <div class="row"><div class="ico bl"><i data-i="folder"></i></div><div class="txt"><div class="nm">Video</div><div class="sb">Folder · 2 items</div></div></div>
+  <div class="row hl"><div class="ico bl"><i data-i="doc"></i></div><div class="txt"><div class="nm">manual-v2.pdf</div><div class="sb">8.4 MB · Just now</div></div><div class="small"><i data-i="open" data-s="18"></i>Open</div></div>
+  <div class="row"><div class="ico a"><i data-i="zip"></i></div><div class="txt"><div class="nm">field-recordings-vol3.zip</div><div class="sb">640 MB · 14:07</div></div></div>
+  <div class="row"><div class="ico" style="color:var(--img)"><i data-i="image"></i></div><div class="txt"><div class="nm">poster-final.png</div><div class="sb">3.2 MB · Yesterday</div></div></div>
+  <div class="row"><div class="ico bl"><i data-i="doc"></i></div><div class="txt"><div class="nm">setlist.pdf</div><div class="sb">220 KB · Yesterday</div></div></div>
+  <div data-tpl="nav-dl"></div>
+  <div class="homebar"></div>
+</section>
+
+<!-- X11: Remote Files tab. Transfers row stays visible when nothing runs; ⋮ sits beside search (menu closed). -->
+<section class="screen" id="x11">
+  <div data-status></div>
+  <div data-tpl="loclist"></div>
+  <div data-tpl="nav-rf"></div>
+  <div class="homebar"></div>
+</section>
+
+<!-- X11b: the ⋮ menu open. -->
+<section class="screen" id="x11b">
+  <div data-status></div>
+  <div data-tpl="loclist"></div>
+  <div class="menu" style="top:108px">
+    <div class="mi"><i data-i="refresh"></i>Refresh</div>
+    <div class="mi"><i data-i="transfers"></i>Transfers</div>
+    <div class="mi"><i data-i="power"></i>Turn off Remote Files</div>
+  </div>
+  <div data-tpl="nav-rf"></div>
+  <div class="homebar"></div>
+</section>
+
+<!-- X12: long-press a location opens the location sheet (cloud location). -->
+<section class="screen" id="x12">
+  <div data-status></div>
+  <div data-tpl="loclist"></div>
+  <div data-tpl="nav-rf"></div>
+  <div class="scrim"></div>
+  <div class="sheet">
+    <div class="grab"></div>
+    <div class="head"><div class="ico rnd"><i data-i="cloud"></i></div><div class="txt"><div class="nm" style="font-size:16px;font-weight:500">Google Drive</div><div class="sb" style="font-size:13px">Signed in</div></div></div>
+    <div class="srow"><i data-i="folder" data-s="24"></i><div class="nm">Open</div></div>
+    <div class="srow"><i data-i="edit" data-s="24"></i><div class="nm">Edit location</div></div>
+    <div class="srow"><i data-i="lock" data-s="24"></i><div class="nm">Sign in again</div></div>
+    <div class="srow"><i data-i="key" data-s="24"></i><div class="txt"><div class="nm">Own client ID</div><div class="sb">Your own app registration</div></div></div>
+    <div class="divider"></div>
+    <div class="srow danger"><i data-i="trash" data-s="24"></i><div class="nm">Remove location</div></div>
+  </div>
+  <div class="homebar"></div>
+</section>
+
+<!-- X12b: the same sheet for an SFTP location: no sign-in rows; Review server key. -->
+<section class="screen" id="x12b">
+  <div data-status></div>
+  <div data-tpl="loclist"></div>
+  <div data-tpl="nav-rf"></div>
+  <div class="scrim"></div>
+  <div class="sheet">
+    <div class="grab"></div>
+    <div class="head"><div class="ico rnd"><i data-i="server"></i></div><div class="txt"><div class="nm" style="font-size:16px;font-weight:500">Home NAS</div><div class="sb" style="font-size:13px">SFTP · nas.local:22</div></div></div>
+    <div class="srow"><i data-i="folder" data-s="24"></i><div class="nm">Open</div></div>
+    <div class="srow"><i data-i="edit" data-s="24"></i><div class="nm">Edit location</div></div>
+    <div class="srow"><i data-i="key" data-s="24"></i><div class="nm">Review server key</div></div>
+    <div class="divider"></div>
+    <div class="srow danger"><i data-i="trash" data-s="24"></i><div class="nm">Remove location</div></div>
+  </div>
+  <div class="homebar"></div>
+</section>
+
+<!-- X13: Remove asks first. -->
+<section class="screen" id="x13">
+  <div data-status></div>
+  <div data-tpl="loclist"></div>
+  <div data-tpl="nav-rf"></div>
+  <div class="scrim"></div>
+  <div class="dlg">
+    <h2>Remove location?</h2>
+    <p>Remove Google Drive from this phone? Files in Google Drive are not deleted.</p>
+    <div class="dbtns"><div class="tbtn">Cancel</div><div class="tbtn d">Remove</div></div>
+  </div>
+  <div class="homebar"></div>
+</section>
+
+<!-- X14: Remote Files is off on a paired PC Host. -->
+<section class="screen" id="x14">
+  <div data-status></div>
+  <div class="headline"><div class="t">Remote Files</div><div class="ib"><i data-i="more" data-s="24"></i></div></div>
+  <div class="hostline">On Office PC</div>
+  <div class="empty" style="top:230px"><div class="bigico"><i data-i="cloud" data-s="40"></i></div><b>Remote Files is off on Office PC</b><span>Turn it on to browse your servers and cloud storage and move files with them.</span><div class="btn fill" style="flex:none"><i data-i="power" data-s="20"></i>Turn on Remote Files</div></div>
+  <div data-tpl="nav-rf"></div>
+  <div class="homebar"></div>
+</section>
+
+<!-- X14b: the ⋮ menu when Remote Files is off. -->
+<section class="screen" id="x14b">
+  <div data-status></div>
+  <div class="headline"><div class="t">Remote Files</div><div class="ib"><i data-i="more" data-s="24"></i></div></div>
+  <div class="hostline">On Office PC</div>
+  <div class="empty" style="top:230px"><div class="bigico"><i data-i="cloud" data-s="40"></i></div><b>Remote Files is off on Office PC</b><span>Turn it on to browse your servers and cloud storage and move files with them.</span><div class="btn fill" style="flex:none"><i data-i="power" data-s="20"></i>Turn on Remote Files</div></div>
+  <div class="menu" style="top:108px">
+    <div class="mi"><i data-i="refresh"></i>Refresh</div>
+    <div class="mi"><i data-i="transfers"></i>Transfers</div>
+    <div class="mi"><i data-i="power"></i>Turn on Remote Files</div>
+  </div>
+  <div data-tpl="nav-rf"></div>
+  <div class="homebar"></div>
+</section>
+
+<!-- X15: Turn off asks first (from the ⋮ menu). -->
+<section class="screen" id="x15">
+  <div data-status></div>
+  <div class="headline"><div class="t">Remote Files</div><div class="ib"><i data-i="search" data-s="24"></i></div><div class="ib"><i data-i="more" data-s="24"></i></div></div>
+  <div class="strip"><i data-i="transfers" data-s="22"></i><span style="flex:1">2 transfers · 1 up, 1 down · 3.1 MB/s</span><i data-i="chev" data-s="20"></i></div>
+  <div class="loc"><div class="ico rnd"><i data-i="server"></i></div><div class="txt"><div class="nm">Home NAS</div><div class="sb">SFTP · nas.local · 1.2 TB free</div></div><i data-i="chev" data-s="22" class="mu"></i></div>
+  <div class="loc"><div class="ico rnd"><i data-i="globe"></i></div><div class="txt"><div class="nm">Work files</div><div class="sb">WebDAV · files.example.com</div></div><i data-i="chev" data-s="22" class="mu"></i></div>
+  <div data-tpl="nav-rf"></div>
+  <div class="scrim"></div>
+  <div class="dlg">
+    <h2>Turn off Remote Files?</h2>
+    <p>On this phone. Running transfers pause. Your locations stay saved.</p>
+    <div class="dbtns"><div class="tbtn">Cancel</div><div class="tbtn">Turn off</div></div>
+  </div>
+  <div class="homebar"></div>
+</section>
+
+<!-- X16: the list could not load (paired PC Host). -->
+<section class="screen" id="x16">
+  <div data-status></div>
+  <div class="headline"><div class="t">Remote Files</div><div class="ib"><i data-i="search" data-s="24"></i></div><div class="ib"><i data-i="more" data-s="24"></i></div></div>
+  <div class="hostline">On Office PC</div>
+  <div class="empty" style="top:230px"><div class="bigico err"><i data-i="alert" data-s="40"></i></div><b>Could not load Remote Files</b><span>Could not load Remote Files from Office PC. Check the connection and try again.</span><div class="small"><i data-i="retry" data-s="18"></i>Try again</div></div>
+  <div data-tpl="nav-rf"></div>
+  <div class="homebar"></div>
+</section>
+
+<!-- X17: search, no match. -->
+<section class="screen" id="x17">
+  <div data-status></div>
+  <div style="height:16px"></div>
+  <div class="search"><i data-i="back" data-s="24" style="color:var(--text)"></i><span class="v">dropbx</span><div class="ib" style="color:var(--text)"><i data-i="close" data-s="22"></i></div></div>
+  <div class="msg" style="margin-top:80px"><b>No locations match "dropbx"</b><span>Search looks at names, types and addresses.</span></div>
+  <div class="fab"><i data-i="plus" data-s="24"></i>Add location</div>
+  <div data-tpl="nav-rf"></div>
+  <div class="homebar"></div>
+</section>
+
+<!-- X18: Add location, step 1: choose the type, same tiles as the list (the app's LocationGlyph). -->
+<section class="screen" id="x18">
+  <div data-status></div>
+  <div class="appbar"><div class="ib"><i data-i="close" data-s="24"></i></div><div class="t">Add location</div></div>
+  <div class="group" style="margin-top:4px">Cloud storage</div>
+  <div class="set">
+    <div class="sr"><div class="ico"><i data-i="cloud"></i></div><div class="txt"><div class="t">Google Drive</div><div class="d">Sign in with your Google account</div></div><i data-i="chev" data-s="22" class="mu"></i></div>
+    <div class="sr"><div class="ico"><i data-i="cloud"></i></div><div class="txt"><div class="t">OneDrive</div><div class="d">Sign in with your Microsoft account</div></div><i data-i="chev" data-s="22" class="mu"></i></div>
+    <div class="sr"><div class="ico"><i data-i="cloud"></i></div><div class="txt"><div class="t">Dropbox</div><div class="d">Sign in with your Dropbox account</div></div><i data-i="chev" data-s="22" class="mu"></i></div>
+  </div>
+  <div class="group">Servers</div>
+  <div class="set">
+    <div class="sr"><div class="ico"><i data-i="server"></i></div><div class="txt"><div class="t">SFTP</div><div class="d">SSH file transfer, with a server key</div></div><i data-i="chev" data-s="22" class="mu"></i></div>
+    <div class="sr"><div class="ico"><i data-i="server"></i></div><div class="txt"><div class="t">FTP or FTPS</div><div class="d">Classic file servers</div></div><i data-i="chev" data-s="22" class="mu"></i></div>
+    <div class="sr"><div class="ico"><i data-i="globe"></i></div><div class="txt"><div class="t">WebDAV</div><div class="d">Nextcloud, ownCloud and web folders</div></div><i data-i="chev" data-s="22" class="mu"></i></div>
+  </div>
+  <div class="group">Object storage</div>
+  <div class="set">
+    <div class="sr"><div class="ico"><i data-i="box"></i></div><div class="txt"><div class="t">S3</div><div class="d">Amazon S3 and compatible services</div></div><i data-i="chev" data-s="22" class="mu"></i></div>
+    <div class="sr"><div class="ico"><i data-i="box"></i></div><div class="txt"><div class="t">Backblaze B2</div><div class="d">With an application key</div></div><i data-i="chev" data-s="22" class="mu"></i></div>
+  </div>
+  <div class="homebar"></div>
+</section>
+
+<!-- X19: SFTP form; Add location saves, tests, then shows the server key (X26). -->
+<section class="screen" id="x19">
+  <div data-status></div>
+  <div class="appbar"><div class="ib"><i data-i="back" data-s="24"></i></div><div class="t">SFTP location</div></div>
+  <div class="form">
+    <div class="field"><div class="txt"><div class="l">Location name</div><div class="v">Home NAS</div></div></div>
+    <div class="two"><div class="field f" style="flex:2.3"><div class="txt"><div class="l">Server name or address</div><div class="v">nas.local</div></div></div><div class="field"><div class="txt"><div class="l">Port</div><div class="v">22</div></div></div></div>
+    <div class="field"><div class="txt"><div class="l">User name</div><div class="v">media</div></div></div>
+    <div class="field"><div class="txt"><div class="l">Password (optional)</div><div class="v">••••••••••</div></div><i data-i="eye" data-s="24" class="mu"></i></div>
+    <div class="hint">Credentials are stored by this phone's Host.</div>
+    <div class="exp"><div class="txt"><div class="t">More options</div><div class="d">Starting folder</div></div><i data-i="caret" data-s="24" class="mu" style="transform:rotate(180deg)"></i></div>
+    <div class="field"><div class="txt"><div class="l">Starting folder (optional)</div><div class="v ph">/media</div></div></div>
+  </div>
+  <div class="foot"><div class="btn out">Cancel</div><div class="btn fill"><i data-i="check" data-s="20"></i>Add location</div></div>
+  <div class="homebar"></div>
+</section>
+
+<!-- X20: FTP / FTPS form (new on Android; the Host already supports it). -->
+<section class="screen" id="x20">
+  <div data-status></div>
+  <div class="appbar"><div class="ib"><i data-i="back" data-s="24"></i></div><div class="t">FTP location</div></div>
+  <div class="form">
+    <div class="field"><div class="txt"><div class="l">Location name</div><div class="v">Print shop</div></div></div>
+    <div class="two"><div class="field" style="flex:2.3"><div class="txt"><div class="l">Server name or address</div><div class="v">ftp.example.org</div></div></div><div class="field"><div class="txt"><div class="l">Port</div><div class="v">21</div></div></div></div>
+    <div class="lbl" style="margin-top:2px">Encryption</div>
+    <div class="seg"><div class="on"><i data-i="check" data-s="18"></i>FTPS</div><div>Implicit FTPS</div><div>None</div></div>
+    <div class="field"><div class="txt"><div class="l">User name (optional)</div><div class="v">orders</div></div></div>
+    <div class="field"><div class="txt"><div class="l">Password (optional)</div><div class="v">••••••••</div></div><i data-i="eye" data-s="24" class="mu"></i></div>
+    <div class="field"><div class="txt"><div class="l">Starting folder (optional)</div><div class="v ph">/</div></div></div>
+    <div class="hint">Implicit FTPS uses port 990. If the server's certificate isn't from a known authority, you are asked to trust it after Add location.</div>
+  </div>
+  <div class="foot"><div class="btn out">Cancel</div><div class="btn fill"><i data-i="check" data-s="20"></i>Add location</div></div>
+  <div class="homebar"></div>
+</section>
+
+<!-- X20b: FTP with no encryption: the same Allow banner as WebDAV over HTTP. -->
+<section class="screen" id="x20b">
+  <div data-status></div>
+  <div class="appbar"><div class="ib"><i data-i="back" data-s="24"></i></div><div class="t">FTP location</div></div>
+  <div class="form">
+    <div class="field"><div class="txt"><div class="l">Location name</div><div class="v">Print shop</div></div></div>
+    <div class="two"><div class="field" style="flex:2.3"><div class="txt"><div class="l">Server name or address</div><div class="v">ftp.example.org</div></div></div><div class="field"><div class="txt"><div class="l">Port</div><div class="v">21</div></div></div></div>
+    <div class="lbl" style="margin-top:2px">Encryption</div>
+    <div class="seg"><div>FTPS</div><div>Implicit FTPS</div><div class="on"><i data-i="check" data-s="18"></i>None</div></div>
+    <div class="banner warn" style="margin:0 0 12px"><div class="cbrow" style="margin:0"><div class="cb on"><i data-i="check" data-s="16"></i></div><div><b>Allow FTP without encryption</b><span>Not encrypted. Credentials and files can be read or changed in transit.</span></div></div></div>
+    <div class="field"><div class="txt"><div class="l">User name (optional)</div><div class="v">orders</div></div></div>
+    <div class="field"><div class="txt"><div class="l">Password (optional)</div><div class="v">••••••••</div></div><i data-i="eye" data-s="24" class="mu"></i></div>
+  </div>
+  <div class="foot"><div class="btn out">Cancel</div><div class="btn fill"><i data-i="check" data-s="20"></i>Add location</div></div>
+  <div class="homebar"></div>
+</section>
+
+<!-- X20c: FTPS or https certificate not from a known authority (sites.certificate). -->
+<section class="screen" id="x20c">
+  <div data-status></div>
+  <div class="appbar"><div class="ib"><i data-i="back" data-s="24"></i></div><div class="t">FTP location</div></div>
+  <div class="form">
+    <div class="field"><div class="txt"><div class="l">Location name</div><div class="v">Print shop</div></div></div>
+    <div class="two"><div class="field" style="flex:2.3"><div class="txt"><div class="l">Server name or address</div><div class="v">ftp.example.org</div></div></div><div class="field"><div class="txt"><div class="l">Port</div><div class="v">21</div></div></div></div>
+  </div>
+  <div class="foot"><div class="btn out">Cancel</div><div class="btn fill"><i data-i="check" data-s="20"></i>Add location</div></div>
+  <div class="scrim"></div>
+  <div class="sheet">
+    <div class="grab"></div>
+    <h2>Trust this server certificate?</h2>
+    <p>Print shop · ftp.example.org:21</p>
+    <p class="hl2">On this phone</p>
+    <div class="in" style="margin-top:10px">
+      <div class="banner warn" style="margin-top:0"><i data-i="alert" data-s="24"></i><div><b>Self-signed certificate</b><span>No known authority vouches for it. Compare the fingerprint with the one from the server's administrator.</span></div></div>
+      <div class="kv" style="margin:0 0 8px">
+        <div><span>Issued to</span><span>ftp.example.org</span></div>
+        <div><span>Issued by</span><span>ftp.example.org</span></div>
+        <div><span>Valid until</span><span>3 Feb 2027</span></div>
+      </div>
+      <div class="keyrow"><div class="keyb wrap">SHA-256<br>4F:A2:91:0C:7E:33:B8:5D:E1:20:6A:9F:C4:17:58:2B:D0:63:AE:F9:14:8C:72:05:BB:3E:69:D1:0A:C8:57:E2</div><div class="ib"><i data-i="cpy" data-s="20"></i></div></div>
+    </div>
+    <div style="display:flex;gap:12px;padding:6px 24px 0"><div class="btn out">Cancel</div><div class="btn fill"><i data-i="lock" data-s="20"></i>Trust certificate</div></div>
+  </div>
+  <div class="homebar"></div>
+</section>
+
+<!-- X21: WebDAV form with errors: http address without the warning ticked, and a missing name. -->
+<section class="screen" id="x21">
+  <div data-status></div>
+  <div class="appbar"><div class="ib"><i data-i="back" data-s="24"></i></div><div class="t">WebDAV location</div></div>
+  <div class="form">
+    <div class="field e"><div class="txt"><div class="l">Location name</div><div class="v ph">Name</div></div><i data-i="alert" data-s="22" class="danger"></i></div>
+    <div class="err">Enter a location name.</div>
+    <div class="field e"><div class="txt"><div class="l">Address</div><div class="v">http://files.example.com/dav</div></div><i data-i="paste" data-s="24" class="mu"></i></div>
+    <div class="err">HTTP is not encrypted. Tick the warning to allow it.</div>
+    <div class="banner warn" style="margin:0 0 10px"><div class="cbrow" style="margin:0"><div class="cb"></div><div><b>Allow HTTP</b><span>Not encrypted. Credentials and files can be read or changed in transit.</span></div></div></div>
+    <div class="field"><div class="txt"><div class="l">User name (optional)</div><div class="v">anna</div></div></div>
+    <div class="field"><div class="txt"><div class="l">Password (optional)</div><div class="v">••••••••</div></div><i data-i="eye" data-s="24" class="mu"></i></div>
+  </div>
+  <div class="foot"><div class="btn out">Cancel</div><div class="btn fill"><i data-i="check" data-s="20"></i>Add location</div></div>
+  <div class="homebar"></div>
+</section>
+
+<!-- X22: S3 form on a paired PC Host (shows the Host download folder field). -->
+<section class="screen" id="x22">
+  <div data-status></div>
+  <div class="appbar"><div class="ib"><i data-i="back" data-s="24"></i></div><div class="t">S3 location</div><div class="hostpill" style="margin-right:8px"><i data-i="pc" data-s="18" class="bl"></i>Office PC</div></div>
+  <div class="form">
+    <div class="field"><div class="txt"><div class="l">Location name</div><div class="v">Backups</div></div></div>
+    <div class="field"><div class="txt"><div class="l">Provider</div><div class="v">Wasabi</div></div><i data-i="caret" data-s="24" class="mu"></i></div>
+    <div class="field"><div class="txt"><div class="l">Endpoint</div><div class="v">s3.eu-central-2.example.com</div></div></div>
+    <div class="field"><div class="txt"><div class="l">Region (optional)</div><div class="v">eu-central-2</div></div></div>
+    <div class="field"><div class="txt"><div class="l">Access key ID</div><div class="v">AKEXAMPLE7Q2</div></div></div>
+    <div class="field"><div class="txt"><div class="l">Secret access key</div><div class="v">••••••••••••••••</div></div><i data-i="eye" data-s="24" class="mu"></i></div>
+    <div class="field"><div class="txt"><div class="l">Starting folder (optional)</div><div class="v">backups/phone</div></div></div>
+    <div class="field"><div class="txt"><div class="l">Download folder on Office PC (optional)</div><div class="v ph">D:\Downloads</div></div></div>
+    <div class="hint">Keys are sent to Office PC and stored there.</div>
+  </div>
+  <div class="foot"><div class="btn out">Cancel</div><div class="btn fill"><i data-i="check" data-s="20"></i>Add location</div></div>
+  <div class="homebar"></div>
+</section>
+
+<!-- X23: Backblaze B2 form (new on Android). -->
+<section class="screen" id="x23">
+  <div data-status></div>
+  <div class="appbar"><div class="ib"><i data-i="back" data-s="24"></i></div><div class="t">Backblaze B2 location</div></div>
+  <div class="form">
+    <div class="field"><div class="txt"><div class="l">Location name</div><div class="v">Archive</div></div></div>
+    <div class="field"><div class="txt"><div class="l">Application key ID</div><div class="v">0051exampleKeyId</div></div></div>
+    <div class="field f"><div class="txt"><div class="l">Application key</div><div class="v">••••••••••••••••••</div></div><i data-i="eye" data-s="24" class="mu"></i></div>
+    <div class="field"><div class="txt"><div class="l">Starting folder (optional)</div><div class="v ph">bucket/folder</div></div></div>
+    <div class="hint">Create the key in your Backblaze account under Application Keys. A key limited to one bucket works.</div>
+  </div>
+  <div class="foot"><div class="btn out">Cancel</div><div class="btn fill"><i data-i="check" data-s="20"></i>Add location</div></div>
+  <div class="homebar"></div>
+</section>
+
+<!-- X23b: Add location saved it, then the connection test (sites.test) failed. -->
+<section class="screen" id="x23b">
+  <div data-status></div>
+  <div class="appbar"><div class="ib"><i data-i="back" data-s="24"></i></div><div class="t">Backblaze B2 location</div></div>
+  <div class="form">
+    <div class="field"><div class="txt"><div class="l">Location name</div><div class="v">Archive</div></div></div>
+    <div class="field"><div class="txt"><div class="l">Application key ID</div><div class="v">0051exampleKeyId</div></div></div>
+    <div class="field"><div class="txt"><div class="l">Application key</div><div class="v">••••••••••••••••••</div></div><i data-i="eye" data-s="24" class="mu"></i></div>
+    <div class="field"><div class="txt"><div class="l">Starting folder (optional)</div><div class="v ph">bucket/folder</div></div></div>
+  </div>
+  <div class="foot"><div class="btn out">Cancel</div><div class="btn fill"><i data-i="check" data-s="20"></i>Add location</div></div>
+  <div class="scrim"></div>
+  <div class="dlg">
+    <h2>Saved, but it did not connect</h2>
+    <p>Archive is saved. The Host said: the application key is not valid.</p>
+    <p>Edit the location to fix it, or keep it and try later.</p>
+    <div class="dbtns"><div class="tbtn">Keep anyway</div><div class="tbtn">Edit</div></div>
+  </div>
+  <div class="homebar"></div>
+</section>
+
+<!-- X24: cloud form on this phone (Drive, OneDrive, Dropbox share it). Own app registration closed. -->
+<section class="screen" id="x24">
+  <div data-status></div>
+  <div class="appbar"><div class="ib"><i data-i="back" data-s="24"></i></div><div class="t">Google Drive location</div></div>
+  <div class="form">
+    <div class="field"><div class="txt"><div class="l">Location name</div><div class="v">Google Drive</div></div></div>
+    <div class="banner info"><i data-i="lock" data-s="24"></i><div><b>Sign in with your browser</b><span>Add and sign in opens Google's sign-in page. This phone stores the authorization; your password stays with Google.</span></div></div>
+    <div class="exp"><div class="txt"><div class="t">Use your own app registration</div><div class="d">Optional</div></div><i data-i="caret" data-s="24" class="mu"></i></div>
+  </div>
+  <div class="foot"><div class="btn out">Cancel</div><div class="btn fill"><i data-i="open" data-s="20"></i>Add and sign in</div></div>
+  <div class="homebar"></div>
+</section>
+
+<!-- X24b: the same form on a paired PC Host, own app registration open. Add and sign in leads to X29b. -->
+<section class="screen" id="x24b">
+  <div data-status></div>
+  <div class="appbar"><div class="ib"><i data-i="back" data-s="24"></i></div><div class="t">OneDrive location</div><div class="hostpill" style="margin-right:8px"><i data-i="pc" data-s="18" class="bl"></i>Office PC</div></div>
+  <div class="form">
+    <div class="field"><div class="txt"><div class="l">Location name</div><div class="v">OneDrive</div></div></div>
+    <div class="banner info"><i data-i="lock" data-s="24"></i><div><b>Sign in with a command</b><span>Office PC stores the authorization. Add and sign in shows a command to run on a computer with a browser; then you paste its answer here.</span></div></div>
+    <div class="exp"><div class="txt"><div class="t">Use your own app registration</div><div class="d">Optional</div></div><i data-i="caret" data-s="24" class="mu" style="transform:rotate(180deg)"></i></div>
+    <div class="hint" style="margin-top:0">Your own client ID and secret from the provider's developer console, instead of rclone's shared one, which rclone says is being retired.</div>
+    <div class="field f"><div class="txt"><div class="l">Your own client ID (optional)</div><div class="v">0f3a9c2e-example-client</div></div></div>
+    <div class="field"><div class="txt"><div class="l">Its client secret (optional)</div><div class="v">••••••••••••</div></div><i data-i="eye" data-s="24" class="mu"></i></div>
+  </div>
+  <div class="foot"><div class="btn out">Cancel</div><div class="btn fill"><i data-i="open" data-s="20"></i>Add and sign in</div></div>
+  <div class="homebar"></div>
+</section>
+
+<!-- X25: the Host connection is not secure, so locations can't be added. -->
+<section class="screen" id="x25">
+  <div data-status></div>
+  <div class="appbar"><div class="ib"><i data-i="back" data-s="24"></i></div><div class="t">SFTP location</div><div class="hostpill" style="margin-right:8px"><i data-i="pc" data-s="18" class="bl"></i>Office PC</div></div>
+  <div class="form">
+    <div class="banner warn" style="margin-top:0"><i data-i="unlock" data-s="24"></i><div><b>Connect to Office PC with HTTPS first</b><span>Locations can't be added over an unencrypted or unverified Host connection, because the password would be sent with it.</span><div class="tbtn">Host connection</div></div></div>
+    <div class="field off"><div class="txt"><div class="l">Location name</div><div class="v ph">Name</div></div></div>
+    <div class="two off"><div class="field off" style="flex:2.3"><div class="txt"><div class="l">Server name or address</div><div class="v ph">Address</div></div></div><div class="field off"><div class="txt"><div class="l">Port</div><div class="v">22</div></div></div></div>
+    <div class="field off"><div class="txt"><div class="l">User name</div><div class="v ph">User</div></div></div>
+    <div class="field off"><div class="txt"><div class="l">Password (optional)</div><div class="v ph">Password</div></div></div>
+  </div>
+  <div class="foot"><div class="btn out">Cancel</div><div class="btn fill dis"><i data-i="check" data-s="20"></i>Add location</div></div>
+  <div class="homebar"></div>
+</section>
+
+<!-- X26: after Add location (or the first tap on a saved SFTP location): trust the server keys. -->
+<section class="screen" id="x26">
+  <div data-status></div>
+  <div data-tpl="sftpform"></div>
+  <div class="scrim"></div>
+  <div class="sheet">
+    <div class="grab"></div>
+    <h2>Trust these server keys?</h2>
+    <p>Home NAS · nas.local:22</p>
+    <p class="hl2">On this phone</p>
+    <div class="in" style="margin-top:8px">
+      <div class="keyrow"><div class="keyb">ssh-ed25519<br>SHA256:q3Vx8pL0eN2Tg7Rk5mWb<br>yZcA1fH9sJ4uD6oKiE0Pt</div><div class="ib"><i data-i="cpy" data-s="20"></i></div></div>
+      <div class="keyrow"><div class="keyb" style="margin-top:0">ecdsa-sha2-nistp256<br>SHA256:Lm4QeW1tY8nCv2Rb7XkJ<br>pH5sG0dA3zF9uT6oNiE2r</div><div class="ib" style="margin-top:0"><i data-i="cpy" data-s="20"></i></div></div>
+      <div class="banner info" style="margin-top:0"><i data-i="info" data-s="24"></i><div><span style="margin-top:0">Compare a fingerprint with the one from the server's administrator before you trust it.</span></div></div>
+    </div>
+    <div style="display:flex;gap:12px;padding:6px 24px 0"><div class="btn out">Cancel</div><div class="btn fill"><i data-i="key" data-s="20"></i>Trust keys</div></div>
+  </div>
+  <div class="homebar"></div>
+</section>
+
+<!-- X26b: the server offers more key types than the ones trusted. -->
+<section class="screen" id="x26b">
+  <div data-status></div>
+  <div data-tpl="loclist"></div>
+  <div data-tpl="nav-rf"></div>
+  <div class="scrim"></div>
+  <div class="sheet">
+    <div class="grab"></div>
+    <h2>Trust more server keys?</h2>
+    <p>Home NAS · nas.local:22</p>
+    <p class="hl2">On this phone</p>
+    <div class="in" style="margin-top:8px">
+      <div class="banner info" style="margin-top:0"><i data-i="info" data-s="24"></i><div><span style="margin-top:0">The server also offers other key types. Trusting them lets this phone connect whichever one the server uses.</span></div></div>
+      <div class="keyrow"><div class="keyb" style="margin-top:0">rsa-sha2-512<br>SHA256:Hb2Kc9Xw4Tq7Lm1Np5Rd<br>vF8sJ3gA6zE0uY2oWiQ7c</div><div class="ib" style="margin-top:0"><i data-i="cpy" data-s="20"></i></div></div>
+    </div>
+    <div style="display:flex;gap:12px;padding:6px 24px 0"><div class="btn out">Cancel</div><div class="btn fill"><i data-i="key" data-s="20"></i>Trust key</div></div>
+  </div>
+  <div class="homebar"></div>
+</section>
+
+<!-- X27: the key changed. Danger banner, old and new key, the tick unlocks the button. -->
+<section class="screen" id="x27">
+  <div data-status></div>
+  <div data-tpl="loclist"></div>
+  <div data-tpl="nav-rf"></div>
+  <div class="scrim"></div>
+  <div class="sheet">
+    <div class="grab"></div>
+    <h2>Server key changed</h2>
+    <p>Home NAS · nas.local:22</p>
+    <p class="hl2">On this phone</p>
+    <div class="in" style="margin-top:8px">
+      <div class="banner fail"><i data-i="alert" data-s="24"></i><div><b>This is not the key you trusted</b><span>Someone could be intercepting the connection. Only continue if the server's administrator confirms that the key changed.</span></div></div>
+      <div class="lbl" style="margin:4px 2px 4px">Trusted before</div>
+      <div class="keyrow"><div class="keyb" style="margin-top:0">ssh-ed25519<br>SHA256:q3Vx8pL0eN2Tg7Rk5mWb<br>yZcA1fH9sJ4uD6oKiE0Pt</div><div class="ib" style="margin-top:0"><i data-i="cpy" data-s="20"></i></div></div>
+      <div class="lbl" style="margin:0 2px 4px">Offered now</div>
+      <div class="keyrow"><div class="keyb" style="margin-top:0">ssh-ed25519<br>SHA256:Zt7cN0wQ4rB9yK2mVp8L<br>eS1xG6hJ3fU5dA0oRiT4n</div><div class="ib" style="margin-top:0"><i data-i="cpy" data-s="20"></i></div></div>
+      <div class="cbrow"><div class="cb"></div><div>I checked the new key with the server's administrator</div></div>
+    </div>
+    <div style="display:flex;gap:12px;padding:0 24px"><div class="btn out">Cancel</div><div class="btn fill dis"><i data-i="key" data-s="20"></i>Replace trusted key</div></div>
+  </div>
+  <div class="homebar"></div>
+</section>
+
+<!-- X28: Signing in on the phone: the browser is open; this waits. -->
+<section class="screen" id="x28">
+  <div data-status></div>
+  <div class="headline"><div class="t">Remote Files</div><div class="ib"><i data-i="search" data-s="24"></i></div><div class="ib"><i data-i="more" data-s="24"></i></div></div>
+  <div class="strip n"><i data-i="transfers" data-s="22" class="g"></i><span style="flex:1">Transfers · 3 finished today</span><i data-i="chev" data-s="20" class="mu"></i></div>
+  <div class="loc"><div class="ico rnd"><i data-i="server"></i></div><div class="txt"><div class="nm">Home NAS</div><div class="sb">SFTP · nas.local · 1.2 TB free</div></div><i data-i="chev" data-s="22" class="mu"></i></div>
+  <div class="loc"><div class="ico rnd"><i data-i="cloud"></i></div><div class="txt"><div class="nm">OneDrive</div><div class="sb">Waiting for sign-in</div></div><div class="small" style="opacity:.6">Waiting</div></div>
+  <div data-tpl="nav-rf"></div>
+  <div class="scrim"></div>
+  <div class="dlg">
+    <div class="di"><svg width="44" height="44" viewBox="0 0 44 44"><circle cx="22" cy="22" r="18" fill="none" stroke="var(--icon)" stroke-width="4"/><path d="M22 4a18 18 0 0 1 18 18" fill="none" stroke="var(--blue)" stroke-width="4" stroke-linecap="round"/></svg></div>
+    <h2 class="c">Signing in to OneDrive</h2>
+    <p style="text-align:center">Finish signing in with the browser. This closes by itself when the phone has the authorization.</p>
+    <div class="dbtns"><div class="tbtn">Open browser again</div><div class="tbtn">Cancel</div></div>
+  </div>
+  <div class="homebar"></div>
+</section>
+
+<!-- X29: sign-in for a paired PC or server Host: run a command elsewhere and paste the token (default client). -->
+<section class="screen" id="x29">
+  <div data-status></div>
+  <div data-tpl="loclist"></div>
+  <div data-tpl="nav-rf"></div>
+  <div class="scrim"></div>
+  <div class="sheet">
+    <div class="grab"></div>
+    <h2>Sign in to OneDrive</h2>
+    <p>On a computer with rclone and a browser, run this command. Then paste everything between ---&gt; and &lt;---End paste. The token is sent to Office PC and gives access to your account.</p>
+    <div class="in" style="margin-top:10px">
+      <div class="keyrow"><div class="keyb wrap" style="font-size:13px">rclone authorize "onedrive" --auth-no-open-browser</div><div class="ib"><i data-i="cpy" data-s="20"></i></div></div>
+      <div class="field f"><div class="txt"><div class="l">Authorization token</div><div class="v">••••••••••••••••••••••••••••••</div></div><i data-i="paste" data-s="24" class="mu"></i></div>
+    </div>
+    <div style="display:flex;gap:12px;padding:6px 24px 0"><div class="btn out">Cancel</div><div class="btn fill">Sign in</div></div>
+  </div>
+  <div class="homebar"></div>
+</section>
+
+<!-- X29b: the same sheet when the location has its own client ID. -->
+<section class="screen" id="x29b">
+  <div data-status></div>
+  <div data-tpl="loclist"></div>
+  <div data-tpl="nav-rf"></div>
+  <div class="scrim"></div>
+  <div class="sheet">
+    <div class="grab"></div>
+    <h2>Sign in to OneDrive</h2>
+    <p>On a computer with rclone and a browser, run this command with your own client ID and secret in place of the placeholders. Then paste everything between ---&gt; and &lt;---End paste. The token is sent to Office PC.</p>
+    <div class="in" style="margin-top:10px">
+      <div class="keyrow"><div class="keyb wrap" style="font-size:13px">rclone authorize "onedrive" "&lt;your client ID&gt;" "&lt;your client secret&gt;" --auth-no-open-browser</div><div class="ib"><i data-i="cpy" data-s="20"></i></div></div>
+      <div class="hint">Never paste your client secret here.</div>
+      <div class="field"><div class="txt"><div class="l">Authorization token</div><div class="v ph">Paste authorization token</div></div><i data-i="paste" data-s="24" class="mu"></i></div>
+    </div>
+    <div style="display:flex;gap:12px;padding:6px 24px 0"><div class="btn out">Cancel</div><div class="btn fill">Sign in</div></div>
+  </div>
+  <div class="homebar"></div>
+</section>
+
+<!-- X30: Own client ID for a saved cloud location. -->
+<section class="screen" id="x30">
+  <div data-status></div>
+  <div data-tpl="loclist"></div>
+  <div data-tpl="nav-rf"></div>
+  <div class="scrim"></div>
+  <div class="sheet">
+    <div class="grab"></div>
+    <h2>Own client ID</h2>
+    <p>Your own app registration from the provider's developer console, instead of rclone's shared one. A new client ID signs Google Drive out; sign in again afterwards.</p>
+    <div class="in" style="margin-top:12px">
+      <div class="field e"><div class="txt"><div class="l">Your own client ID (optional)</div><div class="v">my id/with spaces</div></div></div>
+      <div class="err">A client ID is letters, digits, dots, dashes and underscores.</div>
+      <div class="field"><div class="txt"><div class="l">Its client secret (optional)</div><div class="v ph">Client secret saved; type to replace</div></div><i data-i="eye" data-s="24" class="mu"></i></div>
+    </div>
+    <div style="display:flex;gap:12px;padding:6px 24px 0"><div class="btn out">Cancel</div><div class="btn fill">Save</div></div>
+  </div>
+  <div class="homebar"></div>
+</section>
+
+<!-- X31: Edit location (new on Android; sites.save with the Id): saved password kept unless retyped. -->
+<section class="screen" id="x31">
+  <div data-status></div>
+  <div class="appbar"><div class="ib"><i data-i="close" data-s="24"></i></div><div class="t">Edit Home NAS</div></div>
+  <div class="form">
+    <div class="field"><div class="txt"><div class="l">Location name</div><div class="v">Home NAS</div></div></div>
+    <div class="two"><div class="field" style="flex:2.3"><div class="txt"><div class="l">Server name or address</div><div class="v">nas.local</div></div></div><div class="field"><div class="txt"><div class="l">Port</div><div class="v">2222</div></div></div></div>
+    <div class="field"><div class="txt"><div class="l">User name</div><div class="v">media</div></div></div>
+    <div class="field f"><div class="txt"><div class="l">Password</div><div class="v ph">Saved; type to replace</div></div><i data-i="eye" data-s="24" class="mu"></i></div>
+    <div class="field"><div class="txt"><div class="l">Starting folder (optional)</div><div class="v">/media</div></div></div>
+    <div class="banner warn"><i data-i="key" data-s="24"></i><div><b>New address or port</b><span>You are asked to trust the server key again when you save.</span></div></div>
+    <div class="srow danger" style="padding:0 2px;margin-top:4px"><i data-i="trash" data-s="24"></i><div class="nm">Remove location</div></div>
+  </div>
+  <div class="foot"><div class="btn out">Cancel</div><div class="btn fill"><i data-i="check" data-s="20"></i>Save</div></div>
+  <div class="homebar"></div>
+</section>
+
+<!-- X32: pane message in the folder view: sign-in ran out. -->
+<section class="screen" id="x32">
+  <div data-status></div>
+  <div class="appbar r"><div class="ib"><i data-i="back" data-s="24"></i></div><div class="t">OneDrive</div><div class="ib"><i data-i="transfers" data-s="24"></i></div><div class="ib"><i data-i="more" data-s="24"></i></div></div>
+  <div class="tabs"><div class="tab on">OneDrive<i data-i="caret" data-s="18"></i></div><div class="tab">Home NAS</div></div>
+  <div class="empty" style="top:220px"><div class="bigico"><i data-i="lock" data-s="40"></i></div><b>Sign-in has run out</b><span>Sign in again to browse this location.</span><div class="small"><i data-i="open" data-s="18"></i>Sign in</div></div>
+  <div class="homebar"></div>
+</section>
+
+<!-- X32b: pane message: the server key must be reviewed. -->
+<section class="screen" id="x32b">
+  <div data-status></div>
+  <div class="appbar r"><div class="ib"><i data-i="back" data-s="24"></i></div><div class="t">Home NAS</div><div class="ib"><i data-i="transfers" data-s="24"></i></div><div class="ib"><i data-i="more" data-s="24"></i></div></div>
+  <div class="tabs"><div class="tab on">Home NAS<i data-i="caret" data-s="18"></i></div><div class="tab">This phone</div></div>
+  <div class="empty" style="top:220px"><div class="bigico warn"><i data-i="key" data-s="40"></i></div><b>Review the server key</b><span>The server's key is not the one you trusted.</span><div class="small"><i data-i="key" data-s="18"></i>Review server key</div></div>
+  <div class="homebar"></div>
+</section>
+
+<!-- X32c: pane message: the folder could not load. -->
+<section class="screen" id="x32c">
+  <div data-status></div>
+  <div class="appbar r"><div class="ib"><i data-i="back" data-s="24"></i></div><div class="t">Work files</div><div class="ib"><i data-i="transfers" data-s="24"></i></div><div class="ib"><i data-i="more" data-s="24"></i></div></div>
+  <div class="tabs"><div class="tab on">Work files<i data-i="caret" data-s="18"></i></div><div class="tab">This phone</div></div>
+  <div class="crumbs"><div class="chip">Work files</div><i data-i="chev" data-s="18" class="chev"></i><div class="chip on">shared</div></div>
+  <div class="empty" style="top:240px"><div class="bigico err"><i data-i="alert" data-s="40"></i></div><b>Could not load this folder</b><span>Check the connection and try again.</span><div class="small"><i data-i="retry" data-s="18"></i>Try again</div></div>
+  <div class="homebar"></div>
+</section>
+
+<!-- X32d: pane message: the folder is empty. -->
+<section class="screen" id="x32d">
+  <div data-status></div>
+  <div class="appbar r"><div class="ib"><i data-i="back" data-s="24"></i></div><div class="t">Work files</div><div class="ib"><i data-i="transfers" data-s="24"></i></div><div class="ib"><i data-i="more" data-s="24"></i></div></div>
+  <div class="tabs"><div class="tab on">Work files<i data-i="caret" data-s="18"></i></div><div class="tab">This phone</div></div>
+  <div class="crumbs"><div class="chip">Work files</div><i data-i="chev" data-s="18" class="chev"></i><div class="chip on">drafts</div></div>
+  <div class="empty" style="top:240px"><div class="bigico" style="color:var(--muted)"><i data-i="folder" data-s="40"></i></div><b>This folder is empty.</b></div>
+  <div class="homebar"></div>
+</section>
+
+<!-- X33: a transfer finished while the user is elsewhere in the app: the finished snackbar shows on any tab. -->
+<section class="screen" id="x33">
+  <div data-status></div>
+  <div class="headline"><div class="t">Remote Files</div><div class="ib"><i data-i="search" data-s="24"></i></div><div class="ib"><i data-i="more" data-s="24"></i></div></div>
+  <div class="strip"><i data-i="transfers" data-s="22"></i><span style="flex:1">1 transfer · 1 down · 9.8 MB/s</span><i data-i="chev" data-s="20"></i></div>
+  <div class="loc"><div class="ico rnd"><i data-i="server"></i></div><div class="txt"><div class="nm">Home NAS</div><div class="sb">SFTP · nas.local · 1.2 TB free</div></div><i data-i="chev" data-s="22" class="mu"></i></div>
+  <div class="loc"><div class="ico rnd"><i data-i="globe"></i></div><div class="txt"><div class="nm">Work files</div><div class="sb">WebDAV · files.example.com</div></div><i data-i="chev" data-s="22" class="mu"></i></div>
+  <div class="loc"><div class="ico rnd"><i data-i="cloud"></i></div><div class="txt"><div class="nm">Google Drive</div><div class="sb">Signed in</div></div><i data-i="chev" data-s="22" class="mu"></i></div>
+  <div class="loc"><div class="ico rnd"><i data-i="box"></i></div><div class="txt"><div class="nm">Backups</div><div class="sb">S3 · eu-central</div></div><i data-i="chev" data-s="22" class="mu"></i></div>
+  <div class="fab" style="bottom:188px"><i data-i="plus" data-s="24"></i>Add location</div>
+  <div class="snack"><div class="m">setlist.pdf is on this phone</div><b>Show in folder</b></div>
+  <div data-tpl="nav-rf"></div>
+  <div class="homebar"></div>
+</section>
+
+<script>
+document.querySelectorAll('[data-tpl]').forEach(el => {
+  const t = document.getElementById(el.dataset.tpl).innerHTML;
+  if (el.className) { el.removeAttribute('data-tpl'); el.innerHTML = t; } else el.outerHTML = t;
+});
+const tpl = document.getElementById('status').innerHTML;
+document.querySelectorAll('[data-status]').forEach(el => el.outerHTML = tpl);
+document.querySelectorAll('i[data-i]').forEach(el => {
+  const s = el.dataset.s || 22;
+  el.outerHTML = `<svg width="${s}" height="${s}" class="${el.className}" style="${el.getAttribute('style') || ''}"><use href="#i-${el.dataset.i}"/></svg>`;
+});
+const show = () => {
+  let id = (location.hash || '#x1').slice(1);
+  const light = id.endsWith('-light');
+  if (light) id = id.slice(0, -6);
+  if (light) document.documentElement.dataset.theme = 'light'; else delete document.documentElement.dataset.theme;
+  document.querySelectorAll('.screen').forEach(s => s.classList.toggle('on', s.id === id));
+};
+addEventListener('hashchange', show); show();
+</script>
+</body>
+</html>
