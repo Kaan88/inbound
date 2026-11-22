@@ -261,6 +261,16 @@ internal sealed class PhoneFolderPage : IDisposable
         Load(_path);
     }
 
+#if INBOUND_TEST_BUILD
+    /// <summary>Captures only: the outline fades after 3 s, so the fixture puts it back.</summary>
+    internal void FixtureRemark()
+    {
+        if (_disposed || _pill is null || _mark is not null) return;
+        _mark = _pill;
+        _adapter.NotifyDataSetChanged();
+    }
+#endif
+
     private void StartMarkTimer()
     {
         _ui.PostDelayed(() =>
@@ -419,7 +429,9 @@ internal sealed class PhoneFolderPage : IDisposable
         if (item.IsFolder) return RemoteFileList.Detail(item, DateTimeOffset.Now);
         var parts = new List<string> { item.Size >= 0 ? RemoteFileList.Size(item.Size) : "Size unknown" };
         if (item.Modified is { } modified)
-            parts.Add(DateTimeOffset.Now - modified < TimeSpan.FromMinutes(1) ? "Just now" : Fmt.When(modified, DateTimeOffset.Now));
+            parts.Add(DateTimeOffset.Now - modified < TimeSpan.FromMinutes(1) ? "Just now"
+                : modified.ToLocalTime().Date == DateTimeOffset.Now.ToLocalTime().Date.AddDays(-1) ? "Yesterday" // x10b writes the day alone
+                : Fmt.When(modified, DateTimeOffset.Now));
         return string.Join(" · ", parts);
     }
 

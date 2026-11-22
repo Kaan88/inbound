@@ -165,6 +165,9 @@ public sealed partial class MainActivity
 
     private JobRow? _pendingMark;
 
+    /// <summary>The snackbar view that has the Remote Files Add location button lifted (x33); see ShowMessage.</summary>
+    private View? _fabLiftOwner;
+
     private sealed class FolderBack(Action back) : AndroidX.Activity.OnBackPressedCallback(true)
     {
         public override void HandleOnBackPressed() => back();
@@ -323,6 +326,9 @@ public sealed partial class MainActivity
             });
         }
         OpenFolderPage("Download/Inbound", "manual-v2.pdf", running, rows);
+        if (mode == "finished")
+            for (int i = 0; i < 100; i++)
+                FindViewById<Android.Views.View>(Resource.Id.root)?.PostDelayed(() => _folderPage?.FixtureRemark(), 4000 + i * 400);
     }
 #endif
 

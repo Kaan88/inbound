@@ -288,3 +288,54 @@ internal sealed class SpeedGraphView : View
         if (amount < 1f) PostInvalidateOnAnimation();
     }
 }
+
+/// <summary>
+/// A spinner drawn as a full grey ring with a blue arc that turns. A TimeAnimator drives it, so it also turns when the system's
+/// animators are off, and a still frame is a ring with an arc rather than a dot (x5b, x28).
+/// </summary>
+internal sealed class RingSpinner : View
+{
+    private readonly Paint _track = new(PaintFlags.AntiAlias);
+    private readonly Paint _arc = new(PaintFlags.AntiAlias);
+    private readonly RectF _box = new();
+    private Android.Animation.TimeAnimator? _animator;
+    private float _angle = -90f;
+
+    private readonly float _sweep;
+
+    public RingSpinner(Context c, float strokeDp, int trackColor, int arcColor, float sweep = 110f) : base(c)
+    {
+        _sweep = sweep;
+        float stroke = Motion.Dp(c, strokeDp);
+        _track.SetStyle(Paint.Style.Stroke);
+        _track.StrokeWidth = stroke;
+        _track.Color = new Color(trackColor);
+        _arc.SetStyle(Paint.Style.Stroke);
+        _arc.StrokeWidth = stroke;
+        _arc.StrokeCap = Paint.Cap.Round;
+        _arc.Color = new Color(arcColor);
+    }
+
+    protected override void OnAttachedToWindow()
+    {
+        base.OnAttachedToWindow();
+        _animator = new Android.Animation.TimeAnimator();
+        _animator.Time += (_, e) => { _angle = -90f + e.TotalTime * 360f / 1100f % 360f; Invalidate(); };
+        _animator.Start();
+    }
+
+    protected override void OnDetachedFromWindow()
+    {
+        _animator?.Cancel();
+        _animator = null;
+        base.OnDetachedFromWindow();
+    }
+
+    protected override void OnDraw(Canvas canvas)
+    {
+        float inset = _track.StrokeWidth / 2f;
+        _box.Set(inset, inset, Width - inset, Height - inset);
+        canvas.DrawOval(_box, _track);
+        canvas.DrawArc(_box, _angle, _sweep, false, _arc);
+    }
+}

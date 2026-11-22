@@ -34,12 +34,15 @@ internal sealed partial class RemoteFilesScreen
         _locationTransferText = null;
         _locationTransferCard = null;
 
+        bool listed = _listLoaded && _status?.Enabled == true;
+        bool searchable = listed || (_error is not null && !_listLoaded);
+        if (!searchable) _locationSearchOpen = false;
+        bool searching = _locationSearchOpen && searchable;
         var titleRow = new LinearLayout(_activity) { Orientation = Orientation.Horizontal };
         titleRow.SetGravity(GravityFlags.CenterVertical);
         var title = Label("Remote Files", 32, Resource.Attribute.colorOnSurface);
         titleRow.AddView(title, new LinearLayout.LayoutParams(0, -2, 1));
-        bool listed = _listLoaded && _status?.Enabled == true;
-        if (listed)
+        if (searchable)
         {
             var search = new ImageButton(_activity) { Background = null, ContentDescription = "Search remote locations" };
             search.SetImageResource(Resource.Drawable.ic_search);
@@ -58,8 +61,10 @@ internal sealed partial class RemoteFilesScreen
         overflow.Click += (_, _) => ShowLocationsMenu(overflow);
         titleRow.AddView(overflow, new LinearLayout.LayoutParams(Motion.Dp(_activity, 48), Motion.Dp(_activity, 48)));
         titleRow.LayoutParameters = new LinearLayout.LayoutParams(-1, -2) { BottomMargin = Motion.Dp(_activity, 12) };
-        _content.AddView(titleRow);
-        if (!_phoneHost)
+        // x17: search replaces the whole app bar (back arrow, query, clear) and the Transfers row.
+        if (searching) AddLocationSearch();
+        else _content.AddView(titleRow);
+        if (!_phoneHost && !searching)
         {
             var host = Label("On " + _hostName, 14, Resource.Attribute.colorOnSurfaceVariant);
             host.SetPadding(0, 0, 0, Motion.Dp(_activity, 8));
@@ -68,7 +73,7 @@ internal sealed partial class RemoteFilesScreen
 
         if (_busy && !_listLoaded)
         {
-            var spinner = new ProgressBar(_activity) { Indeterminate = true, ContentDescription = "Loading Remote Files" };
+            var spinner = new RingSpinner(_activity, 4, Attr(Resource.Attribute.colorOutlineVariant), Attr(Resource.Attribute.colorPrimary)) { ContentDescription = "Loading Remote Files" };
             _content.AddView(spinner, new LinearLayout.LayoutParams(Motion.Dp(_activity, 48), Motion.Dp(_activity, 48))
             { Gravity = GravityFlags.CenterHorizontal, TopMargin = Motion.Dp(_activity, 96) });
             return;
@@ -88,8 +93,7 @@ internal sealed partial class RemoteFilesScreen
             return;
         }
 
-        AddTransferSummary();
-        if (_locationSearchOpen) AddLocationSearch();
+        if (!searching) AddTransferSummary();
 
         if (_error is not null)
             _content.AddView(Banner(BannerKind.Fail, _error, null, Resource.Drawable.ic_remote_alert));
@@ -106,7 +110,7 @@ internal sealed partial class RemoteFilesScreen
 
             _locationNoMatches = Label("", 15, Resource.Attribute.colorOnSurfaceVariant);
             _locationNoMatches.Gravity = GravityFlags.Center;
-            _locationNoMatches.SetPadding(0, Motion.Dp(_activity, 48), 0, Motion.Dp(_activity, 12));
+            _locationNoMatches.SetPadding(0, Motion.Dp(_activity, _locationSearchOpen ? 72 : 48), 0, Motion.Dp(_activity, 12));
             _content.AddView(_locationNoMatches);
             FilterLocationCards();
         }
@@ -129,7 +133,10 @@ internal sealed partial class RemoteFilesScreen
         block.SetGravity(GravityFlags.CenterHorizontal);
         block.SetPadding(Dp(32), Dp(80), Dp(32), 0);
         var disc = new FrameLayout(_activity) { ImportantForAccessibility = ImportantForAccessibility.No };
-        disc.Background = Rounded(error ? ResColor(Resource.Color.state_failed_container) : Attr(Resource.Attribute.colorSurfaceContainerHighest), Dp(44));
+        // x14: a dark grey disc, light blue in the light theme.
+        bool night = (_activity.Resources?.Configuration?.UiMode & Android.Content.Res.UiMode.NightMask) == Android.Content.Res.UiMode.NightYes;
+        disc.Background = Rounded(error ? ResColor(Resource.Color.state_failed_container)
+            : Attr(night ? Resource.Attribute.colorSurfaceContainer : Resource.Attribute.colorPrimaryContainer), Dp(44));
         var glyph = new ImageView(_activity);
         glyph.SetImageResource(icon);
         glyph.ImageTintList = ColorStateList.ValueOf(new Color(error ? ResColor(Resource.Color.state_failed) : Attr(Resource.Attribute.colorPrimary)));
@@ -154,7 +161,15 @@ internal sealed partial class RemoteFilesScreen
             pill.IconGravity = MaterialButton.IconGravityTextStart;
             pill.IconPadding = Dp(filled ? 10 : 6);
             pill.IconSize = Dp(filled ? 20 : 18);
-            pill.SetPadding(Dp(filled ? 24 : 16), 0, Dp(filled ? 24 : 16), 0);
+            if (filled)
+            {
+                pill.BackgroundTintList = ColorStateList.ValueOf(new Color(Attr(Resource.Attribute.colorPrimary)));
+                pill.SetTextColor(new Color(Attr(Resource.Attribute.colorOnPrimary)));
+                pill.IconTint = ColorStateList.ValueOf(new Color(Attr(Resource.Attribute.colorOnPrimary)));
+            }
+            pill.SetPadding(Dp(filled ? 18 : 16), 0, Dp(filled ? 20 : 16), 0);
+            pill.SetTextSize(Android.Util.ComplexUnitType.Sp, filled ? 15 : 14);
+            pill.SetTypeface(Android.Graphics.Typeface.Create("sans-serif-medium", Android.Graphics.TypefaceStyle.Normal), Android.Graphics.TypefaceStyle.Normal);
             pill.SetMinimumHeight(0);
             pill.Gravity = GravityFlags.Center;
             pill.SetSingleLine(true);
@@ -199,18 +214,15 @@ internal sealed partial class RemoteFilesScreen
         var shell = new LinearLayout(_activity) { Orientation = Orientation.Horizontal };
         shell.SetGravity(GravityFlags.CenterVertical);
         shell.SetBackgroundResource(Resource.Drawable.bg_pill_search);
-        shell.SetPadding(Motion.Dp(_activity, 14), 0, Motion.Dp(_activity, 12), 0);
-        shell.LayoutParameters = new LinearLayout.LayoutParams(-1, Motion.Dp(_activity, 52))
+        shell.SetPadding(Motion.Dp(_activity, 8), 0, Motion.Dp(_activity, 8), 0);
+        shell.LayoutParameters = new LinearLayout.LayoutParams(-1, Motion.Dp(_activity, 56))
         {
-            TopMargin = Motion.Dp(_activity, 8),
+            TopMargin = Motion.Dp(_activity, 4),
             BottomMargin = Motion.Dp(_activity, 14)
         };
 
-        var icon = new ImageView(_activity);
-        icon.SetImageResource(Resource.Drawable.ic_search);
-        icon.ImageTintList = ColorStateList.ValueOf(new Color(Motion.Attr(_activity, Resource.Attribute.colorOnSurfaceVariant)));
-        icon.ImportantForAccessibility = ImportantForAccessibility.No;
-        shell.AddView(icon, new LinearLayout.LayoutParams(Motion.Dp(_activity, 22), Motion.Dp(_activity, 22)));
+        var back = IconButton(Resource.Drawable.ic_arrow_back, "Close search", () => { _locationSearchOpen = false; _locationSearch = ""; Render(); });
+        shell.AddView(back, new LinearLayout.LayoutParams(Motion.Dp(_activity, 48), Motion.Dp(_activity, 48)));
 
         var input = new EditText(_activity)
         {
@@ -221,15 +233,25 @@ internal sealed partial class RemoteFilesScreen
             InputType = Android.Text.InputTypes.ClassText
         };
         input.SetSingleLine(true);
-        input.SetPadding(Motion.Dp(_activity, 10), 0, 0, 0);
+        input.SetPadding(Motion.Dp(_activity, 6), 0, 0, 0);
         input.SetTextSize(Android.Util.ComplexUnitType.Sp, 16);
         input.ContentDescription = "Search remote locations";
+        var clear = IconButton(Resource.Drawable.ic_close, "Clear search", () => { input.Text = ""; input.RequestFocus(); });
+        clear.Visibility = _locationSearch.Length == 0 ? ViewStates.Invisible : ViewStates.Visible;
         input.TextChanged += (_, _) =>
         {
             _locationSearch = input.Text ?? "";
+            clear.Visibility = _locationSearch.Length == 0 ? ViewStates.Invisible : ViewStates.Visible;
             FilterLocationCards();
         };
         shell.AddView(input, new LinearLayout.LayoutParams(0, -1, 1));
+        if (_locationSearch.Length == 0)
+            input.Post(() =>
+            {
+                input.RequestFocus();
+                (_activity.GetSystemService(Android.Content.Context.InputMethodService) as Android.Views.InputMethods.InputMethodManager)?.ShowSoftInput(input, 0);
+            });
+        shell.AddView(clear, new LinearLayout.LayoutParams(Motion.Dp(_activity, 48), Motion.Dp(_activity, 48)));
         _content.AddView(shell);
     }
 
@@ -421,7 +443,15 @@ internal sealed partial class RemoteFilesScreen
             if (match) visible++;
         }
         if (_locationNoMatches is not null)
-            _locationNoMatches.Text = "No locations match \"" + query + "\"" + Environment.NewLine + "Search looks at names, types and addresses.";
+        {
+            string first = "No locations match \"" + query + "\"" + Environment.NewLine;
+            var text = new Android.Text.SpannableStringBuilder(first + "Search looks at names, types and addresses.");
+            text.SetSpan(new Android.Text.Style.AbsoluteSizeSpan(16, true), 0, first.Length, Android.Text.SpanTypes.ExclusiveExclusive);
+            text.SetSpan(new Android.Text.Style.ForegroundColorSpan(new Color(Motion.Attr(_activity, Resource.Attribute.colorOnSurface))), 0, first.Length, Android.Text.SpanTypes.ExclusiveExclusive);
+            text.SetSpan(new Android.Text.Style.AbsoluteSizeSpan(14, true), first.Length, text.Length(), Android.Text.SpanTypes.ExclusiveExclusive);
+            _locationNoMatches.SetLineSpacing(Motion.Dp(_activity, 6), 1f);
+            _locationNoMatches.SetText(text, Android.Widget.TextView.BufferType.Spannable);
+        }
         if (_locationNoMatches is not null)
             _locationNoMatches.Visibility = visible == 0 ? ViewStates.Visible : ViewStates.Gone;
     }
@@ -481,16 +511,18 @@ internal sealed partial class RemoteFilesScreen
         var dialog = NewSheet(out var column);
         SheetTitle(column, "Own client ID");
         var note = FolderText("Your own app registration from the provider's developer console, instead of rclone's shared one. A new client ID signs " + RemoteLocationText.DisplayName(site) + " out; sign in again afterwards.", 14, Resource.Attribute.colorOnSurfaceVariant);
+        note.SetLineSpacing(Dp(3), 1f);
         AddInset(column, note);
         var (idLayout, idEdit) = OutlinedField("Your own client ID (optional)", site.ClientId ?? "", InputTypes.ClassText);
         var (secretLayout, secretEdit) = OutlinedField("Its client secret (optional)", "", InputTypes.ClassText, password: true,
             placeholder: site.HasClientSecret ? "Client secret saved; type to replace" : null);
         _clientSecret = secretEdit;
+        idLayout.ErrorIconDrawable = null; // x30 draws the outline and the line, no triangle
         idEdit.TextChanged += (_, _) => SetFieldError(idLayout, null);
         AddInset(column, idLayout);
         AddInset(column, secretLayout);
         if (Android.OS.Build.VERSION.SdkInt >= Android.OS.BuildVersionCodes.O) secretEdit.ImportantForAutofill = ImportantForAutofill.No;
-        var save = SheetButtons(column, "Save", Resource.Drawable.ic_remote_check, null);
+        var save = SheetButtons(column, "Save", 0, null);
         // Validation must keep the sheet open, so Save is wired here and the shared click handler is replaced.
         save.SetOnClickListener(new ClickAction(() =>
         {
@@ -607,7 +639,13 @@ internal sealed partial class RemoteFilesScreen
             .SetNegativeButton("Cancel", (Android.Content.IDialogInterfaceOnClickListener?)null)!
             .SetPositiveButton("Turn off", (_, _) => _ = SetEnabledAsync(false))!
             .Show();
-        if (_confirm is { } dialog) dialog.DismissEvent += (_, _) => { if (ReferenceEquals(_confirm, dialog)) _confirm = null; };
+        if (_surface.FindViewWithTag("rf_fab") is { } fab) fab.Visibility = ViewStates.Gone; // x15 draws no button over the scrim
+        if (_confirm is { } dialog)
+            dialog.DismissEvent += (_, _) =>
+            {
+                if (ReferenceEquals(_confirm, dialog)) _confirm = null;
+                if (_surface.FindViewWithTag("rf_fab") is { } shown) shown.Visibility = ViewStates.Visible;
+            };
     }
 
     private async Task SetEnabledAsync(bool enabled)

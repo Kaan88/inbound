@@ -383,7 +383,7 @@ internal sealed partial class RemoteFilesScreen
         }
         TextInputLayout? layout0(string key) => layouts.GetValueOrDefault(key);
 
-        var name = Add(_content, "name", "Location name");
+        var name = Add(_content, "name", "Location name", placeholder: "Name");
 
         MaterialButton? primary = null;
         // --- kind specific ---------------------------------------------------------------------------------------
@@ -411,7 +411,7 @@ internal sealed partial class RemoteFilesScreen
             var hostRow = new LinearLayout(_activity) { Orientation = Orientation.Horizontal };
             var hostHolder = new LinearLayout(_activity) { Orientation = Orientation.Vertical };
             var portHolder = new LinearLayout(_activity) { Orientation = Orientation.Vertical };
-            Add(hostHolder, "host", "Server name or address", InputTypes.ClassText | InputTypes.TextVariationUri,
+            Add(hostHolder, "host", "Server name or address", InputTypes.ClassText | InputTypes.TextVariationUri, placeholder: "Address",
                 changed: _ => UpdateKeyNote());
             Add(portHolder, "port", "Port", InputTypes.ClassNumber, changed: _ => UpdateKeyNote());
             hostRow.AddView(hostHolder, new LinearLayout.LayoutParams(0, -2, 2.3f) { RightMargin = Dp(12) });
@@ -441,13 +441,8 @@ internal sealed partial class RemoteFilesScreen
                 {
                     var button = new MaterialButton(_activity, null, Resource.Attribute.materialButtonOutlinedStyle)
                     { Text = text, Id = View.GenerateViewId(), Enabled = secure };
-                    button.SetAllCaps(false);
-                    button.SetTextSize(Android.Util.ComplexUnitType.Sp, 12);
-                    button.SetPadding(Dp(2), 0, Dp(2), 0);
-                    button.SetSingleLine(true);
-                    button.IconPadding = Dp(4);
-                    button.IconSize = Dp(16);
-                    group.AddView(button, new LinearLayout.LayoutParams(0, Dp(56), 1));
+                    StyleSegment(button);
+                    group.AddView(button, new LinearLayout.LayoutParams(0, Dp(44), 1));
                     ids[button.Id] = mode;
                     if (V("tls") == mode || V("tls").Length == 0 && mode == SiteTlsModes.Explicit) checkedId = button.Id;
                 }
@@ -488,7 +483,7 @@ internal sealed partial class RemoteFilesScreen
             }
             bool sftpEdit = site is not null && kind == SiteKindCatalog.Sftp;
             bool keyLogin = kind == SiteKindCatalog.Sftp && V("auth") == "key";
-            Add(_content, "user", kind == SiteKindCatalog.Sftp ? "User name" : "User name (optional)");
+            Add(_content, "user", kind == SiteKindCatalog.Sftp ? "User name" : "User name (optional)", placeholder: "User");
             if (kind == SiteKindCatalog.Sftp) AddAuthChoice(keyLogin, secure);
             if (keyLogin)
             {
@@ -517,7 +512,7 @@ internal sealed partial class RemoteFilesScreen
             else
             {
                 Add(_content, "password", sftpEdit ? "Password" : "Password (optional)", password: true,
-                    placeholder: site?.HasPassword == true ? "Saved; type to replace" : null);
+                    placeholder: site?.HasPassword == true ? "Saved; type to replace" : "Password");
                 if (!sftpEdit && kind != SiteKindCatalog.Ftp)
                     _content.AddView(Hint(_phoneHost ? "Credentials are stored by this phone's Host." : "Credentials are sent to " + _hostName + " and stored there."));
             }
@@ -538,6 +533,7 @@ internal sealed partial class RemoteFilesScreen
                         Resource.Drawable.ic_remote_key);
                     newAddressBanner.Visibility = ViewStates.Gone;
                     _content.AddView(newAddressBanner);
+                    UpdateKeyNote(); // a re-render keeps what was typed, so the banner follows the typed address and port
                 }
                 else
                 {
@@ -555,6 +551,7 @@ internal sealed partial class RemoteFilesScreen
             address.EndIconMode = TextInputLayout.EndIconCustom;
             address.SetEndIconDrawable(Resource.Drawable.ic_paste);
             address.EndIconContentDescription = "Paste address";
+            address.ErrorIconDrawable = null; // x21 keeps the paste icon in the error state
             address.SetEndIconOnClickListener(new ClickAction(() =>
             {
                 try
@@ -661,15 +658,9 @@ internal sealed partial class RemoteFilesScreen
         {
             var button = new MaterialButton(_activity, null, Resource.Attribute.materialButtonOutlinedStyle)
             { Text = text, Id = View.GenerateViewId(), Enabled = secure && !_busy, ContentDescription = text };
-            button.SetAllCaps(false);
-            button.InsetTop = button.InsetBottom = 0;
+            StyleSegment(button);
             bool on = mode == (key ? "key" : "password");
-            if (on)
-            {
-                button.SetIconResource(Resource.Drawable.ic_remote_check);
-                button.IconGravity = MaterialButton.IconGravityTextStart;
-                button.IconPadding = Dp(8);
-            }
+            if (on) button.SetIconResource(Resource.Drawable.ic_remote_check);
             group.AddView(button, new LinearLayout.LayoutParams(0, Dp(44), 1));
             ids[button.Id] = mode;
             if (on) checkedId = button.Id;
@@ -712,7 +703,7 @@ internal sealed partial class RemoteFilesScreen
         var outline = new Android.Graphics.Drawables.GradientDrawable();
         outline.SetCornerRadius(Dp(8));
         outline.SetColor(Color.Transparent);
-        outline.SetStroke(red ? Dp(2) : Dp(1), new Color(red ? ResColor(Resource.Color.state_failed) : Attr(Resource.Attribute.colorOutline)));
+        outline.SetStroke(red ? Dp(2) : Dp(1), new Color(red ? ResColor(Resource.Color.state_failed) : FieldLine()));
         row.Background = outline;
         row.SetMinimumHeight(Dp(64));
         row.SetPadding(Dp(14), Dp(9), Dp(8), Dp(9));
@@ -761,6 +752,7 @@ internal sealed partial class RemoteFilesScreen
     private TextView Hint(string text)
     {
         var view = FolderText(text, 13, Resource.Attribute.colorOnSurfaceVariant);
+        view.SetLineSpacing(Dp(3), 1f);
         view.SetPadding(Dp(4), Dp(2), Dp(4), Dp(10));
         return view;
     }
@@ -1020,21 +1012,21 @@ internal sealed partial class RemoteFilesScreen
             : Banner(BannerKind.Warn, "Not from a known authority", "Compare the fingerprint with the one from the server's administrator before you trust it.", Resource.Drawable.ic_remote_alert);
         AddInset(column, warning);
         var details = new LinearLayout(_activity) { Orientation = Orientation.Vertical };
-        details.Background = Rounded(Attr(Resource.Attribute.colorSurfaceContainerHighest), Dp(20));
-        details.SetPadding(Dp(16), Dp(12), Dp(16), Dp(12));
+        details.Background = Rounded(InsetSurface(), Dp(18));
+        details.SetPadding(Dp(16), Dp(6), Dp(16), Dp(6));
         void Row(string label, string value)
         {
             var row = new LinearLayout(_activity) { Orientation = Orientation.Horizontal };
-            row.AddView(FolderText(label, 16, Resource.Attribute.colorOnSurfaceVariant), new LinearLayout.LayoutParams(Dp(104), -2));
-            row.AddView(FolderText(value, 16, Resource.Attribute.colorOnSurface), new LinearLayout.LayoutParams(0, -2, 1));
-            row.SetPadding(0, Dp(5), 0, Dp(5));
+            row.AddView(FolderText(label, 14.5f, Resource.Attribute.colorOnSurfaceVariant), new LinearLayout.LayoutParams(Dp(96), -2));
+            row.AddView(FolderText(value, 14.5f, Resource.Attribute.colorOnSurface), new LinearLayout.LayoutParams(0, -2, 1));
+            row.SetPadding(0, Dp(8), 0, Dp(8));
             details.AddView(row);
         }
         Row("Issued to", cert.Subject);
         Row("Issued by", cert.Issuer);
         Row("Valid until", cert.NotAfter.ToLocalTime().ToString("d MMM yyyy"));
         AddInset(column, details);
-        AddInset(column, CopyBox(cert.Fingerprint, "Copy fingerprint", "SHA-256"));
+        AddInset(column, CopyBox(cert.Fingerprint, "Copy fingerprint", "SHA-256", captionInside: true));
         SheetButtons(column, "Trust certificate", Resource.Drawable.ic_remote_lock, () => _ = TrustCertificateAsync(saved, cert.Fingerprint, trusted));
         ShowSheet(dialog);
     }

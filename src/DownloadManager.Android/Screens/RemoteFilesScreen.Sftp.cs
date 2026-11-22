@@ -72,11 +72,12 @@ internal sealed partial class RemoteFilesScreen
         else
         {
             if (review.Case == SftpKeyCase.MoreKeys)
-                AddInset(column, FolderText("The server also offers other key types. Trusting them lets this phone connect whichever one the server uses.", 15,
-                    Resource.Attribute.colorOnSurfaceVariant));
+                AddInset(column, Banner(BannerKind.Info, "The server also offers other key types. Trusting them lets this phone connect whichever one the server uses.", null,
+                    Resource.Drawable.ic_remote_info));
             foreach (var key in review.Offered) AddInset(column, CopyBox(KeyText(key), "Copy key", null, key.Fingerprint));
-            AddInset(column, Banner(BannerKind.Info, "Compare a fingerprint with the one from the server's administrator before you trust it.", null,
-                Resource.Drawable.ic_remote_info));
+            if (review.Case != SftpKeyCase.MoreKeys)
+                AddInset(column, Banner(BannerKind.Info, "Compare a fingerprint with the one from the server's administrator before you trust it.", null,
+                    Resource.Drawable.ic_remote_info));
         }
         CheckBox? confirmed = null;
         if (changed)

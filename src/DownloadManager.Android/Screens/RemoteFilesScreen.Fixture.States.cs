@@ -155,7 +155,7 @@ internal sealed partial class RemoteFilesScreen
             case "x16": FxBase(paired: true); _listLoaded = false; _error = LoadErrorText; break;
             case "x17": FxBase(); _locationSearchOpen = true; _locationSearch = "dropbx"; break;
             case "x18": FxBase(); _adding = true; _addStep = 0; break;
-            case "x19": FxForm(SiteKindCatalog.Sftp, v => { v["name"] = "Home NAS"; v["host"] = "nas.local"; v["user"] = "media"; v["password"] = "hunter2hunter2"; v["folder"] = "/media"; }); _moreOpen = true; break;
+            case "x19": FxForm(SiteKindCatalog.Sftp, v => { v["name"] = "Home NAS"; v["host"] = "nas.local"; v["user"] = "media"; v["password"] = "hunter2hunter2"; v["folder"] = "/media"; }); _moreOpen = true; Render(); FxLater(() => _fxLayouts?.GetValueOrDefault("host")?.EditText?.RequestFocus()); return true;
             case "x20": FxForm(SiteKindCatalog.Ftp, v => { v["name"] = "Print shop"; v["host"] = "ftp.example.org"; v["user"] = "orders"; v["password"] = "hunter2x"; v["folder"] = "/"; }); break;
             case "x20b":
                 FxForm(SiteKindCatalog.Ftp, v => { v["name"] = "Print shop"; v["host"] = "ftp.example.org"; v["user"] = "orders"; v["password"] = "hunter2x"; v["tls"] = SiteTlsModes.None; });
@@ -212,6 +212,13 @@ internal sealed partial class RemoteFilesScreen
             case "x29":
                 FxBase(paired: true); Render();
                 FxLater(() => ShowPasteTokenDialog(_sites[3], "rclone authorize \"onedrive\" --auth-no-open-browser"));
+                FxLater(() => FxLater(() =>
+                {
+                    if (_signInToken is not { } token) return;
+                    token.Text = new string('x', 30);
+                    token.RequestFocus();
+                    token.PostDelayed(() => (_activity.GetSystemService(Android.Content.Context.InputMethodService) as Android.Views.InputMethods.InputMethodManager)?.HideSoftInputFromWindow(token.WindowToken, 0), 600);
+                }));
                 return true;
             case "x29b":
                 FxBase(paired: true); _sites[3].ClientId = "own-id"; Render();

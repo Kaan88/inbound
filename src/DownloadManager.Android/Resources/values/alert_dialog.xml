@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <!-- The mockups' dialogs: a 22 sp title (x3, x13, x15, x23b, x28). -->
+  <style name="InboundAlertDialog" parent="ThemeOverlay.Material3.MaterialAlertDialog">
+    <item name="materialAlertDialogTitleTextStyle">@style/InboundAlertDialogTitle</item>
+  </style>
+  <style name="InboundAlertDialogTitle" parent="MaterialAlertDialog.Material3.Title.Text">
+    <item name="android:textSize">22sp</item>
+  </style>
+</resources>

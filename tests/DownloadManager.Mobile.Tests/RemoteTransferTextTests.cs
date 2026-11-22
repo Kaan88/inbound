@@ -80,4 +80,10 @@ public sealed class RemoteTransferTextTests
         Assert.True(RemoteTransferText.NeedsAttention(new SiteTransferDto { State = "failed", Problem = SiteProblems.SignInNeeded, SiteName = "Drive" }));
         Assert.False(RemoteTransferText.NeedsAttention(new SiteTransferDto { State = "failed" }));
     }
+
+    [Theory]
+    [InlineData("Connection lost", "Not copied · connection lost")]
+    [InlineData("SFTP refused it", "Not copied · SFTP refused it")]
+    public void ANotCopiedReasonReadsInLowercaseAfterTheDot(string error, string expected) =>
+        Assert.Equal(expected, RemoteTransferText.FileLine(new SiteTransferItemDto { Path = "a/b.jpg", State = "failed", Error = error }).Line);
 }

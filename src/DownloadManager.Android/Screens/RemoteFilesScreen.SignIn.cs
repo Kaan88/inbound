@@ -167,9 +167,7 @@ internal sealed partial class RemoteFilesScreen
         var body = new LinearLayout(_activity) { Orientation = Orientation.Vertical };
         body.SetGravity(GravityFlags.CenterHorizontal);
         body.SetPadding(Dp(24), Dp(24), Dp(24), 0);
-        var spinner = new Google.Android.Material.ProgressIndicator.CircularProgressIndicator(_activity)
-        { Indeterminate = true, ContentDescription = "Signing in", IndicatorSize = Dp(36), TrackThickness = Dp(4), TrackColor = Attr(Resource.Attribute.colorOutlineVariant) };
-        spinner.SetIndicatorColor(Attr(Resource.Attribute.colorPrimary));
+        var spinner = new RingSpinner(_activity, 4, Attr(Resource.Attribute.colorOutlineVariant), Attr(Resource.Attribute.colorPrimary)) { ContentDescription = "Signing in" };
         body.AddView(spinner, new LinearLayout.LayoutParams(Dp(44), Dp(44)) { Gravity = GravityFlags.CenterHorizontal });
         var heading = FolderText($"Signing in to {site.Name}", 22, Resource.Attribute.colorOnSurface);
         heading.Gravity = GravityFlags.Center;
@@ -178,6 +176,7 @@ internal sealed partial class RemoteFilesScreen
         var message = FolderText("Finish signing in with the browser. This closes by itself when the phone has the authorization.", 14,
             Resource.Attribute.colorOnSurfaceVariant);
         message.Gravity = GravityFlags.Center;
+        message.SetLineSpacing(Dp(3), 1f);
         body.AddView(message, new LinearLayout.LayoutParams(-1, -2));
         var dialog = new MaterialAlertDialogBuilder(_activity)
             .SetView(body)!
@@ -274,9 +273,11 @@ internal sealed partial class RemoteFilesScreen
         var dialog = NewSheet(out var column);
         SheetTitle(column, $"Sign in to {site.Name}");
         string text = own
-            ? $"On a computer with rclone and a browser, replace the two placeholders with your own client ID and secret and run this command. Then paste everything between ---> and <---End paste. The token is sent to {_hostName} and gives access to your account."
+            ? $"On a computer with rclone and a browser, run this command with your own client ID and secret in place of the placeholders. Then paste everything between ---> and <---End paste. The token is sent to {_hostName}."
             : $"On a computer with rclone and a browser, run this command. Then paste everything between ---> and <---End paste. The token is sent to {_hostName} and gives access to your account.";
-        AddInset(column, FolderText(text, 16, Resource.Attribute.colorOnSurfaceVariant));
+        var intro = FolderText(text, 14, Resource.Attribute.colorOnSurfaceVariant);
+        intro.SetLineSpacing(Dp(3), 1f);
+        AddInset(column, intro);
         AddInset(column, CopyBox(command, "Copy command"));
         if (own)
         {

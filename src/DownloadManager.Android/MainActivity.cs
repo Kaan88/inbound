@@ -118,7 +118,7 @@ public sealed partial class MainActivity : AppCompatActivity
         {
             var offered = _model.Hello?.Capabilities.Contains("sites") == true;
 #if INBOUND_TEST_BUILD
-            offered |= RemoteFilesScreen.FixtureMode is not null;
+            offered |= RemoteFilesScreen.FixtureMode is not null || Intent?.GetStringExtra("x10_fixture") is not null || Intent?.GetStringExtra("x10b_fixture") is not null; // x10 and x10b draw the Remote Files tab
 #endif
             if (!offered && _onRemoteFiles) bottom.SelectedItemId = Resource.Id.nav_downloads;
             bottom.Menu.FindItem(Resource.Id.nav_remote_files)!.SetVisible(offered);
@@ -463,8 +463,15 @@ public sealed partial class MainActivity : AppCompatActivity
                 // Remote Files: lift the Add location button above the snackbar (x33).
                 if (_onRemoteFiles && FindViewById<View>(Resource.Id.root)?.FindViewWithTag("rf_fab") is { } fab)
                 {
+                    _fabLiftOwner = view;
                     view.Post(() => fab.Animate()?.TranslationY(-(view.Height + Motion.Dp(this, 12)))?.SetDuration(150)?.Start());
-                    view.ViewDetachedFromWindow += (_, _) => fab.Animate()?.TranslationY(0)?.SetDuration(150)?.Start();
+                    // A newer snackbar that took the lift over keeps it when this one goes away.
+                    view.ViewDetachedFromWindow += (_, _) =>
+                    {
+                        if (!ReferenceEquals(_fabLiftOwner, view)) return;
+                        _fabLiftOwner = null;
+                        fab.Animate()?.TranslationY(0)?.SetDuration(150)?.Start();
+                    };
                 }
             }
             if (!withinDownloads && _nav?.PageOpen != true && navigation?.Visibility == ViewStates.Visible) bar.SetAnchorView(navigation);

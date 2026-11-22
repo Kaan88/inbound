@@ -31,6 +31,7 @@
     <item name="android:colorBackground">#181818</item>
     <item name="colorError">#F07A7A</item>
     <item name="bottomSheetDialogTheme">@style/InboundSheetDialog</item>
+    <item name="materialAlertDialogTheme">@style/InboundAlertDialog</item>
   </style>
   <style name="InboundSheetDialog" parent="ThemeOverlay.Material3.BottomSheetDialog">
     <item name="android:windowAnimationStyle">@style/InboundSheetAnimation</item>

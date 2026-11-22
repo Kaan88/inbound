@@ -17,6 +17,30 @@ internal sealed partial class RemoteFilesScreen
 
     private int ResColor(int id) => _activity.GetColor(id);
 
+    /// <summary>The mockup's inset surface inside sheets (key boxes, the From/To card): the page colour in dark, the icon-tile grey in light.</summary>
+    private int InsetSurface() => IsNight() ? Attr(Resource.Attribute.colorSurface) : Attr(Resource.Attribute.colorSurfaceContainerHighest);
+
+    private bool IsNight() =>
+        (_activity.Resources?.Configuration?.UiMode & Android.Content.Res.UiMode.NightMask) == Android.Content.Res.UiMode.NightYes;
+
+    /// <summary>The mockups' field and segment outline colour (--field): a quiet grey, #4a4a4a in dark and #8a8a8a in light.</summary>
+    private int FieldLine() => IsNight() ? Color.ParseColor("#4a4a4a") : Color.ParseColor("#8a8a8a");
+
+    /// <summary>A segment of a "Sign in with" or "Encryption" choice as drawn: 44 dp, 14.5 sp medium, the check beside the label.</summary>
+    private void StyleSegment(MaterialButton button)
+    {
+        button.SetAllCaps(false);
+        button.SetTextSize(Android.Util.ComplexUnitType.Sp, 14.5f);
+        button.SetTypeface(Android.Graphics.Typeface.Create("sans-serif-medium", Android.Graphics.TypefaceStyle.Normal), Android.Graphics.TypefaceStyle.Normal);
+        button.StrokeColor = ColorStateList.ValueOf(new Color(FieldLine()));
+        button.StrokeWidth = Dp(1);
+        button.InsetTop = button.InsetBottom = 0;
+        button.IconGravity = MaterialButton.IconGravityTextStart;
+        button.IconPadding = Dp(8);
+        button.IconSize = Dp(18);
+        button.SetSingleLine(true);
+    }
+
     private static GradientDrawable Rounded(int color, int radiusPx)
     {
         var drawable = new GradientDrawable();
@@ -61,6 +85,7 @@ internal sealed partial class RemoteFilesScreen
         if (body is not null)
         {
             var detail = new TextView(_activity) { Text = body, TextSize = 12.5f };
+            detail.SetLineSpacing(Dp(3), 1f);
             detail.SetTextColor(new Color(text));
             column.AddView(detail);
         }
@@ -82,25 +107,33 @@ internal sealed partial class RemoteFilesScreen
     private void ShowIconMenu(View anchor, params (int Icon, string Text, Action Click)[] items)
     {
         var list = new LinearLayout(_activity) { Orientation = Orientation.Vertical };
-        list.Background = Rounded(Attr(Resource.Attribute.colorSurfaceContainer), Dp(16));
+        list.Background = Rounded(Attr(Resource.Attribute.colorSurfaceContainerHigh), Dp(8));
         list.SetPadding(0, Dp(8), 0, Dp(8));
         PopupWindow? popup = null;
         foreach (var (icon, label, click) in items)
         {
             var row = new LinearLayout(_activity) { Orientation = Orientation.Horizontal, Clickable = true, Focusable = true };
             row.SetGravity(GravityFlags.CenterVertical);
-            row.SetPadding(Dp(16), 0, Dp(24), 0);
+            row.SetPadding(Dp(16), 0, Dp(16), 0);
             row.Background = new TypedValueHolder(_activity).SelectableBackground();
-            row.AddView(SheetIcon(icon, Resource.Attribute.colorOnSurface), new LinearLayout.LayoutParams(Dp(24), Dp(24)) { RightMargin = Dp(16) });
-            row.AddView(FolderText(label, 16, Resource.Attribute.colorOnSurface));
+            row.AddView(SheetIcon(icon, Resource.Attribute.colorOnSurface), new LinearLayout.LayoutParams(Dp(24), Dp(24)) { RightMargin = Dp(14) });
+            row.AddView(FolderText(label, 15, Resource.Attribute.colorOnSurface));
             row.ContentDescription = label;
             var action = click;
             row.Click += (_, _) => { popup?.Dismiss(); action(); };
-            list.AddView(row, new LinearLayout.LayoutParams(-1, Dp(52)));
+            list.AddView(row, new LinearLayout.LayoutParams(-1, Dp(48)));
         }
-        popup = new PopupWindow(list, Dp(260), -2, true) { Elevation = Dp(8) };
+        popup = new PopupWindow(list, Dp(236), -2, true) { Elevation = Dp(8) };
         popup.SetBackgroundDrawable(new ColorDrawable(Color.Transparent));
-        popup.ShowAsDropDown(anchor, 0, 0, GravityFlags.End);
+        ShowMenuPopup(popup, anchor, false);
+    }
+
+    /// <summary>The mockups' menu sits 10 dp from the screen's right edge, under the anchor (or over it, as x5 draws it).</summary>
+    private void ShowMenuPopup(PopupWindow popup, View anchor, bool overAnchor)
+    {
+        var where = new int[2];
+        anchor.GetLocationOnScreen(where);
+        popup.ShowAtLocation(anchor.RootView, GravityFlags.Top | GravityFlags.Right, Dp(10), where[1] + (overAnchor ? 0 : anchor.Height));
     }
 
     private void CopyText(string text)
@@ -115,25 +148,30 @@ internal sealed partial class RemoteFilesScreen
     }
 
     /// <summary>A monospace box with a copy button beside it (keys, fingerprints, the rclone command).</summary>
-    private View CopyBox(string text, string copyLabel, string? caption = null, string? copyText = null)
+    private View CopyBox(string text, string copyLabel, string? caption = null, string? copyText = null, bool captionInside = false)
     {
         var holder = new LinearLayout(_activity) { Orientation = Orientation.Vertical };
-        if (caption is not null)
+        string shown = text;
+        if (caption is not null && captionInside) shown = caption + "\n" + text; // x20c: "SHA-256" is the box's first mono line
+        else if (caption is not null)
         {
-            var cap = FolderText(caption, 14, Resource.Attribute.colorOnSurfaceVariant);
-            cap.SetPadding(Dp(4), Dp(8), 0, Dp(4));
+            var cap = FolderText(caption, 14, Resource.Attribute.colorOnSurfaceVariant); // x27: "Trusted before" above the box
+            cap.SetPadding(Dp(2), Dp(4), 0, Dp(4));
             holder.AddView(cap);
         }
         var row = new LinearLayout(_activity) { Orientation = Orientation.Horizontal };
         row.SetGravity(GravityFlags.Top);
-        var mono = new TextView(_activity) { Text = text, TextSize = 12 };
+        var mono = new TextView(_activity) { Text = shown, TextSize = 13 };
+        mono.SetLineSpacing(Dp(1), 1f);
         mono.SetTypeface(Android.Graphics.Typeface.Monospace, Android.Graphics.TypefaceStyle.Normal);
         mono.SetTextIsSelectable(true);
         mono.SetTextColor(new Color(Attr(Resource.Attribute.colorOnSurface)));
-        mono.Background = Rounded(Attr(Resource.Attribute.colorSurfaceContainerHighest), Dp(16));
-        mono.SetPadding(Dp(16), Dp(12), Dp(16), Dp(12));
+        mono.Background = Rounded(InsetSurface(), Dp(12));
+        mono.SetPadding(Dp(12), Dp(10), Dp(12), Dp(10));
         row.AddView(mono, new LinearLayout.LayoutParams(0, -2, 1));
-        row.AddView(IconButton(Resource.Drawable.ic_copy, copyLabel, () => CopyText(copyText ?? text)), new LinearLayout.LayoutParams(Dp(48), Dp(48)) { LeftMargin = Dp(4) });
+        var copy = IconButton(Resource.Drawable.ic_copy, copyLabel, () => CopyText(copyText ?? text), Resource.Attribute.colorOnSurfaceVariant);
+        copy.SetPadding(Dp(10), Dp(10), Dp(10), Dp(10));
+        row.AddView(copy, new LinearLayout.LayoutParams(Dp(40), Dp(40)) { LeftMargin = Dp(4), TopMargin = Dp(6) });
         holder.AddView(row);
         holder.LayoutParameters = new LinearLayout.LayoutParams(-1, -2) { BottomMargin = Dp(6) };
         return holder;
@@ -149,8 +187,10 @@ internal sealed partial class RemoteFilesScreen
         layout.ExpandedHintEnabled = false;
         edit.SaveEnabled = false;
         layout.SetBoxBackgroundColorStateList(ColorStateList.ValueOf(Color.Transparent));
-        layout.Background = FieldBox(false, false);
-        edit.FocusChange += (_, e) => layout.Background = FieldBox(layout.Error is not null, e.HasFocus);
+        SetOutline(layout, FieldBox(false, false));
+        layout.ErrorIconDrawable = AndroidX.AppCompat.Content.Res.AppCompatResources.GetDrawable(_activity, Resource.Drawable.ic_remote_alert);
+        layout.SetErrorIconTintList(ColorStateList.ValueOf(new Color(Attr(Resource.Attribute.colorError))));
+        edit.FocusChange += (_, e) => SetOutline(layout, FieldBox(layout.Error is not null, e.HasFocus));
         edit.SetTextSize(Android.Util.ComplexUnitType.Sp, 15.5f);
         edit.InputType = type;
         edit.ContentDescription = label;
@@ -176,7 +216,7 @@ internal sealed partial class RemoteFilesScreen
         box.SetColor(Color.Transparent);
         box.SetCornerRadius(Dp(8));
         box.SetStroke(error || focused ? Dp(2) : Dp(1),
-            error ? new Color(Attr(Resource.Attribute.colorError)) : focused ? new Color(Attr(Resource.Attribute.colorPrimary)) : Color.Argb(0x99, Color.GetRedComponent(Attr(Resource.Attribute.colorOnSurfaceVariant)), Color.GetGreenComponent(Attr(Resource.Attribute.colorOnSurfaceVariant)), Color.GetBlueComponent(Attr(Resource.Attribute.colorOnSurfaceVariant))));
+            error ? new Color(Attr(Resource.Attribute.colorError)) : focused ? new Color(Attr(Resource.Attribute.colorPrimary)) : new Color(FieldLine()));
         return box;
     }
 
@@ -184,7 +224,26 @@ internal sealed partial class RemoteFilesScreen
     {
         layout.Error = message;
         layout.ErrorEnabled = message is not null;
-        layout.Background = FieldBox(message is not null, layout.EditText?.HasFocus == true);
+        SetOutline(layout, FieldBox(message is not null, layout.EditText?.HasFocus == true));
+    }
+
+    private sealed class OutlineBox { public Drawable? Current; }
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<View, OutlineBox> Outlines = new();
+
+    /// <summary>Draws the outline over the box only (the frame holding the label and value, not the error line below it); it takes no touches.</summary>
+    private static void SetOutline(TextInputLayout layout, Drawable box)
+    {
+        var frame = (FrameLayout)layout.EditText!.Parent!;
+        var holder = Outlines.GetValue(frame, _ =>
+        {
+            var created = new OutlineBox();
+            frame.LayoutChange += (_, _) => created.Current?.SetBounds(0, 0, frame.Width, frame.Height);
+            return created;
+        });
+        if (holder.Current is not null) frame.Overlay!.Remove(holder.Current);
+        holder.Current = box;
+        box.SetBounds(0, 0, frame.Width, frame.Height);
+        frame.Overlay!.Add(box);
     }
 
     private View HostPill()
@@ -265,6 +324,7 @@ internal sealed partial class RemoteFilesScreen
         foreach (var line in lines)
         {
             var sub = FolderText(line, 14, Resource.Attribute.colorOnSurfaceVariant);
+            sub.SetLineSpacing(Dp(3), 1f);
             sub.SetPadding(Dp(24), Dp(2), Dp(24), Dp(2));
             parent.AddView(sub);
         }

@@ -30,6 +30,7 @@ internal sealed partial class RemoteFilesScreen
     private LinearLayout? _tfShell, _tfBanner, _tfChips, _tfList;
     private HorizontalScrollView? _tfChipScroll;
     private SwipeRefreshLayout? _tfSwipe;
+    private FrameLayout? _tfRefreshDisc;
 
     private void OpenTransfers()
     {
@@ -184,7 +185,17 @@ internal sealed partial class RemoteFilesScreen
             RefreshGap();
         };
         _tfSwipe.AddView(scroll, new ViewGroup.LayoutParams(-1, -1));
-        _tfShell.AddView(_tfSwipe, new LinearLayout.LayoutParams(-1, 0, 1));
+        // The pull gesture stays the SwipeRefreshLayout's; its own spinner is hidden for a ring that always draws (x5b).
+        if (_tfSwipe.GetChildAt(0) is { } circle) circle.Alpha = 0f;
+        var hold = new FrameLayout(_activity);
+        hold.AddView(_tfSwipe, new FrameLayout.LayoutParams(-1, -1));
+        _tfRefreshDisc = new FrameLayout(_activity) { Visibility = ViewStates.Gone, ImportantForAccessibility = ImportantForAccessibility.No };
+        _tfRefreshDisc.Background = Rounded(Attr(Resource.Attribute.colorSurfaceContainerHigh), Dp(24));
+        _tfRefreshDisc.Elevation = Dp(2);
+        _tfRefreshDisc.AddView(new RingSpinner(_activity, 3, Android.Graphics.Color.Transparent, Attr(Resource.Attribute.colorPrimary), 270f) { ContentDescription = "Refreshing" },
+            new FrameLayout.LayoutParams(Dp(26), Dp(26), GravityFlags.Center));
+        hold.AddView(_tfRefreshDisc, new FrameLayout.LayoutParams(Dp(48), Dp(48), GravityFlags.Top | GravityFlags.CenterHorizontal) { TopMargin = Dp(4) });
+        _tfShell.AddView(hold, new LinearLayout.LayoutParams(-1, 0, 1));
         _surface.AddView(_tfShell, new FrameLayout.LayoutParams(-1, -1));
     }
 
@@ -204,6 +215,7 @@ internal sealed partial class RemoteFilesScreen
     private void RefreshGap()
     {
         if (_tfList?.Parent is not View scroll || _tfSwipe is null) return;
+        if (_tfRefreshDisc is not null) _tfRefreshDisc.Visibility = _tfSwipe.Refreshing ? ViewStates.Visible : ViewStates.Gone;
         float target = _tfSwipe.Refreshing ? Dp(56) : 0;
         if (Math.Abs(scroll.TranslationY - target) > 0.5f) scroll.Animate()?.TranslationY(target)?.SetDuration(150)?.Start();
     }
@@ -235,20 +247,25 @@ internal sealed partial class RemoteFilesScreen
     {
         int tone = _activity.GetColor(warning ? Resource.Color.state_waiting : Resource.Color.state_failed);
         var card = new LinearLayout(_activity) { Orientation = Orientation.Horizontal };
-        card.SetPadding(Dp(16), Dp(14), Dp(16), Dp(14));
+        card.SetPadding(Dp(14), Dp(12), Dp(14), Dp(12));
         var background = new GradientDrawable();
-        background.SetCornerRadius(Dp(16));
-        background.SetColor(new Color(Color.GetRedComponent(tone), Color.GetGreenComponent(tone), Color.GetBlueComponent(tone), 48));
+        background.SetCornerRadius(Dp(12));
+        background.SetColor(new Color(_activity.GetColor(warning ? Resource.Color.state_waiting_container : Resource.Color.state_failed_container)));
         card.Background = background;
         var icon = new ImageView(_activity) { ImportantForAccessibility = ImportantForAccessibility.No };
         icon.SetImageResource(iconRes == 0 ? Resource.Drawable.ic_remote_warning : iconRes);
         icon.ImageTintList = ColorStateList.ValueOf(new Color(tone));
-        card.AddView(icon, new LinearLayout.LayoutParams(Dp(24), Dp(24)) { RightMargin = Dp(14), TopMargin = Dp(2) });
+        card.AddView(icon, new LinearLayout.LayoutParams(Dp(24), Dp(24)) { RightMargin = Dp(12), TopMargin = Dp(0) });
         var texts = new LinearLayout(_activity) { Orientation = Orientation.Vertical };
-        var heading = FolderText(title, 16, Resource.Attribute.colorOnSurface);
+        var heading = FolderText(title, 14.5f, Resource.Attribute.colorOnSurface);
         heading.SetTypeface(Typeface.Create("sans-serif-medium", TypefaceStyle.Normal), TypefaceStyle.Normal);
         texts.AddView(heading);
-        if (text is not null) texts.AddView(FolderText(text, 14, Resource.Attribute.colorOnSurface));
+        if (text is not null)
+        {
+            var detail = FolderText(text, 12.5f, Resource.Attribute.colorOnSurface);
+            detail.SetLineSpacing(Dp(3), 1f);
+            texts.AddView(detail);
+        }
         card.AddView(texts, new LinearLayout.LayoutParams(0, -2, 1));
         card.ContentDescription = title + (text is null ? "" : ". " + text);
         return card;
@@ -318,9 +335,8 @@ internal sealed partial class RemoteFilesScreen
         {
             if (_transferLoading)
             {
-                var spinner = new CircularProgressIndicator(_activity) { Indeterminate = true };
-                spinner.ContentDescription = "Loading transfers";
-                _tfList!.AddView(spinner, new LinearLayout.LayoutParams(-2, -2) { Gravity = GravityFlags.CenterHorizontal, TopMargin = Dp(48) });
+                var spinner = new RingSpinner(_activity, 4, Attr(Resource.Attribute.colorOutlineVariant), Attr(Resource.Attribute.colorPrimary)) { ContentDescription = "Loading transfers" };
+                _tfList!.AddView(spinner, new LinearLayout.LayoutParams(Dp(40), Dp(40)) { Gravity = GravityFlags.CenterHorizontal, TopMargin = Dp(48) });
             }
             return;
         }
@@ -433,7 +449,7 @@ internal sealed partial class RemoteFilesScreen
         {
             "running" => (Resource.Drawable.ic_pause, "Pause " + title, true, () => _ = TransferActionAsync(t.Id, "pause")),
             "paused" => (Resource.Drawable.ic_play, "Resume " + title, false, () => _ = TransferActionAsync(t.Id, "resume")),
-            "failed" when !RemoteTransferText.NeedsAttention(t) => (Resource.Drawable.ic_refresh, "Retry " + title, false, () => _ = TransferActionAsync(t.Id, "retry")),
+            "failed" when !RemoteTransferText.NeedsAttention(t) => (Resource.Drawable.ic_remote_retry, "Retry " + title, false, () => _ = TransferActionAsync(t.Id, "retry")),
             "failed" => AttentionCardAction(t, title),
             "queued" => (Resource.Drawable.ic_close, "Cancel " + title, false, () => ConfirmCancelTransfer(t)),
             "done" when CanShowTransferFolder(t) => (Resource.Drawable.ic_remote_folder, "Show " + title + " in folder", false, () => ShowTransferFolder(t, null)),
@@ -452,7 +468,7 @@ internal sealed partial class RemoteFilesScreen
     private (int Icon, string Description, bool Primary, Action Click)? AttentionCardAction(SiteTransferDto t, string title)
     {
         var attention = RemoteTransferText.AttentionOf(t);
-        if (attention == TransferAttention.None) return (Resource.Drawable.ic_refresh, "Retry " + title, false, () => _ = TransferActionAsync(t.Id, "retry"));
+        if (attention == TransferAttention.None) return (Resource.Drawable.ic_remote_retry, "Retry " + title, false, () => _ = TransferActionAsync(t.Id, "retry"));
         return (AttentionIcon(attention), RemoteTransferText.AttentionLabel(attention) + ": " + title, false, () => RunAttention(t));
     }
 
@@ -507,7 +523,7 @@ internal sealed partial class RemoteFilesScreen
     {
         var card = new LinearLayout(_activity) { Orientation = Orientation.Vertical, Clickable = true, Focusable = true };
         var shape = new GradientDrawable();
-        shape.SetCornerRadius(Dp(24));
+        shape.SetCornerRadius(Dp(18));
         shape.SetColor(new Color(Attr(Resource.Attribute.colorSurfaceContainer)));
         card.Background = new RippleDrawable(ColorStateList.ValueOf(new Color(Attr(Resource.Attribute.colorControlHighlight))), shape, null);
         card.SetPadding(Dp(16), Dp(16), Dp(16), Dp(16));
@@ -518,14 +534,14 @@ internal sealed partial class RemoteFilesScreen
 
         var texts = new LinearLayout(_activity) { Orientation = Orientation.Vertical };
         string title = TransferTitle(t);
-        var name = FolderText(title, 17, Resource.Attribute.colorOnSurface);
+        var name = FolderText(title, 16, Resource.Attribute.colorOnSurface);
         name.SetTypeface(Typeface.Create("sans-serif-medium", TypefaceStyle.Normal), TypefaceStyle.Normal);
         name.SetSingleLine(true);
         name.Ellipsize = TextUtils.TruncateAt.End;
         texts.AddView(name);
         var tone = RemoteTransferText.ToneOf(t);
         string status = RemoteTransferText.Status(t, now);
-        var statusView = FolderText(status, 14, Resource.Attribute.colorOnSurfaceVariant);
+        var statusView = FolderText(status, 13, Resource.Attribute.colorOnSurfaceVariant);
         if (tone is TransferTone.Done or TransferTone.Failed or TransferTone.Paused) statusView.SetTextColor(new Color(ToneColor(tone)));
         statusView.SetSingleLine(true);
         statusView.Ellipsize = TextUtils.TruncateAt.End;
@@ -545,12 +561,12 @@ internal sealed partial class RemoteFilesScreen
         LinearProgressIndicator? progress = null;
         if (t.State is "running" or "paused" && t.Bytes > 0)
         {
-            var bar = progress = new LinearProgressIndicator(_activity) { Indeterminate = false, Max = 1000, TrackThickness = Dp(4), TrackCornerRadius = Dp(2) };
+            var bar = progress = new LinearProgressIndicator(_activity) { Indeterminate = false, Max = 1000, TrackThickness = Dp(5), TrackCornerRadius = Dp(3), TrackStopIndicatorSize = 0 };
             bar.SetIndicatorColor(t.State == "paused" ? Attr(Resource.Attribute.colorOutline) : Attr(Resource.Attribute.colorPrimary));
             bar.TrackColor = Attr(Resource.Attribute.colorSurfaceContainerHighest);
             bar.Progress = (int)Math.Min(1000, t.BytesDone * 1000 / Math.Max(1, t.Bytes));
             bar.ImportantForAccessibility = ImportantForAccessibility.No;
-            card.AddView(bar, new LinearLayout.LayoutParams(-1, Dp(4)) { TopMargin = Dp(12) });
+            card.AddView(bar, new LinearLayout.LayoutParams(-1, Dp(5)) { TopMargin = Dp(10) });
         }
 
         card.ContentDescription = title + ", " + status + ", " + source + " to " + destination + ". Details";
@@ -603,7 +619,7 @@ internal sealed partial class RemoteFilesScreen
         background.SetColor(new Color(Attr(Resource.Attribute.colorSurfaceContainerHigh)));
         card.Background = background;
         card.SetPadding(0, Dp(8), 0, Dp(8));
-        var popup = new PopupWindow(card, Dp(270), ViewGroup.LayoutParams.WrapContent, true) { OutsideTouchable = true, Elevation = Dp(8) };
+        var popup = new PopupWindow(card, Dp(248), ViewGroup.LayoutParams.WrapContent, true) { OutsideTouchable = true, Elevation = Dp(8) };
         popup.SetBackgroundDrawable(new ColorDrawable(Color.Transparent));
 
         void Item(int icon, string text, string? end, bool enabled, Action action)
@@ -616,16 +632,16 @@ internal sealed partial class RemoteFilesScreen
             image.SetImageResource(icon);
             image.ImageTintList = ColorStateList.ValueOf(new Color(Attr(Resource.Attribute.colorOnSurface)));
             item.AddView(image, new LinearLayout.LayoutParams(Dp(24), Dp(24)) { RightMargin = Dp(14) });
-            item.AddView(FolderText(text, 16, Resource.Attribute.colorOnSurface), new LinearLayout.LayoutParams(0, -2, 1));
+            item.AddView(FolderText(text, 15, Resource.Attribute.colorOnSurface), new LinearLayout.LayoutParams(0, -2, 1));
             if (end is not null) item.AddView(FolderText(end, 14, Resource.Attribute.colorOnSurfaceVariant));
             item.ContentDescription = text + (end is null ? "" : ", " + end);
             item.Click += (_, _) => { popup.Dismiss(); action(); };
-            card.AddView(item, new LinearLayout.LayoutParams(-1, Dp(52)));
+            card.AddView(item, new LinearLayout.LayoutParams(-1, Dp(48)));
         }
 
         Item(Resource.Drawable.ic_refresh, "Refresh", null, true, () => _ = LoadTransfersAsync());
         Item(Resource.Drawable.ic_remote_clearall, "Clear ended transfers", ended.ToString(), ended > 0, () => _ = TransferActionAsync("", "clear"));
-        popup.ShowAsDropDown(anchor, 0, -anchor.Height, GravityFlags.End);
+        ShowMenuPopup(popup, anchor, true);
     }
 
     private void ConfirmCancelTransfer(SiteTransferDto transfer)
@@ -719,10 +735,10 @@ internal sealed partial class RemoteFilesScreen
         head.SetPadding(Dp(24), 0, Dp(24), Dp(12));
         head.AddView(DirectionTile(t, 48), new LinearLayout.LayoutParams(Dp(48), Dp(48)) { RightMargin = Dp(14) });
         var names = new LinearLayout(_activity) { Orientation = Orientation.Vertical };
-        var heading = FolderText(title, 20, Resource.Attribute.colorOnSurface);
+        var heading = FolderText(title, 16, Resource.Attribute.colorOnSurface);
         heading.SetTypeface(Typeface.Create("sans-serif-medium", TypefaceStyle.Normal), TypefaceStyle.Normal);
         names.AddView(heading);
-        var status = FolderText(RemoteTransferText.Status(t, now), 15, Resource.Attribute.colorOnSurfaceVariant);
+        var status = FolderText(RemoteTransferText.Status(t, now), 13, Resource.Attribute.colorOnSurfaceVariant);
         if (tone is TransferTone.Done or TransferTone.Failed or TransferTone.Paused) status.SetTextColor(new Color(ToneColor(tone)));
         names.AddView(status);
         head.AddView(names, new LinearLayout.LayoutParams(0, -2, 1));
@@ -736,12 +752,12 @@ internal sealed partial class RemoteFilesScreen
 
         var pills = new LinearLayout(_activity) { Orientation = Orientation.Horizontal };
         pills.SetPadding(Dp(24), 0, Dp(24), Dp(12));
-        if (t.State == "failed" && !RemoteTransferText.NeedsAttention(t)) pills.AddView(SheetPill("Retry", Resource.Drawable.ic_refresh, () => _ = TransferActionAsync(t.Id, "retry")), new LinearLayout.LayoutParams(-2, Dp(40)) { RightMargin = Dp(8) });
+        if (t.State == "failed" && !RemoteTransferText.NeedsAttention(t)) pills.AddView(SheetPill("Retry", Resource.Drawable.ic_remote_retry, () => _ = TransferActionAsync(t.Id, "retry")), new LinearLayout.LayoutParams(-2, Dp(40)) { RightMargin = Dp(8) });
         if (RemoteTransferText.AttentionOf(t) is var attention && attention != TransferAttention.None)
             pills.AddView(SheetPill(RemoteTransferText.AttentionLabel(attention), AttentionIcon(attention), () => RunAttention(t)), new LinearLayout.LayoutParams(-2, Dp(40)) { RightMargin = Dp(8) });
         if (t.State == "paused") pills.AddView(SheetPill("Resume", Resource.Drawable.ic_play, () => _ = TransferActionAsync(t.Id, "resume")), new LinearLayout.LayoutParams(-2, Dp(40)) { RightMargin = Dp(8) });
         if (t.State == "running") pills.AddView(SheetPill("Pause", Resource.Drawable.ic_pause, () => _ = TransferActionAsync(t.Id, "pause")), new LinearLayout.LayoutParams(-2, Dp(40)) { RightMargin = Dp(8) });
-        if (CanShowTransferFolder(t))
+        if (CanShowTransferFolder(t) && t.State != "paused") // x2b draws Resume alone
         {
             string place = t.Direction == "download" ? "folder" : t.Direction == "upload" ? t.SiteName : t.DestinationSiteName ?? "location";
             pills.AddView(SheetPill("Show in " + place, Resource.Drawable.ic_remote_folder, () => ShowTransferFolder(t, null)), new LinearLayout.LayoutParams(-2, Dp(40)));
@@ -752,16 +768,16 @@ internal sealed partial class RemoteFilesScreen
         var (from, to) = RemoteTransferText.RouteDetail(t, _phoneHost);
         var info = new LinearLayout(_activity) { Orientation = Orientation.Vertical };
         var infoShape = new GradientDrawable();
-        infoShape.SetCornerRadius(Dp(24));
-        infoShape.SetColor(new Color(Attr(Resource.Attribute.colorSurfaceContainerHigh)));
+        infoShape.SetCornerRadius(Dp(18));
+        infoShape.SetColor(new Color(InsetSurface()));
         info.Background = infoShape;
-        info.SetPadding(Dp(20), Dp(10), Dp(12), Dp(10));
+        info.SetPadding(Dp(16), Dp(6), Dp(8), Dp(6));
         void Line(string label, string value, bool mono = false, bool copy = false)
         {
             var line = new LinearLayout(_activity) { Orientation = Orientation.Horizontal };
             line.SetGravity(GravityFlags.CenterVertical);
-            line.AddView(FolderText(label, 15, Resource.Attribute.colorOnSurfaceVariant), new LinearLayout.LayoutParams(Dp(92), -2));
-            var text = FolderText(value, mono ? 13 : 16, Resource.Attribute.colorOnSurface);
+            line.AddView(FolderText(label, 14.5f, Resource.Attribute.colorOnSurfaceVariant), new LinearLayout.LayoutParams(Dp(96), -2));
+            var text = FolderText(value, mono ? 12.5f : 14.5f, Resource.Attribute.colorOnSurface);
             if (mono) text.Typeface = Typeface.Monospace;
             if (mono) text.SetTextIsSelectable(true);
             line.AddView(text, new LinearLayout.LayoutParams(0, -2, 1));
@@ -772,7 +788,7 @@ internal sealed partial class RemoteFilesScreen
                     if (!OperatingSystem.IsAndroidVersionAtLeast(33)) Toast.MakeText(_activity, "Transfer ID copied", ToastLength.Short)?.Show();
                 }), new LinearLayout.LayoutParams(Dp(44), Dp(44)));
             line.ContentDescription = label + ", " + value;
-            info.AddView(line, new LinearLayout.LayoutParams(-1, -2) { TopMargin = Dp(6), BottomMargin = Dp(6) });
+            info.AddView(line, new LinearLayout.LayoutParams(-1, -2) { TopMargin = Dp(8), BottomMargin = Dp(8) });
         }
         Line("From", from);
         Line("To", to);
@@ -811,10 +827,12 @@ internal sealed partial class RemoteFilesScreen
                 var ordered = items.Where(i => !i.IsFolder).OrderBy(i => i.State switch { "failed" => 0, "running" => 1, "done" => 2, "skipped" => 3, _ => 4 }).ToList();
                 var header = new LinearLayout(_activity) { Orientation = Orientation.Horizontal };
                 header.SetPadding(Dp(24), Dp(8), Dp(24), Dp(8));
-                header.AddView(FolderText("Files", 16, Resource.Attribute.colorOnSurfaceVariant), new LinearLayout.LayoutParams(0, -2, 1));
+                var filesLabel = FolderText("Files", 14, Resource.Attribute.colorOnSurfaceVariant);
+                filesLabel.SetTypeface(Typeface.Create("sans-serif-medium", TypefaceStyle.Normal), TypefaceStyle.Normal);
+                header.AddView(filesLabel, new LinearLayout.LayoutParams(0, -2, 1));
                 if (ordered.Count > 3)
                 {
-                    var toggle = FolderText(all ? "Fewer" : "All " + ordered.Count, 16, Resource.Attribute.colorPrimary);
+                    var toggle = FolderText(all ? "Fewer" : "All " + ordered.Count, 14, Resource.Attribute.colorPrimary);
                     toggle.Clickable = true;
                     toggle.ContentDescription = all ? "Show fewer files" : "Show all " + ordered.Count + " files";
                     toggle.Click += (_, _) => { all = !all; Fill(); };
@@ -843,7 +861,7 @@ internal sealed partial class RemoteFilesScreen
         };
         var tile = new FrameLayout(_activity) { ImportantForAccessibility = ImportantForAccessibility.No };
         var shape = new GradientDrawable();
-        shape.SetCornerRadius(Dp(10));
+        shape.SetCornerRadius(Dp(9));
         shape.SetColor(new Color(Attr(Resource.Attribute.colorSurfaceContainerHighest)));
         tile.Background = shape;
         var icon = new ImageView(_activity);
@@ -857,14 +875,14 @@ internal sealed partial class RemoteFilesScreen
             _ => FileIcons.For(kind).Drawable,
         });
         icon.ImageTintList = ColorStateList.ValueOf(new Color(tint));
-        tile.AddView(icon, new FrameLayout.LayoutParams(Dp(20), Dp(20), GravityFlags.Center));
-        row.AddView(tile, new LinearLayout.LayoutParams(Dp(36), Dp(36)) { RightMargin = Dp(14) });
+        tile.AddView(icon, new FrameLayout.LayoutParams(Dp(18), Dp(18), GravityFlags.Center));
+        row.AddView(tile, new LinearLayout.LayoutParams(Dp(32), Dp(32)) { RightMargin = Dp(14) });
         var texts = new LinearLayout(_activity) { Orientation = Orientation.Vertical };
-        var nameView = FolderText(name, 16, Resource.Attribute.colorOnSurface);
+        var nameView = FolderText(name, 14.5f, Resource.Attribute.colorOnSurface);
         nameView.SetSingleLine(true);
         nameView.Ellipsize = TextUtils.TruncateAt.Middle;
         texts.AddView(nameView);
-        var lineView = FolderText(line, 14, Resource.Attribute.colorOnSurfaceVariant);
+        var lineView = FolderText(line, 12.5f, Resource.Attribute.colorOnSurfaceVariant);
         if (tone is TransferTone.Failed or TransferTone.Done) lineView.SetTextColor(new Color(tint));
         lineView.SetSingleLine(true);
         lineView.Ellipsize = TextUtils.TruncateAt.End;

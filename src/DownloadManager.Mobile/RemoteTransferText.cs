@@ -202,6 +202,10 @@ public static class RemoteTransferText
         _ => null,
     };
 
+    /// <summary>"Connection lost" reads as "connection lost" after the dot; an acronym such as "SFTP" keeps its capitals.</summary>
+    private static string LowerFirst(string text) =>
+        text.Length > 1 && char.IsUpper(text[0]) && char.IsLower(text[1]) ? char.ToLowerInvariant(text[0]) + text[1..] : text;
+
     /// <summary>The file name of a batch item path ("Photos/IMG_1.jpg" is "IMG_1.jpg").</summary>
     public static string LeafName(string path) => path[(path.LastIndexOf('/') + 1)..];
 
@@ -210,7 +214,7 @@ public static class RemoteTransferText
     {
         "done" => (LeafName(item.Path), "Copied" + (item.Size > 0 ? " · " + Fmt.Bytes(item.Size) : ""), TransferTone.Done),
         "skipped" => (LeafName(item.Path), "Already there", TransferTone.Neutral),
-        "failed" => (LeafName(item.Path), "Not copied" + (string.IsNullOrWhiteSpace(item.Error) ? "" : " · " + item.Error), TransferTone.Failed),
+        "failed" => (LeafName(item.Path), "Not copied" + (string.IsNullOrWhiteSpace(item.Error) ? "" : " · " + LowerFirst(item.Error)), TransferTone.Failed),
         "running" => (LeafName(item.Path), "Copying" + (item.Size > 0 ? " · " + Fmt.Bytes(item.Size) : ""), TransferTone.Running),
         _ => (LeafName(item.Path), "Waiting" + (item.Size > 0 ? " · " + Fmt.Bytes(item.Size) : ""), TransferTone.Neutral),
     };
