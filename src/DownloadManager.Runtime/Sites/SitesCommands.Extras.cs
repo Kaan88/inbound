@@ -38,7 +38,7 @@ public sealed partial class SitesCommands
             if (saved == site) return new SiteResultDto { Ok = true, Site = ToDto(site) };
             try
             {
-                await _sites.SaveAsync(saved, cancellationToken).ConfigureAwait(false);
+                await _sites.SaveAsync(saved, cancellationToken, keepRevision: true).ConfigureAwait(false);
             }
             catch (SiteStoreException e)
             {
@@ -272,7 +272,7 @@ public sealed partial class SitesCommands
             saved = site with { ScheduledSync = sync };
             try
             {
-                await _sites.SaveAsync(saved, cancellationToken).ConfigureAwait(false);
+                await _sites.SaveAsync(saved, cancellationToken, keepRevision: true).ConfigureAwait(false);
             }
             catch (SiteStoreException e)
             {

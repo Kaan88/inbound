@@ -770,19 +770,21 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
                 ? "The server changed, so type the password again: a saved password is only sent to the server it was saved for."
                 : !sameTls
                     ? "The encryption changed, so type the password again: a saved password is only sent with the encryption it was saved with."
-                    : draft
+                    : draft && !string.Equals(existing.User, request.User.Trim(), StringComparison.Ordinal)
                         ? "The user changed, so type the password again to test it: a saved password is only tried for the user it was saved for."
                         : "Enter the password or key again: it isn't kept when the user name or sign-in settings change."));
         if (existing is not null && !keepKey && existing.SealedPrivateKey is not null && request.PrivateKey is null
             && request.AuthMethod == SiteAuthMethods.Key)
-            return (null, Fail("Enter the password or key again: it isn't kept when the user name or sign-in settings change."));
+            return (null, Fail(sameSignIn ? "Choose the private key to sign in with."
+                : "Enter the password or key again: it isn't kept when the user name or sign-in settings change."));
         // A key kept without a passphrase (every converted .ppk is one) takes none: rclone refuses a passphrase for an
         // unencrypted key, so one typed on an edit is not kept (Fable review, SITES.11).
         if (!string.IsNullOrEmpty(request.KeyPassphrase))
         {
             var keyInUse = request.PrivateKey ?? (keepKey && existing!.SealedPrivateKey is { } sealedKey
                 ? SecretProtector.UnprotectSiteSecret(sealedKey) : null);
-            if (keyInUse is not null && SiteKeyText.IsUnencrypted(keyInUse)) request.KeyPassphrase = null;
+            // Empty, not null: a passphrase stored with an older key is cleared too (Fable, merge review).
+            if (keyInUse is not null && SiteKeyText.IsUnencrypted(keyInUse)) request.KeyPassphrase = "";
         }
         var saved = new SiteRecord
         {

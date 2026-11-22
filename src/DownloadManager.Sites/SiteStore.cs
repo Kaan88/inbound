@@ -266,11 +266,16 @@ public sealed class SiteStore
     /// <see cref="KeepAsync"/> writes it); a record marked unsaved whose id is no longer open is refused, so a closed
     /// address never comes back as a file.
     /// </summary>
-    public async Task SaveAsync(SiteRecord site, CancellationToken cancellationToken = default)
+    /// <param name="keepRevision">
+    /// True for a write that changes nothing about the connection (last used, last folder and sort, a sync schedule): the
+    /// record keeps the <see cref="SiteRecord.Revision"/> it was read with, so listings taken under it stay usable
+    /// (Fable, merge review: such a write after the first page made deletes, uploads and "load more" fail as changed).
+    /// </param>
+    public async Task SaveAsync(SiteRecord site, CancellationToken cancellationToken = default, bool keepRevision = false)
     {
         Validate(site);
-        // Opaque content revision on every write (memory copies of unsaved addresses too), so cached listings know it changed.
-        site = site with { Revision = Guid.NewGuid() };
+        // Opaque content revision on every other write (memory copies of unsaved addresses too), so cached listings know it changed.
+        if (!keepRevision) site = site with { Revision = Guid.NewGuid() };
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {

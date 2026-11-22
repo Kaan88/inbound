@@ -97,7 +97,7 @@ public sealed partial class SitesCommands
                     return;
                 }
 
-                await _sites.SaveAsync(site with { LastUsedAt = now }).ConfigureAwait(false);
+                await _sites.SaveAsync(site with { LastUsedAt = now }, keepRevision: true).ConfigureAwait(false);
                 lock (_memory) _stamped[siteId] = now;
             }
             finally

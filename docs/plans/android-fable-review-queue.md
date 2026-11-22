@@ -12,7 +12,25 @@ not the Opus findings first, so its read is its own), then compare, act on what 
 Each entry: date; what was reviewed (commit, or files if uncommitted); who reviewed; findings and what was done; what
 Fable should look at.
 
-## Open: merge of main (0.9.0, SITES.13/14) into the Android branch (2026-11-23)
+## Done: merge of main (0.9.0, SITES.13/14) into the Android branch (2026-11-23)
+
+Fable reviewed `7941d412` (2026-11-23): not approved as it stood, one medium-high finding, five lows; everything else
+checked and found correct. Fixed before Android 0.1.3:
+
+- M1: `SiteStore.SaveAsync` gave every write a new `Revision`, so main's background writes (the last-used stamp after a
+  first page, `sites.remember`, a sync schedule) made the listing just returned stale: delete, "load more", a cached first
+  page and a no-replace upload could be refused as changed. Those writes now keep the revision (`keepRevision`).
+  Test `ALastUsedStampAfterTheFirstPageKeepsItsListingUsable` fails without the fix.
+- L3: messages branch on the condition that failed (draft: user changed or other sign-in setting; a key not carried to
+  another server says "Choose the private key to sign in with.").
+- L4: a passphrase typed for a kept unencrypted key now clears a stored one ("" instead of null).
+
+Left, recorded: L2, copying into the folder the files are in is refused (main's rule; Android 0.1.x allowed it for files
+with Keep both; said in the 0.1.3 notes). L5, `sitesRemoteCopy` now means `between` with legacy `copy` accepted; a
+0.9.0 desktop Host takes `between` but does not advertise it, so the phone hides copy against it until main's next
+desktop release. L6, the PuTTY conversion in `sites.testDraft` runs before `BuildRecord`'s checks (bounded by `_keyGate`).
+
+What Opus asked Fable to check:
 
 Owner, 2026-11-22: merge main into this branch, then this branch into main. Resolved by Opus, not reviewed. The two
 branches had each built the same two features; review the merge commit's resolution in these places:

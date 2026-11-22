@@ -45,6 +45,33 @@ public sealed partial class SiteTransfersEndToEndTests
     }
 
     [SiteTransfersFact]
+    public async Task ALastUsedStampAfterTheFirstPageKeepsItsListingUsable()
+    {
+        // Fable, merge review: the first browse stamps the remote's last-used time; that write must not make the listing
+        // just returned stale, or the next page, a delete or an upload is refused as changed.
+        var (commands, siteId) = await OpenSiteAsync(StartServer(slow: false));
+        var first = await Call<SiteBrowseResultDto>(commands, SitesMessageTypes.Browse, new SiteBrowseRequest { Id = siteId, Path = "/pub", Limit = 1 });
+        Assert.True(first.Ok, first.Message);
+        for (var i = 0; i < 100; i++)
+        {
+            var listed = await Call<SitesListDto>(commands, SitesMessageTypes.ListRequest, new { });
+            if (listed.Sites.Single(site => site.Id == siteId).LastUsedAt is not null) break;
+            await Task.Delay(50);
+        }
+
+        Assert.NotNull((await Call<SitesListDto>(commands, SitesMessageTypes.ListRequest, new { })).Sites.Single(site => site.Id == siteId).LastUsedAt);
+        var more = await Call<SiteBrowseResultDto>(commands, SitesMessageTypes.Browse,
+            new SiteBrowseRequest { Id = siteId, Path = "/pub", Offset = first.Items.Count, Limit = 500, Listing = first.Listing });
+        Assert.True(more.Ok, more.Message);
+        var deleted = await Call<SiteChangeResultDto>(commands, SitesMessageTypes.DeleteFiles, new SiteChangeRequest
+        {
+            Id = siteId, Path = "/pub", Listing = first.Listing, Items = [new() { Name = "readme.txt" }]
+        });
+        Assert.True(deleted.Ok, deleted.Message);
+        Assert.False(File.Exists(Path.Combine(Served, "pub", "readme.txt")));
+    }
+
+    [SiteTransfersFact]
     public async Task FileOnlyDeleteLeavesAFolderAndItsContentsAlone()
     {
         var (commands, siteId) = await OpenSiteAsync(StartServer(slow: false));
