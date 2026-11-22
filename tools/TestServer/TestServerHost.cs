@@ -341,7 +341,10 @@ public sealed partial class TestServerHost : IAsyncDisposable
             var seed = QueryInt(context, "seed", 1);
             await ServeAsync(context, ContentFor(name, size, seed), name, allowRanges: true,
                 throttleBytesPerSecond: QueryInt(context, "bps", 64 * 1024),
-                unknownLength: false).ConfigureAwait(false);
+                unknownLength: false,
+                // chunk=<bytes>: a smaller write than 64 KiB, so a low rate really stalls a reader; otherwise each new
+                // request gets a whole first chunk at once and a client that keeps splitting ranges can finish.
+                chunkBytes: QueryInt(context, "chunk", 64 * 1024)).ConfigureAwait(false);
         });
 
         _app.MapGet("/slowfirst/{name}", async (HttpContext context, string name) =>
@@ -857,7 +860,8 @@ public sealed partial class TestServerHost : IAsyncDisposable
         int? cutAt = null,
         bool forceFullForRange = false,
         bool forcePartial = false,
-        bool throttleWhenStartIsZero = false)
+        bool throttleWhenStartIsZero = false,
+        int chunkBytes = 64 * 1024)
     {
         var etag = $"\"{etagName}-{content.Length}-{Convert.ToHexString(SHA256.HashData(content))[..12]}\"";
         var lastModified = new DateTimeOffset(2024, 1, 1, 0, 0, 0, TimeSpan.Zero).AddMinutes(content.Length % 1000);
@@ -917,7 +921,7 @@ public sealed partial class TestServerHost : IAsyncDisposable
         var effectiveThrottle = throttleWhenStartIsZero && start != 0
             ? 0
             : throttleBytesPerSecond;
-        var buffer = new byte[64 * 1024];
+        var buffer = new byte[Math.Clamp(chunkBytes, 1, 64 * 1024)];
         var written = 0L;
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         try

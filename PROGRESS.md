@@ -1,5 +1,14 @@
 # Progress — session handoff
 
+## Owner: no 0.0.11, one major release with the redesign, 2026-11-22
+
+"no publish, finish everything and make a major release. this includes redesign and audits by fable." 0.0.11 is not
+published (it stays a staged build, started once on the S24). Next: merge the Remote Files redesign, settle the open
+review items (A6, A9-15), compare r1-r6 with the mockups on the emulator, on real data and on the S24, Fable audits of
+the redesign and of the release, then one release. Decision (owner away from the details): the major release is
+Android **0.1.0** (versionCode 12), the first minor-version step on the Android line; the desktop line is not part of
+it, since this branch does not merge into `main` without the owner's say-so.
+
 ## Owner: release after feature parity, before the redesign, 2026-11-21
 
 "after feature parity, before ui work. make a new release": once ANDROID.9 is complete (torrents on the phone, then

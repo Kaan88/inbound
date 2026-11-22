@@ -689,7 +689,7 @@ public sealed class HttpDownloadEngineTests
                    maxAttempts: 1, readTimeout: TimeSpan.FromMilliseconds(250)))
         {
             var job = ctx.CreateJob(
-                $"{_server.BaseAddress}/slow/timeout-segments.bin?size=4194304&seed=13&bps=1024",
+                $"{_server.BaseAddress}/slow/timeout-segments.bin?size=4194304&seed=13&bps=1024&chunk=1024",
                 "timeout-segments.bin");
             job.RequestedConnections = 4;
             var result = await engine.ExecuteAsync(job, null, null, CancellationToken.None);
