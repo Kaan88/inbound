@@ -237,6 +237,8 @@ internal sealed partial class RemoteFilesScreen
     {
         if (_retryAfterSignIn is not { } retry || retry.SiteId != siteId) return;
         _retryAfterSignIn = null;
+        // A retry left by a sign-in that failed can be picked up by a later one: only a transfer still failed is retried (Fable N1).
+        if (_transfers.FirstOrDefault(t => t.Id == retry.TransferId) is not { State: "failed" }) return;
         _ = TransferActionAsync(retry.TransferId, "retry");
     }
 

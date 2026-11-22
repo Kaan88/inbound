@@ -162,7 +162,10 @@ internal sealed class PhoneFolderPage : IDisposable
         {
             var crumb = crumbs[i];
             bool current = i == crumbs.Count - 1;
-            var chip = Text(crumb.Label, 14, current ? Resource.Attribute.colorOnSurface : Resource.Attribute.colorOnSurfaceVariant);
+            var chip = Text(crumb.Label, 14, Resource.Attribute.colorOnSurface);
+            // The mockups' --chiptext: on-surface in light, #cfcfcf in dark (on-surface at 85 %) (Fable x10b).
+            if (!current && (_activity.Resources?.Configuration?.UiMode & Android.Content.Res.UiMode.NightMask) == Android.Content.Res.UiMode.NightYes)
+                chip.SetTextColor(new Android.Graphics.Color(Motion.Attr(_activity, Resource.Attribute.colorOnSurface)) { A = 217 });
             chip.SetSingleLine(true);
             chip.Gravity = GravityFlags.CenterVertical;
             chip.SetPadding(Dp(12), 0, Dp(12), 0);
