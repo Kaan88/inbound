@@ -26,6 +26,13 @@ Android 0.0.11 staged, not published: signed release APK from a clean Release ou
 passed. Publishing waits for one start on the S24 with the owner's OK (the owner was asleep and said not to count on
 the phone; no device run of the fixes yet).
 
+Remaining review items of the earlier range, 2026-11-22 (owner away; decisions noted): A5, A7, S9, T1 and the F3
+note fixed, S4 partly fixed (a skipped update version changes the settings revision); S5, S7, S8, S10 and M4 kept with
+reasons; A3 and P6 open; A6 goes to the owner. Details:
+[the review](docs/plans/android-review-49f5663c-c745317f.md#step-6-and-the-remaining-items-2026-11-22). Checks: queue,
+settings, update and schedule integration tests 248 passed; Sites integration tests 75 passed with the 41 real-rclone
+tests skipped (no rclone binary on this PC); Android emulator build succeeded. Not in the staged 0.0.11 APK.
+
 Owner, 2026-11-22, on delegation: Opus coordinates, checks every worker diff, owns merges and does risky and important
 changes itself; Haiku mechanical work; Sonnet routine implementation with an outcome, owned files and a check; Fable
 reviews (CLAUDE.md "Delegation and review").

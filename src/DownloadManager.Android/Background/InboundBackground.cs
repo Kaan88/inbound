@@ -443,7 +443,10 @@ internal sealed class UidtKeepAlive(Context app) : IKeepAlive
             if (_service is not null || DateTimeOffset.UtcNow - _requestedAt < StartGrace) return true;
             var estimate = SessionBytes.Estimate(summary);
             var ok = Schedule(NetworkType.Any, estimate, "session job");
-            if (ok) { _requestedAt = DateTimeOffset.UtcNow; _lastEstimate = estimate; CrashGuardStore.SessionBegan(ExecutionLeaseKind.KeepAlive); }
+            // The crash-guard lease opens when the run attaches, not here: a job that is scheduled but never starts must not
+            // make a later ordinary process death count as a crash during a session (review A5). A crash loop always
+            // restarts through an attached run, which opens the lease.
+            if (ok) { _requestedAt = DateTimeOffset.UtcNow; _lastEstimate = estimate; }
             return ok;
         }
     }

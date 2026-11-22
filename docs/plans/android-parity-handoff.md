@@ -37,16 +37,19 @@ Updated 2026-11-22 (after the Fable review). Claude leads the Android work again
    asleep and said not to count on the phone. Then publish per `docs/android-updates.md`: APK and manifest on
    `android-v0.0.11`, the same manifest on `android-latest`, `latest=false` on both.
 2. **Merge the redesign branch** after the release, then compare r1-r6 on real data and on the owner's phone.
-3. Open from the reviews: earlier A3 (redirecting fixture first), A4, A5-A7, S4, S5, S7, S8-S10, T1-T8, P6, M4; the
-   F3 note (drop only the direct parent's listing); ANDROID.5/.6 real-account capture and deep Doze (ANDROID.14);
-   expanded accessibility is optional (ANDROID.13).
+3. Open from the reviews (the rest were fixed or decided on 2026-11-22, see
+   [the earlier review](android-review-49f5663c-c745317f.md#step-6-and-the-remaining-items-2026-11-22)): A3 (a redirecting
+   download in the link fixture first), P6 (needs its own design);
+   ANDROID.5/.6 real-account capture and deep Doze (ANDROID.14); expanded accessibility is optional (ANDROID.13).
 
 ## Ask the owner
 
 - A9-15: on an unmetered 5G plan Android reports the network as not metered, so torrents run there although the
   subtitle says "Peers never use mobile data". Keep the behaviour and reword the subtitle, or require Wi-Fi?
+- A6: a downloaded update stays offered even if the signed feed later points back to an older version (a pulled
+  release). Keep offering it, or withdraw it?
 - The decisions in [the review](android-review-android9.md#what-was-done) made while the owner was away (A9-6, A9-7,
-  A9-15, A9-18, earlier A4).
+  A9-15, A9-18, earlier A4) and in [the earlier review](android-review-49f5663c-c745317f.md#step-6-and-the-remaining-items-2026-11-22) (S4, S5, S7, S8, S10, M4).
 
 ## Remind the owner (after the release)
 

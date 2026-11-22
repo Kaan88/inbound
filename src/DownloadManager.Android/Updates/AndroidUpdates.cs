@@ -46,7 +46,12 @@ internal static partial class AndroidUpdates
                 ((NotificationManager)_app.GetSystemService(Context.NotificationService)!).Cancel(NotificationId);
         };
         var scheduler = (JobScheduler)_app.GetSystemService(Context.JobSchedulerService)!;
-        if (scheduler.GetPendingJob(DailyJobId) is null)
+        // A pending job from an older version with another definition is replaced (review A7).
+        var pending = scheduler.GetPendingJob(DailyJobId);
+        if (pending is null || pending.IntervalMillis != (long)TimeSpan.FromDays(1).TotalMilliseconds ||
+            pending.FlexMillis != (long)TimeSpan.FromHours(2).TotalMilliseconds || !pending.IsPersisted ||
+            pending.NetworkType != NetworkType.Any ||
+            pending.Service?.ClassName != Java.Lang.Class.FromType(typeof(UpdateCheckJob)).Name)
         {
             var info = new JobInfo.Builder(DailyJobId, new ComponentName(_app, Java.Lang.Class.FromType(typeof(UpdateCheckJob))))
                 .SetPeriodic((long)TimeSpan.FromDays(1).TotalMilliseconds, (long)TimeSpan.FromHours(2).TotalMilliseconds)!

@@ -1051,8 +1051,9 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
                 _uploadFilesDone[transfer.Id] = transfer.FilesDone;
                 // A listing being read now may predate the file: it isn't kept (held ones elsewhere stay).
                 _generations[transfer.SiteId] = _generations.GetValueOrDefault(transfer.SiteId) + 1;
-                // Only the upload's folder, what is inside it, and the folders above it (whose counts change) are
-                // read again; paging elsewhere on the site goes on (Fable follow-up to F3).
+                // Only the upload's folder, what is inside it, and its direct parent (whose count of it changes) are
+                // read again; paging elsewhere on the site goes on (Fable follow-up to F3). Folders further up list
+                // the parent's count, which an upload into a child does not change.
                 if (!_listings.TryGetValue(transfer.SiteId, out var held)) continue;
                 var target = SitePaths.Normalize(transfer.RemoteFolder);
                 if (target is null) { _listings.Remove(transfer.SiteId); continue; }
@@ -1066,7 +1067,8 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
             }
         }
 
-        static bool Related(string listed, string target) => Under(listed, target) || Under(target, listed);
+        static bool Related(string listed, string target) => Under(listed, target) || listed == Parent(target);
+        static string? Parent(string path) => path == "/" ? null : path.LastIndexOf('/') is var cut and > 0 ? path[..cut] : "/";
         static bool Under(string path, string folder) => path == folder || folder.Length == 0 || folder == "/" ||
             path.StartsWith(folder.TrimEnd('/') + "/", StringComparison.Ordinal);
     }

@@ -26,6 +26,10 @@ function Invoke-Adb {
     $result
 }
 
+# Only the dedicated test emulator: never the owner's phone, which needs the display baseline first (review T1).
+if ($Serial -notmatch '^emulator-\d+$') { throw 'Refusing a physical device; only the dedicated emulator is allowed.' }
+if (((Invoke-Adb emu avd name) | Select-Object -First 1).Trim() -ne 'inbound33') { throw 'Refusing anything other than the dedicated inbound33 AVD.' }
+if ((Invoke-Adb shell getprop ro.build.version.sdk).Trim() -ne '33') { throw 'Refusing anything other than API 33.' }
 if (Invoke-Adb shell "pm list packages $package" | Where-Object { $_ -eq "package:$package" }) {
     throw 'The probe is already installed. This runner requires a fresh, isolated probe.'
 }

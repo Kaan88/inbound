@@ -68,19 +68,6 @@ public sealed partial class DownloadManagerService
         next.Revision = revision;
     }
 
-    /// <summary>Queue <c>create</c> and <c>delete</c> change the live list; this records them as a save would.</summary>
-    private void NoteQueueAddedLocked(int id)
-    {
-        _queueAddedAt[id] = ++_settings.Revision;
-        _queueRemovedAt.Remove(id);
-    }
-
-    private void NoteQueueRemovedLocked(int id)
-    {
-        _queueRemovedAt[id] = ++_settings.Revision;
-        _queueAddedAt.Remove(id);
-    }
-
     private List<DownloadQueue> MergeQueues(List<QueueDto>? requested, long requestedRevision, int defaultMax)
     {
         List<DownloadQueue> existing;

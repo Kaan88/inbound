@@ -261,3 +261,27 @@ tests were run with rclone 1.76.0 (`INBOUND_RCLONE`), so the end-to-end transfer
 
 Also fixed: the Server protocol test's capability list was missing `sitesDeleteFiles`, `queueUnqueuedPrecondition` and
 `stopUnfinished`, which this range added without updating the test (it failed at HEAD).
+
+## Step 6 and the remaining items, 2026-11-22
+
+Done while the owner was away; Opus did the shared and lifecycle changes itself. Decisions follow the owner's "do what's
+best for the app, note decisions".
+
+| # | Outcome |
+| --- | --- |
+| A5 | Fixed: the keep-alive's crash-guard lease opens when the job run attaches, not when it is scheduled, so a job that never starts can't make an ordinary process death count. A crash loop restarts through an attached run, which still opens the lease. |
+| A7 | Fixed: the daily update job is scheduled again when the pending one has another interval, flex, network, persistence or service. |
+| S4 | Partly fixed: skipping an update version now changes the settings revision, since a client's full save carries that field. Kept: the recent-address list is also carried by a full save but changes with every new download; bumping the revision there would refuse settings saves while downloads are added, and a stale save at worst drops the newest few recent addresses. The other unversioned saves (quota use, schedule run stamps, run arms, the first torrent port) hold Host-owned state that a full save does not take from the client. |
+| S9 | Fixed: the dead `create`/`delete` branches in `QueueActionCoreAsync` and their two revision helpers are removed; create and delete go through the durable paths in `QueuePolicyCommands`. |
+| T1 | Fixed: `run-remote-files-host-probe.ps1` refuses anything but an `emulator-*` serial, the `inbound33` AVD and API 33. |
+| T5, T6 | Already done: `check-apk.py` lists every hook (Fable follow-up), and `.gitignore` has `__pycache__/`. |
+| S5 | Kept: queue create and delete save through the full settings path on purpose (durable admission before a queue can start). The candidate comes from the live settings, which are valid; re-applying unchanged limits is idempotent. |
+| S7 | Kept for now: the rename under `_sync` and the listeners under the refresh gates are short and have no lock cycle (the reviewer checked the order). Moving them needs its own change with tests. |
+| S8, S10 | Kept: the scaffolding is refused unless the probe flag is set; removing it means moving the tests that use it. Recorded for a test-code cleanup. |
+| M4 | Kept: stopping rclone outside the gate would let a new rclone start while the old one may still write its config. With the phone's 3-minute idle delay a browse at that moment is rare, and it then costs at most the stop grace plus a cold start. |
+| F3 note | Fixed: an upload drops the held listings of its folder, the folders under it and its direct parent only; folders further up keep theirs (ANDROID.9 review follow-up). |
+| P6 | Open: needs its own design (drop the cached form when a connection fails), see "Host speed fixes". |
+| A3 | Open: needs a redirecting download in the link fixture first, on the emulator. |
+| A4 | Kept (owner's earlier decision, unchanged). |
+| A6 | Owner decision: whether a downloaded update stays offered after the signed feed points back to an older version. Kept as is until the owner answers. |
+| T2-T4, T7, T8 | Kept: test tooling; T2 is the reason real-data and phone checks are now required. Clean up with the one-off runners after the redesign merge. |

@@ -1985,33 +1985,6 @@ public sealed partial class DownloadManagerService
         lock (_sync)
         {
             var queue = _settings.Queues.FirstOrDefault(q => q.Id == request.QueueId);
-            if (request.Action.Equals("create", StringComparison.OrdinalIgnoreCase))
-            {
-                if (!ValidQueuePolicy(request))
-                    return new SettingsResult { Ok = false, Error = "Invalid queue name, concurrency or quota policy.", Settings = MapLiveSettings(_settings) };
-                var usedIds = _settings.Queues.Select(q => q.Id).ToHashSet();
-                var nextId = 0;
-                while (usedIds.Contains(nextId) && nextId < int.MaxValue) nextId++;
-                if (usedIds.Contains(nextId))
-                    return new SettingsResult { Ok = false, Error = "No queue identifiers are available.", Settings = MapLiveSettings(_settings) };
-                queue = new DownloadQueue
-                {
-                    Id = nextId, Name = request.Name!.Trim(), IsRunning = false,
-                    RequireUnmeteredNetwork = request.RequireUnmeteredNetwork ?? false,
-                    RequireCharging = request.RequireCharging ?? false,
-                    RequireBatterySaverOff = request.RequireBatterySaverOff ?? false,
-                    SpeedLimitBytesPerSecond = request.SpeedLimitBytesPerSecond ?? 0,
-                    NotifyWhenFinished = request.NotifyWhenFinished ?? false,
-                    Order = _settings.Queues.Count,
-                    MaxConcurrentDownloads = request.MaxConcurrentDownloads,
-                    QuotaEnabled = request.QuotaEnabled ?? false,
-                    QuotaBytes = request.QuotaBytes ?? 200L * 1024 * 1024,
-                    QuotaWindowHours = request.QuotaWindowHours ?? 5,
-                };
-                // A new list, not a change to the one a save may be writing out (audit 2 M19).
-                _settings.Queues = new List<DownloadQueue>(_settings.Queues) { queue };
-                NoteQueueAddedLocked(queue.Id);
-            }
             if (queue is null)
             {
                 return new SettingsResult { Ok = false, Error = "Queue not found.", Settings = MapLiveSettings(_settings) };
@@ -2019,20 +1992,6 @@ public sealed partial class DownloadManagerService
 
             switch (request.Action.ToLowerInvariant())
             {
-                case "create":
-                    break;
-                case "delete":
-                    if (queue.Id == _settings.DefaultQueueId)
-                        error = "The default queue cannot be deleted.";
-                    else if (_jobs.Values.Any(r => r.Job.QueueId == queue.Id) ||
-                             _settings.Schedules.Any(s => s.QueueId == queue.Id))
-                        error = "Move this queue's downloads and schedules before deleting it. No downloads were removed.";
-                    else
-                    {
-                        _settings.Queues = _settings.Queues.Where(item => item != queue).ToList();
-                        NoteQueueRemovedLocked(queue.Id);
-                    }
-                    break;
                 case "moveup":
                 case "movedown":
                     var ordered = _settings.Queues.OrderBy(q => q.Order).ThenBy(q => q.Id).ToList();
@@ -2994,7 +2953,12 @@ public sealed partial class DownloadManagerService
             return new SettingsResult { Ok = false, Error = "Version is required." };
         }
 
-        _settings.SkippedUpdateVersion = version.Trim();
+        // A client's later compare-and-swap save carries this field, so it changes the revision (review S4).
+        lock (_sync)
+        {
+            _settings.SkippedUpdateVersion = version.Trim();
+            _settings.Revision++;
+        }
         await _settingsStore.SaveAsync(_settings, cancellationToken).ConfigureAwait(false);
         SettingsChanged?.Invoke(this, _settings);
         UpdateDeferred?.Invoke(this, _settings.SkippedUpdateVersion);
