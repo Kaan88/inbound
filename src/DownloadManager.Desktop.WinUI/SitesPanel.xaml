@@ -18,8 +18,9 @@
             </Grid.RowDefinitions>
 
             <!-- The header: server icon, name, kind chip, "Not encrypted" chip. -->
-            <StackPanel Orientation="Horizontal" Spacing="8" Padding="12,10,12,4" VerticalAlignment="Center">
-                <FontIcon Glyph="&#xE839;" FontSize="14" VerticalAlignment="Center" />
+            <!-- SITES.B2: a fixed height, so a card whose header holds the left pane's source picker stays level with the other. -->
+            <StackPanel x:Name="HeaderRow" Orientation="Horizontal" Spacing="8" Padding="12,4,12,4" MinHeight="40" VerticalAlignment="Center">
+                <FontIcon x:Name="HeaderIcon" Glyph="&#xE839;" FontSize="14" VerticalAlignment="Center" />
                 <TextBlock x:Name="SiteNameText" VerticalAlignment="Center" FontWeight="SemiBold" FontSize="12" MaxWidth="260"
                            TextTrimming="CharacterEllipsis" Foreground="{ThemeResource SystemControlForegroundBaseHighBrush}" />
                 <Border x:Name="KindChip" Visibility="Collapsed" CornerRadius="9" Padding="8,1" BorderThickness="1"

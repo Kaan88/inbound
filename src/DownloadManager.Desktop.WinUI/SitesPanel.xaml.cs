@@ -96,6 +96,27 @@ public sealed partial class SitesPanel : UserControl
     private readonly List<SiteItemRow> _rows = [];
     private readonly ObservableCollection<SiteItemRow> _view = [];
     private SiteDto? _site;
+
+    /// <summary>
+    /// SITES.B2: the left pane's source picker sits in this card's header, in place of its icon and name, so the two
+    /// cards of Two panes start level, as in the mockup. Null takes it out and gives the header its icon and name back.
+    /// </summary>
+    public void ShowSourceChoice(FrameworkElement? choice)
+    {
+        var shown = choice is not null;
+        HeaderIcon.Visibility = shown ? Visibility.Collapsed : Visibility.Visible;
+        SiteNameText.Visibility = shown ? Visibility.Collapsed : Visibility.Visible;
+        if (choice is null)
+        {
+            foreach (var old in HeaderRow.Children.OfType<ComboBox>().ToList()) HeaderRow.Children.Remove(old);
+            return;
+        }
+
+        if (ReferenceEquals(choice.Parent, HeaderRow)) return;
+        // One parent only (SITES.B1): out of the other card first.
+        (choice.Parent as Panel)?.Children.Remove(choice);
+        HeaderRow.Children.Insert(0, choice);
+    }
     private string _path = SitesBrowseRules.Root;
     private int _total;
     private string _sortKey = SitesBrowseRules.SortName;

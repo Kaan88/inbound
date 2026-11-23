@@ -189,10 +189,23 @@ public sealed partial class MainWindow
         if (_localPane is { } local) local.Visibility = shown && _leftSiteId is null ? Visibility.Visible : Visibility.Collapsed;
         if (_leftRemote is { } leftRemote) leftRemote.Visibility = shown && _leftSiteId is not null ? Visibility.Visible : Visibility.Collapsed;
         if (_leftSource is { } leftSource) leftSource.Visibility = shown ? Visibility.Visible : Visibility.Collapsed;
+        PlaceLeftSource();
         if (_paneArrows is { } arrows) arrows.Visibility = shown ? Visibility.Visible : Visibility.Collapsed;
         panel.ServerOnly = !shown;
         if (shown && panel.Site is { } site) FollowSite(site, panel.Path);
         UpdateTwoPanesArrows();
+    }
+
+    /// <summary>SITES.B2: the picker goes in the header of the left card that is shown; the other card has its own name back.</summary>
+    private void PlaceLeftSource()
+    {
+        if (_leftSource is not { } box) return;
+        var remote = _leftSiteId is not null && _leftRemote is not null;
+        // Out of the card it leaves first, so it is never in two (SITES.B1).
+        if (remote) _localPane?.ShowSourceChoice(null);
+        else _leftRemote?.ShowSourceChoice(null);
+        if (remote) _leftRemote!.ShowSourceChoice(box);
+        else _localPane?.ShowSourceChoice(box);
     }
 
     private void EnsureTwoPanes()
@@ -217,7 +230,8 @@ public sealed partial class MainWindow
         grid.Children.Add(local);
         _localPane = local;
 
-        _leftSource = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch, Margin = new Thickness(0, 0, 0, 6) };
+        // SITES.B2: shown in the left card's header (PlaceLeftSource), not above it, so both cards start level.
+        _leftSource = new ComboBox { MinWidth = 200, MaxWidth = 320, FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
         AutomationProperties.SetName(_leftSource, "Left pane shows");
         ToolTipService.SetToolTip(_leftSource, "What the left pane shows: a folder of this PC or any remote");
         _leftSource.SelectionChanged += (_, _) => OnLeftSourceChanged();
@@ -225,8 +239,6 @@ public sealed partial class MainWindow
         {
             if (_leftSourcesPending) DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, RefreshLeftSources);
         };
-        Grid.SetColumn(_leftSource, 0);
-        grid.Children.Add(_leftSource);
         RefreshLeftSources();
 
         _uploadArrow = GutterButton("", "Upload to the server", "Upload the items selected on this PC into the server folder on the right", "InboundUploadBrush");
@@ -251,7 +263,7 @@ public sealed partial class MainWindow
             UpdateTwoPanesArrows();
         };
         // Beside the first rows, as in the mockup (below the cards' header, path row and column titles).
-        _paneArrows = new StackPanel { Spacing = 6, Margin = new Thickness(8, 100, 8, 0), VerticalAlignment = VerticalAlignment.Top };
+        _paneArrows = new StackPanel { Spacing = 6, Margin = new Thickness(8, 110, 8, 0), VerticalAlignment = VerticalAlignment.Top };
         _paneArrows.Children.Add(_uploadArrow);
         _paneArrows.Children.Add(_downloadArrow);
         _paneArrows.Children.Add(_linkToggle);

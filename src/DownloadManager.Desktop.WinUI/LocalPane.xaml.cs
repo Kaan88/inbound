@@ -67,6 +67,27 @@ public sealed partial class LocalPane : UserControl
     // SITES.11 R2c: drag and drop, built on Windows only (PaneDrag.cs).
     partial void WireDrag();
 
+    /// <summary>
+    /// SITES.B2: the left pane's source picker sits in this card's header, in place of its icon and name, so the two
+    /// cards of Two panes start level, as in the mockup. Null takes it out and gives the header its icon and name back.
+    /// </summary>
+    public void ShowSourceChoice(FrameworkElement? choice)
+    {
+        var shown = choice is not null;
+        HeaderIcon.Visibility = shown ? Visibility.Collapsed : Visibility.Visible;
+        HeaderTitle.Visibility = shown ? Visibility.Collapsed : Visibility.Visible;
+        if (choice is null)
+        {
+            foreach (var old in HeaderRow.Children.OfType<ComboBox>().ToList()) HeaderRow.Children.Remove(old);
+            return;
+        }
+
+        if (ReferenceEquals(choice.Parent, HeaderRow)) return;
+        // One parent only (SITES.B1): out of the other card first.
+        (choice.Parent as Panel)?.Children.Remove(choice);
+        HeaderRow.Children.Insert(0, choice);
+    }
+
     public LocalPane()
     {
         InitializeComponent();
