@@ -47,7 +47,7 @@ public sealed class ServerUpdateCheck : IDisposable
         {
             Timeout = TimeSpan.FromSeconds(30),
         };
-        _timer = new Timer(_ => _ = CheckAsync(), null, Timeout.Infinite, Timeout.Infinite);
+        _timer = new Timer(_ => _ = CheckInBackgroundAsync(), null, Timeout.Infinite, Timeout.Infinite);
     }
 
     /// <summary>False when <c>INBOUND_UPDATE_CHECK=false</c>: nothing is checked and nothing is recorded.</summary>
@@ -62,7 +62,7 @@ public sealed class ServerUpdateCheck : IDisposable
     {
         if (!Enabled) return;
         _timer.Change(Interval, Interval);
-        _ = CheckAsync();
+        _ = CheckInBackgroundAsync();
     }
 
     /// <summary>The one check: fetch and verify the Docker manifest, then record its version and notes. Never installs.</summary>
@@ -90,8 +90,8 @@ public sealed class ServerUpdateCheck : IDisposable
                 {
                     var json = response.Content.Headers.ContentLength is > MaxManifestBytes
                         ? null
-                        : await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-                    if (json is null || json.Length > MaxManifestBytes)
+                        : await ReadBoundedAsync(response.Content, cancellationToken).ConfigureAwait(false);
+                    if (json is null)
                     {
                         _log("Docker update check: the manifest is too large.");
                     }
@@ -125,6 +125,41 @@ public sealed class ServerUpdateCheck : IDisposable
         finally
         {
             lock (_sync) _checking = false;
+        }
+    }
+
+    /// <summary>The body as text, or null when it is longer than <see cref="MaxManifestBytes"/> (at most one byte more is read).</summary>
+    private static async Task<string?> ReadBoundedAsync(HttpContent content, CancellationToken cancellationToken)
+    {
+        await using var stream = await content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        using var buffer = new MemoryStream();
+        var chunk = new byte[16 * 1024];
+        while (true)
+        {
+            var read = await stream.ReadAsync(chunk, cancellationToken).ConfigureAwait(false);
+            if (read == 0) break;
+            if (buffer.Length + read > MaxManifestBytes) return null;
+            buffer.Write(chunk, 0, read);
+        }
+
+        return System.Text.Encoding.UTF8.GetString(buffer.GetBuffer(), 0, (int)buffer.Length);
+    }
+
+    /// <summary>The timer's and Start's call: it returns at once when disposed and never leaves a fault unobserved.</summary>
+    private async Task CheckInBackgroundAsync()
+    {
+        if (Volatile.Read(ref _disposed)) return;
+        try
+        {
+            await CheckAsync().ConfigureAwait(false);
+        }
+        catch (ObjectDisposedException)
+        {
+            // Disposed while the check was running.
+        }
+        catch (Exception ex)
+        {
+            _log($"Docker update check failed: {ex.Message}");
         }
     }
 

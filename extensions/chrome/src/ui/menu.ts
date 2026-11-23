@@ -35,6 +35,8 @@ export interface MenuPlacementInput {
   viewport: { width: number; height: number };
   /** A right-click's point, or the row's own start: the menu goes under it when there is room, above it otherwise. */
   at?: { x: number; y: number };
+  /** With `at`: the line the menu's bottom sits on when it flips upward (a keyboard-opened row's top edge); default `at.y`. */
+  above?: number;
   /** The element the menu came from: under it, or above it with `upward` (the status bar's switcher). */
   anchor?: { left: number; top: number; bottom: number };
   upward?: boolean;
@@ -45,13 +47,13 @@ export interface MenuPlacementInput {
  * menu fits below, upwards otherwise, then kept inside on both axes. A menu taller than the popup is capped there and
  * scrolls.
  */
-export function placeMenu({ width, height, viewport, at, anchor, upward = false }: MenuPlacementInput): MenuPlacement {
+export function placeMenu({ width, height, viewport, at, above, anchor, upward = false }: MenuPlacementInput): MenuPlacement {
   // The popup's own height is all the menu may use: it is never made taller for the menu.
   const room = Math.max(0, viewport.height - MENU_EDGE * 2);
   const tall = Math.min(Math.max(height, 0), room);
   const lowest = Math.max(MENU_EDGE, viewport.height - MENU_EDGE - tall);
   const down = at ? at.y : anchor ? anchor.bottom + MENU_GAP : MENU_EDGE;
-  const up = at ? at.y - tall : anchor ? anchor.top - MENU_GAP - tall : MENU_EDGE;
+  const up = at ? (above ?? at.y) - tall : anchor ? anchor.top - MENU_GAP - tall : MENU_EDGE;
   // Below when the whole menu fits there, above when it doesn't; a menu that fits nowhere is put at the top and scrolls.
   const top = upward || down + tall > viewport.height - MENU_EDGE ? up : down;
   const wanted = at ? at.x : anchor ? anchor.left : MENU_EDGE;
@@ -78,7 +80,7 @@ export function menuOpen(): boolean {
 /**
  * Opens a menu under (or above) the anchor, or at a point: a right-click's position (EXT.R11), kept inside the popup.
  */
-export function openMenu(anchor: HTMLElement, items: MenuItem[], options: { upward?: boolean; at?: { x: number; y: number } } = {}): void {
+export function openMenu(anchor: HTMLElement, items: MenuItem[], options: { upward?: boolean; at?: { x: number; y: number }; above?: number } = {}): void {
   closeMenu();
   const menu = document.createElement("div");
   menu.className = "menu popup-menu";
@@ -118,6 +120,7 @@ export function openMenu(anchor: HTMLElement, items: MenuItem[], options: { upwa
       height: wanted.height,
       viewport: { width: window.innerWidth, height: window.innerHeight },
       at: options.at,
+      above: options.above,
       anchor: { left: rect.left, top: rect.top, bottom: rect.bottom },
       upward: options.upward,
     });

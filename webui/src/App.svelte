@@ -35,7 +35,7 @@
   import UpdateAvailableDialog from './components/UpdateAvailableDialog.svelte';
   import { between, decideSeen, displayDate, hadWebState, recordSeen, filterChangelog, findVersion, readChangelog, type ChangelogVersion, type WhatsNewView } from './lib/whatsNew';
   import { hostKindOf } from './lib/hostKind';
-  import { filterUpdateNotes, noticeShown, noticeWords, type UpdateKind } from './lib/updateNotice';
+  import { dismissFailure, filterUpdateNotes, noticeShown, noticeWords, type UpdateKind } from './lib/updateNotice';
   import type { Job } from './lib/types';
   import { chipCompact, extraViewShows, torrentExtraViews, torrentFilters, waitingForChoice, waitingForChoiceText } from './lib/torrentList';
   import { dragMayHoldTorrents, intake, intakeStep, isEditableTarget, pageTakes, uploadTorrent } from './lib/torrentIntake';
@@ -275,16 +275,25 @@
   const noticeCurrent = $derived(store.model.hello?.hostVersion ?? null);
   const noticeLatest = $derived(store.model.status?.latestVersion ?? null);
   const noticeKind = $derived<UpdateKind>(hostKindOf(store.model.hello?.hostKind));
+  // The server refused to keep a dismissal: the notice stays hidden for this browser session so its buttons are never dead.
+  let noticeHiddenHere = $state(false);
   const noticeVisible = $derived(
-    store.connection === 'open' &&
+    !noticeHiddenHere &&
+      store.connection === 'open' &&
       noticeShown(noticeCurrent, noticeLatest, store.model.status?.updateNoticeHiddenUntil, store.model.status?.updateNoticeSkippedVersion, Date.now()),
   );
 
   async function dismissNotice(action: 'notNow' | 'skip') {
     if (store.connection !== 'open') return;
     try {
-      await store.ask('update.dismiss', { action });
+      const answer = await store.ask<{ ok?: boolean; message?: string | null }>('update.dismiss', { action });
+      const failure = dismissFailure(answer);
+      if (failure) {
+        noticeHiddenHere = true;
+        store.toast(failure, 'error');
+      }
     } catch {
+      noticeHiddenHere = true;
       store.toast("The server couldn't hide the update notice.", 'error');
     }
   }
