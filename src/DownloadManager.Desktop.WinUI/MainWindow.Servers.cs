@@ -106,6 +106,11 @@ public sealed partial class MainWindow
             // This PC's latest is also what a shown server without a check of its own is held to.
             if (connection == _local || connection == _connection) UpdateStatusText();
         });
+        // UPD.D1 addendum: this PC's Host found another newest Docker image version; the switcher menus mark saved servers by it.
+        connection.DockerLatestChanged += latest => DispatcherQueue.TryEnqueue(() =>
+        {
+            if (connection == _local && _localStatus is { } local) local.DockerLatestVersion = latest;
+        });
         // UI.R41, review: an extension reached this PC's Host for the first time, so the hint goes now.
         connection.ExtensionsSeenChanged += seen => DispatcherQueue.TryEnqueue(() =>
         {
@@ -116,6 +121,14 @@ public sealed partial class MainWindow
             UpdateExtensionHint(false);
             // UI.B30: an open Get the Browser Extension dialog or Options shows it too.
             RefreshExtensionLinkPanels();
+        });
+        // UPD.D1: the shown server's notice dismiss state changed (dismissed here, or in a web session of the same server).
+        connection.UpdateNoticeStateChanged += (hiddenUntil, skippedVersion) => DispatcherQueue.TryEnqueue(() =>
+        {
+            if (connection != _connection || _status is not { } shown) return;
+            shown.UpdateNoticeHiddenUntil = hiddenUntil;
+            shown.UpdateNoticeSkippedVersion = skippedVersion;
+            UpdateServerNotice();
         });
         // Only this PC's Host raises it (HostConnection never does for a server).
         connection.HostExiting += () => DispatcherQueue.TryEnqueue(() =>
@@ -234,14 +247,35 @@ public sealed partial class MainWindow
 
     private IReadOnlyList<ServerChoice> ServerChoices() => ServerSwitch.Choices(_servers.Load(), _connection.Target.Id);
 
+    // UPD.D1 addendum: the version last written to servers.json for each saved server, so a snapshot writes it only on a change.
+    private readonly Dictionary<string, string> _notedServerVersions = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// UPD.D1 addendum: remembers the version the shown saved server runs, so the switcher menus can mark it (or note
+    /// another one) as having an update while it is not the shown one. Written only when it changed.
+    /// </summary>
+    private void NoteShownServerVersion(string? version)
+    {
+        if (!_connection.IsRemote || _connection.Target.Id is not { } id || string.IsNullOrWhiteSpace(version)) return;
+        if (_notedServerVersions.TryGetValue(id, out var known) && known == version) return;
+        _notedServerVersions[id] = version;
+        try { _servers.NoteVersion(id, version); }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException or UnauthorizedAccessException) { /* a mark, not data worth a dialog */ }
+    }
+
     /// <summary>
     /// UI.R37: the shown server's name in the switchers' menus, with "0.6.3 (not latest)" after it when it is known to be
     /// older than the latest. Only the shown one's version is known.
     /// </summary>
     private string ServerMenuText(ServerChoice choice)
-        => choice.IsCurrent && _connection.IsRemote && _graphConnected && VersionStatus.ServerNote(_status?.HostVersion, ShownServerLatest) is { } note
-            ? $"{choice.Name} · {note}"
+    {
+        if (choice.IsCurrent && _connection.IsRemote && _graphConnected && VersionStatus.ServerNote(_status?.HostVersion, ShownServerLatest) is { } note)
+            return $"{choice.Name} · {note}";
+        // UPD.D1 addendum: a saved Docker server that is not the shown one, last seen on a version behind the Docker latest.
+        return !choice.IsCurrent && VersionStatus.SavedServerNote(choice.HostKind, choice.LastVersion, _localStatus?.DockerLatestVersion) is { } saved
+            ? $"{choice.Name} · {saved}"
             : choice.Name;
+    }
 
     // UI.R37: the shown server's note the Tasks > Show Downloads Of submenu was last filled with. That submenu has no
     // Opening event of its own, so it is filled again when the note changes (snapshot, connection, latest version).
@@ -257,7 +291,8 @@ public sealed partial class MainWindow
 
     /// <summary>UI.R37: the latest version the shown server is held to (<see cref="VersionStatus.LatestFor"/>).</summary>
     private string? ShownServerLatest
-        => VersionStatus.LatestFor(_status?.LatestVersion, _connection.Hello?.HostKind, _localStatus?.LatestVersion, _local.Hello?.HostKind);
+        => VersionStatus.LatestFor(_status?.LatestVersion, _connection.Hello?.HostKind, _localStatus?.LatestVersion, _local.Hello?.HostKind,
+            _localStatus?.DockerLatestVersion);
 
     /// <summary>
     /// The connection words at the right of the status bar (UI.R37): <paramref name="text"/>, then a link to the update

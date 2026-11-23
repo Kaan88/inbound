@@ -178,6 +178,8 @@ public sealed partial class HostCommandDispatcher
         _service.JobChanged += OnJobChanged;
         _service.UpdateProgressChanged += OnUpdateProgressChanged;
         _service.LatestVersionChanged += OnLatestVersionChanged;
+        _service.UpdateNoticeChanged += OnUpdateNoticeChanged;
+        _service.DockerLatestVersionChanged += OnDockerLatestChanged;
         _service.MeteredWaitChanged += OnMeteredWaitChanged;
         _service.SettingsChanged += OnSettingsChanged;
         if (_remote is not null) _remote.Changed += OnRemoteChanged;
@@ -189,6 +191,8 @@ public sealed partial class HostCommandDispatcher
         _service.JobChanged -= OnJobChanged;
         _service.UpdateProgressChanged -= OnUpdateProgressChanged;
         _service.LatestVersionChanged -= OnLatestVersionChanged;
+        _service.UpdateNoticeChanged -= OnUpdateNoticeChanged;
+        _service.DockerLatestVersionChanged -= OnDockerLatestChanged;
         _service.MeteredWaitChanged -= OnMeteredWaitChanged;
         _service.SettingsChanged -= OnSettingsChanged;
         if (_remote is not null) _remote.Changed -= OnRemoteChanged;
@@ -637,6 +641,19 @@ public sealed partial class HostCommandDispatcher
                     await Reply(client, message, MessageTypes.SettingsResult,
                         await _service.DeferUpdateAsync(deferRequest.Version, cancellationToken)
                             .ConfigureAwait(false))
+                        .ConfigureAwait(false);
+                    break;
+
+                // UPD.D1: dismissing the server update notice is not the install updater's to gate; the headless server
+                // shows the notice though it never updates itself, and an admin session (never the extension) dismisses it.
+                case MessageTypes.UpdateDismiss:
+                    await Reply(client, message, MessageTypes.HostActionResult,
+                        _service.DismissUpdateNotice(message.GetPayload<UpdateDismissRequest>().Action))
+                        .ConfigureAwait(false);
+                    break;
+
+                case MessageTypes.UpdateNotes:
+                    await Reply(client, message, MessageTypes.UpdateNotes, _service.ServerUpdateNotes())
                         .ConfigureAwait(false);
                     break;
 
@@ -1296,6 +1313,30 @@ public sealed partial class HostCommandDispatcher
         => Broadcast(IpcMessage.Create(MessageTypes.NetworkWait, new NetworkWaitDto { Waiting = waiting }));
 
     private void OnLatestVersionChanged(object? sender, string? version) => BroadcastLatestVersion(version);
+
+    private void OnUpdateNoticeChanged(object? sender, UpdateNoticeState state) => BroadcastUpdateNoticeState(state);
+
+    private void OnDockerLatestChanged(object? sender, string? version) => BroadcastDockerLatest(version);
+
+    /// <summary>
+    /// UPD.D1 addendum: every session hears the newest Docker image version this Host's update check found
+    /// (<see cref="HostStatusDto.DockerLatestVersion"/>), so a window marks a saved Docker server that is behind it.
+    /// A paired browser extension never hears it (<see cref="NativeBridgePolicy"/>).
+    /// </summary>
+    public void BroadcastDockerLatest(string? version)
+        => Broadcast(IpcMessage.Create(MessageTypes.UpdateDockerLatest, new UpdateLatestDto { LatestVersion = version }));
+
+    /// <summary>
+    /// UPD.D1: every session, a web one and a paired desktop app too, hears the notice's dismiss state, which snapshots also
+    /// carry (<see cref="HostStatusDto.UpdateNoticeHiddenUntil"/>, <see cref="HostStatusDto.UpdateNoticeSkippedVersion"/>).
+    /// A paired browser extension never hears it (<see cref="NativeBridgePolicy"/>).
+    /// </summary>
+    public void BroadcastUpdateNoticeState(UpdateNoticeState state)
+        => Broadcast(IpcMessage.Create(MessageTypes.UpdateNoticeState, new UpdateNoticeStateDto
+        {
+            HiddenUntil = state.HiddenUntil,
+            SkippedVersion = state.SkippedVersion,
+        }));
 
     /// <summary>
     /// UI.R37: every session, a web one too, hears the newest version the update check found, which snapshots also carry

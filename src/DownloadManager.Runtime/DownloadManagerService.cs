@@ -36,6 +36,7 @@ public sealed partial class DownloadManagerService
     private readonly ISleepPrevention _sleepPrevention;
     private readonly IRemoteLinkBroker? _linkBroker;
     private readonly IRemoteSecretMatcher? _linkSecrets;
+    private readonly UpdateNoticeStore _updateNoticeStore;
     private static readonly HttpClient UpdateClient = new() { Timeout = TimeSpan.FromSeconds(30) };
     private const int MaxManifestBytes = 1024 * 1024;
     internal static string WindowsPowerShellPath => Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe");
@@ -56,6 +57,23 @@ public sealed partial class DownloadManagerService
     // The channel and manifest the value came from: after either changes in settings it says nothing until a new check.
     private string? _latestChannel;
     private string? _latestManifestUrl;
+    // UPD.D1: the newest Docker image version the server's own check found (manifest-docker.json); null on the desktop
+    // Host, whose own check fills _latestVersion instead.
+    private string? _serverLatestVersion;
+    // UPD.D1: the available version's changelog lines from the signed Docker manifest; null when there are none.
+    private List<ChangelogItem>? _serverUpdateNotes;
+    // UPD.D1: the server update notice's dismiss state, kept on the server per server.
+    private DateTimeOffset? _noticeHiddenUntil;
+    private string? _noticeSkippedVersion;
+    // UPD.D1 addendum: the newest Docker image version the desktop Host's check found (manifest-docker.json); null on a
+    // Host that doesn't check it (the headless server reads it through ServerUpdateCheck and records _serverLatestVersion).
+    private string? _dockerLatestVersion;
+
+    /// <summary>UPD.D1: raised with the new state when the server update notice's dismiss state changes.</summary>
+    public event EventHandler<UpdateNoticeState>? UpdateNoticeChanged;
+
+    /// <summary>UPD.D1 addendum: raised when the desktop Host's check found another newest Docker image version.</summary>
+    public event EventHandler<string?>? DockerLatestVersionChanged;
 
     /// <summary>
     /// UI.R37: the newest version the last successful update check found on this Host's own channel, while it runs; null
@@ -68,12 +86,14 @@ public sealed partial class DownloadManagerService
     }
 
     private string? CurrentLatestVersionLocked()
-        => _latestVersion is not null &&
-           !string.IsNullOrWhiteSpace(_settings.UpdateManifestUrl) && !string.IsNullOrWhiteSpace(_settings.UpdatePublicKey) &&
-           string.Equals(_latestChannel, _settings.UpdateChannel, StringComparison.OrdinalIgnoreCase) &&
-           string.Equals(_latestManifestUrl, _settings.UpdateManifestUrl, StringComparison.Ordinal)
-            ? _latestVersion
-            : null;
+        => _serverLatestVersion is not null
+            ? _serverLatestVersion
+            : _latestVersion is not null &&
+              !string.IsNullOrWhiteSpace(_settings.UpdateManifestUrl) && !string.IsNullOrWhiteSpace(_settings.UpdatePublicKey) &&
+              string.Equals(_latestChannel, _settings.UpdateChannel, StringComparison.OrdinalIgnoreCase) &&
+              string.Equals(_latestManifestUrl, _settings.UpdateManifestUrl, StringComparison.Ordinal)
+                ? _latestVersion
+                : null;
 
     /// <summary>Records what a check found on the current channel and manifest; null when it found that none is known.</summary>
     private void NoteLatestVersion(string? version)
@@ -100,6 +120,133 @@ public sealed partial class DownloadManagerService
             _latestAnnounced = current;
         }
         LatestVersionChanged?.Invoke(this, current);
+    }
+
+    /// <summary>
+    /// UPD.D1: records what the server's own check found: the newest Docker image version and its changelog lines from the
+    /// signed manifest. Never called on the desktop Host, which has its own install check. Announces the change as
+    /// <see cref="LatestVersionChanged"/> does, so the same <c>update.latest</c> reaches every session.
+    /// </summary>
+    public void NoteServerUpdate(string? version, IReadOnlyList<ChangelogItem>? notes)
+    {
+        lock (_sync)
+        {
+            _serverLatestVersion = version;
+            _serverUpdateNotes = notes is null ? null : new List<ChangelogItem>(notes);
+        }
+        AnnounceLatestVersion();
+    }
+
+    /// <summary>UPD.D1: the server update notice's dismiss state, kept on the server per server.</summary>
+    public UpdateNoticeState UpdateNotice()
+    {
+        lock (_sync) return new UpdateNoticeState(_noticeHiddenUntil, _noticeSkippedVersion);
+    }
+
+    /// <summary>
+    /// UPD.D1 addendum: the newest Docker image version the desktop Host's own check found, while updates are on (a Host
+    /// with no manifest address or key knows none, as for <see cref="LatestVersion"/>). Null before one.
+    /// </summary>
+    public string? DockerLatestVersion
+    {
+        get { lock (_sync) return CurrentDockerLatestLocked(); }
+    }
+
+    private string? CurrentDockerLatestLocked()
+        => !string.IsNullOrWhiteSpace(_settings.UpdateManifestUrl) && !string.IsNullOrWhiteSpace(_settings.UpdatePublicKey)
+            ? _dockerLatestVersion
+            : null;
+
+    private string? _dockerAnnounced;
+
+    /// <summary>
+    /// UPD.D1 addendum: records the newest Docker image version the desktop Host's check found, and announces a change
+    /// once. Called from the same scheduled check that reads this Host's own manifest, so no extra timer runs.
+    /// </summary>
+    public void NoteDockerLatest(string? version)
+    {
+        lock (_sync) _dockerLatestVersion = version;
+        AnnounceDockerLatest();
+    }
+
+    private void AnnounceDockerLatest()
+    {
+        string? current;
+        lock (_sync)
+        {
+            current = CurrentDockerLatestLocked();
+            if (string.Equals(current, _dockerAnnounced, StringComparison.OrdinalIgnoreCase)) return;
+            _dockerAnnounced = current;
+        }
+        DockerLatestVersionChanged?.Invoke(this, current);
+    }
+
+    /// <summary>
+    /// UPD.D1 addendum: whether the desktop Host's own update is waiting, or the server's notice is showing (neither
+    /// hidden for the day nor skipped). The single boolean a paired extension reads in place of the notice's details.
+    /// </summary>
+    public bool UpdateWaiting()
+    {
+        lock (_sync) return UpdateWaitingLocked();
+    }
+
+    private bool UpdateWaitingLocked()
+    {
+        var host = Protocol.HostVersion;
+        var latest = CurrentLatestVersionLocked();
+        if (string.IsNullOrWhiteSpace(host) || string.IsNullOrWhiteSpace(latest)) return false;
+        if (Changelog.Compare(latest, host) is not > 0) return false;
+        if (_serverLatestVersion is not null)
+        {
+            // Server: the notice shows only while neither hidden for the day nor skipped for this version.
+            return UpdateNoticeState.ShouldShow(host, latest, new UpdateNoticeState(_noticeHiddenUntil, _noticeSkippedVersion), _timeProvider.GetUtcNow());
+        }
+        // Desktop Host: its own update waits while it is not the version the user skipped.
+        return !string.Equals(latest, _settings.SkippedUpdateVersion, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>UPD.D1: the server's available version and its changelog lines, for the update dialog.</summary>
+    public ServerUpdateNotesResult ServerUpdateNotes()
+    {
+        lock (_sync) return new ServerUpdateNotesResult
+        {
+            AvailableVersion = _serverLatestVersion,
+            Notes = _serverUpdateNotes is null ? null : new List<ChangelogItem>(_serverUpdateNotes),
+            ReleaseDate = _serverLatestVersion is null ? null : Changelog.Find(Changelog.Embedded, _serverLatestVersion)?.Date,
+        };
+    }
+
+    /// <summary>
+    /// UPD.D1: dismisses the server update notice: "Not now" (and ×) for a day, "Skip this version" until a newer one. The
+    /// state is kept on the server per server and announced to every admin session.
+    /// </summary>
+    public HostActionResult DismissUpdateNotice(string action)
+    {
+        var now = _timeProvider.GetUtcNow();
+        string? latest;
+        UpdateNoticeState current;
+        lock (_sync)
+        {
+            latest = CurrentLatestVersionLocked();
+            current = new UpdateNoticeState(_noticeHiddenUntil, _noticeSkippedVersion);
+        }
+
+        if (action == UpdateDismissActions.Skip && string.IsNullOrWhiteSpace(latest))
+            return new HostActionResult { Ok = false, Message = "No update is known to skip." };
+
+        var next = UpdateNoticeState.Dismiss(action, latest, current, now);
+        if (next is null)
+            return new HostActionResult { Ok = false, Message = "Unknown dismiss action." };
+
+        lock (_sync)
+        {
+            _noticeHiddenUntil = next.HiddenUntil;
+            _noticeSkippedVersion = next.SkippedVersion;
+        }
+
+        _updateNoticeStore.Save(next);
+        UpdateNoticeChanged?.Invoke(this, next);
+        return new HostActionResult { Ok = true };
     }
     private readonly object _sync = new();
     private readonly List<string> _orphanPartFiles = new();
@@ -135,6 +282,7 @@ public sealed partial class DownloadManagerService
         ITorrentDownloadEngine? torrentEngine = null)
     {
         _paths = paths;
+        _updateNoticeStore = new UpdateNoticeStore(paths.Root, log);
         _jobStore = jobStore;
         _checkpointStore = checkpointStore;
         _settingsStore = settingsStore;
@@ -223,6 +371,13 @@ public sealed partial class DownloadManagerService
         await _jobStore.InitializeAsync(cancellationToken).ConfigureAwait(false);
         _settings = await _settingsStore.LoadAsync(cancellationToken).ConfigureAwait(false);
         _settings.Revision = StartingRevision(_timeProvider);
+        // UPD.D1: the notice's dismiss state survives a restart, so "Not now" and "Skip this version" keep holding.
+        var notice = _updateNoticeStore.Load();
+        lock (_sync)
+        {
+            _noticeHiddenUntil = notice.HiddenUntil;
+            _noticeSkippedVersion = notice.SkippedVersion;
+        }
         _engine.UpdateProxy(_settings.Proxy);
         _engine.UpdateSiteLogins(BuildSiteLogins(_settings));
         _engine.UpdateHostConnectionLimit(_settings.MaxConnectionsPerHost);
@@ -1586,7 +1741,11 @@ public sealed partial class DownloadManagerService
                     return new SettingsResult { Error = "Settings changed on the Host. Reopen the editor and try again.", Settings = MapLiveSettings(_settings) };
             var result = await UpdateSettingsCoreAsync(settings, cancellationToken, caller).ConfigureAwait(false);
             // UI.R37: another channel or manifest, or updates turned off, leaves no latest version known.
-            if (result.Ok) AnnounceLatestVersion();
+            if (result.Ok)
+            {
+                AnnounceLatestVersion();
+                AnnounceDockerLatest();
+            }
             return result;
         }
         finally { _settingsUpdateGate.Release(); }
@@ -2346,6 +2505,60 @@ public sealed partial class DownloadManagerService
 
     /// <summary>The name of the AppImage's signed manifest next to the Windows one in a release.</summary>
     public const string AppImageManifestName = "manifest-linux-x64.json";
+
+    /// <summary>UPD.D1 addendum: the Docker image's signed manifest, next to this Host's own manifest in a release.</summary>
+    public const string DockerManifestName = "manifest-docker.json";
+
+    /// <summary>The Docker manifest's address, beside whatever manifest <paramref name="manifestUrl"/> names; null without a path.</summary>
+    public static string? DockerManifestUrlFor(string? manifestUrl)
+    {
+        if (string.IsNullOrWhiteSpace(manifestUrl)) return null;
+        var slash = manifestUrl.LastIndexOf('/');
+        return slash < 0 ? null : manifestUrl[..(slash + 1)] + DockerManifestName;
+    }
+
+    /// <summary>
+    /// UPD.D1 addendum: reads the signed <see cref="DockerManifestName"/> and records the newest Docker image version, so
+    /// the window can mark a saved Docker server that has an update. Runs at the same moment as the scheduled check of this
+    /// Host's own manifest (no extra timer) and never installs. A failed or unreadable fetch leaves the last value as it
+    /// was; turning updates off clears it.
+    /// </summary>
+    public async Task CheckDockerAsync(CancellationToken cancellationToken = default)
+    {
+        var url = DockerManifestUrlFor(_settings.UpdateManifestUrl);
+        if (url is null || string.IsNullOrWhiteSpace(_settings.UpdatePublicKey))
+        {
+            NoteDockerLatest(null);
+            return;
+        }
+
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var manifestUri) ||
+            (manifestUri.Scheme != "https" && !manifestUri.IsLoopback))
+            return;
+
+        try
+        {
+            using var response = await UpdateClient.GetAsync(manifestUri, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+                .ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode) return;
+            var json = response.Content.Headers.ContentLength is > MaxManifestBytes
+                ? null
+                : await ReadManifestAsync(response.Content, cancellationToken).ConfigureAwait(false);
+            if (json is null) return;
+            var manifest = UpdateManifestVerifier.Parse(json);
+            if (manifest is null || !UpdateManifestVerifier.Verify(manifest, _settings.UpdatePublicKey)) return;
+            NoteDockerLatest(manifest.Version);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or IOException or TaskCanceledException)
+        {
+            // A failed Docker check says nothing new; the last value stays.
+        }
+    }
+
 
     /// <summary>
     /// An AppImage reads its own manifest, which names the .AppImage instead of the Windows package. It sits next to the
@@ -6086,6 +6299,10 @@ public sealed partial class DownloadManagerService
             BrowserIntegration = nativeHost.IntegrationText(_settings.BrowserIntegrationEnabled),
             OrphanPartFiles = _orphanPartFiles.Where(File.Exists).ToList(),
             LatestVersion = CurrentLatestVersionLocked(),
+            UpdateNoticeHiddenUntil = _noticeHiddenUntil,
+            UpdateNoticeSkippedVersion = _noticeSkippedVersion,
+            UpdateWaiting = UpdateWaitingLocked(),
+            DockerLatestVersion = CurrentDockerLatestLocked(),
             ExtensionsSeen = ExtensionSightings?.Snapshot(),
             WaitingForMeteredNetwork = MeteredRuleHoldsLocked(),
         };

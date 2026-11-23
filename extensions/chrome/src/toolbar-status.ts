@@ -314,3 +314,28 @@ export class DownloadWatch {
     return this.jobs.size;
   }
 }
+
+/** UPD.D1: the small dot on the toolbar icon while the app, or a paired server, says an update is waiting. */
+export const UPDATE_DOT = "•";
+/** The dot's background: the accent blue the waiting count uses. */
+export const UPDATE_DOT_COLOR = "#1f6fc5";
+
+/**
+ * Whether the dot is drawn: only when the badge has nothing else to say. An OFF, a waiting-folder count, a red "!" and
+ * the finished count all win, so the dot never hides a state the user has to act on or has not yet seen.
+ */
+export function showsUpdateDot(otherBadgeText: string, updateWaiting: boolean): boolean {
+  return updateWaiting && otherBadgeText === "";
+}
+
+/** The tooltip while the dot shows (nothing about which version or where: the extension is told only that one waits). */
+export function updateWaitingTitle(): string {
+  return "Inbound Download Manager: an update is waiting. Open the app to update.";
+}
+
+/** UPD.D1: a Host's answer says an update waits only with a literal true (an older Host sends nothing). */
+export function readUpdateWaiting(answer: unknown): boolean | null {
+  const status = (answer as { status?: { updateWaiting?: unknown } } | null | undefined)?.status;
+  if (!status || typeof status !== "object") return null;
+  return status.updateWaiting === true;
+}

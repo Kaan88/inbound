@@ -31,7 +31,11 @@
   import { chipText, hereName, jobInput, openAsTorrentStep, sidebarShows, torrentProvider, torrentsApply, torrentsOffText } from './lib/torrents';
   import Confirm from './components/Confirm.svelte';
   import WhatsNew from './components/WhatsNew.svelte';
+  import UpdateNotice from './components/UpdateNotice.svelte';
+  import UpdateAvailableDialog from './components/UpdateAvailableDialog.svelte';
   import { between, decideSeen, displayDate, hadWebState, recordSeen, filterChangelog, findVersion, readChangelog, type ChangelogVersion, type WhatsNewView } from './lib/whatsNew';
+  import { hostKindOf } from './lib/hostKind';
+  import { filterUpdateNotes, noticeShown, noticeWords, type UpdateKind } from './lib/updateNotice';
   import type { Job } from './lib/types';
   import { chipCompact, extraViewShows, torrentExtraViews, torrentFilters, waitingForChoice, waitingForChoiceText } from './lib/torrentList';
   import { dragMayHoldTorrents, intake, intakeStep, isEditableTarget, pageTakes, uploadTorrent } from './lib/torrentIntake';
@@ -265,6 +269,44 @@
     providers: store.model.accounts.filter((account) => account.hasKey).map((account) => account.provider.toLowerCase()),
   });
 
+  // UPD.D1: the server update notice. Shown while the server is out of date and neither hidden for a day nor skipped, as
+  // the server's own check (or a paired desktop app's) knows. Dismissing is sent to the server and kept per server.
+  let updateDialog = $state<{ version: string; current: string; kind: UpdateKind; here: string[]; elsewhere: string; releaseDate: string | null } | null>(null);
+  const noticeCurrent = $derived(store.model.hello?.hostVersion ?? null);
+  const noticeLatest = $derived(store.model.status?.latestVersion ?? null);
+  const noticeKind = $derived<UpdateKind>(hostKindOf(store.model.hello?.hostKind));
+  const noticeVisible = $derived(
+    store.connection === 'open' &&
+      noticeShown(noticeCurrent, noticeLatest, store.model.status?.updateNoticeHiddenUntil, store.model.status?.updateNoticeSkippedVersion, Date.now()),
+  );
+
+  async function dismissNotice(action: 'notNow' | 'skip') {
+    if (store.connection !== 'open') return;
+    try {
+      await store.ask('update.dismiss', { action });
+    } catch {
+      store.toast("The server couldn't hide the update notice.", 'error');
+    }
+  }
+
+  async function openUpdateDialog() {
+    if (store.connection !== 'open' || !noticeCurrent || !noticeLatest) return;
+    try {
+      const result = await store.ask<{ availableVersion?: string | null; notes?: { text: string; tags: string[] }[] | null; releaseDate?: string | null }>('update.notes', {});
+      const shown = filterUpdateNotes(result.notes ?? null, whatsNewFeatures());
+      updateDialog = {
+        version: noticeLatest,
+        current: noticeCurrent,
+        kind: noticeKind,
+        here: shown.here,
+        elsewhere: shown.elsewhere[0] ?? '',
+        releaseDate: result.releaseDate ?? null,
+      };
+    } catch {
+      store.toast("The server couldn't load the update details.", 'error');
+    }
+  }
+
   function storage(): Storage | null {
     try {
       return localStorage;
@@ -455,6 +497,11 @@
     </nav>
 
     <main class="min-w-0 flex-1 overflow-y-auto">
+      {#if noticeVisible && noticeCurrent && noticeLatest}
+        {@const text = noticeWords(noticeKind, noticeCurrent, noticeLatest)}
+        <UpdateNotice title={text.title} body={text.body} shortBody={noticeKind === 'windows' ? `This PC runs ${noticeCurrent}.` : `This server runs ${noticeCurrent}.`}
+          onopen={openUpdateDialog} onnotnow={() => dismissNotice('notNow')} ondismiss={() => dismissNotice('notNow')} />
+      {/if}
       {#if !store.model.settings}
         <div class="flex h-full items-center justify-center text-[13px] text-muted">{connectionText[store.connection]}</div>
       {:else if screen.kind === 'list'}
@@ -501,6 +548,11 @@
 
 {#if whatsNew}
   <WhatsNew version={whatsNew.version} subtitle={whatsNew.subtitle} view={whatsNew.view} onclose={() => (whatsNew = null)} />
+{/if}
+{#if updateDialog}
+  <UpdateAvailableDialog version={updateDialog.version} current={updateDialog.current} kind={updateDialog.kind}
+    here={updateDialog.here} elsewhere={updateDialog.elsewhere} releaseDate={updateDialog.releaseDate}
+    onskip={() => { updateDialog = null; void dismissNotice('skip'); }} onclose={() => (updateDialog = null)} />
 {/if}
 {#if torrentsOff}
   <Confirm title="Open as torrent" message={torrentsOffText} primary="Open Options" onclose={() => (torrentsOff = false)}

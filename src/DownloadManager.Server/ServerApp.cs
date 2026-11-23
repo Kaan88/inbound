@@ -48,11 +48,12 @@ public sealed class ServerApp : IAsyncDisposable
     private readonly RemoteProviderSetup _remote;
     private readonly HttpDownloadEngine _engine;
     private readonly DataFolderLock _dataLock;
+    private readonly ServerUpdateCheck? _updateCheck;
     private int _stopped;
 
     private ServerApp(WebApplication web, ServerLog log, DownloadManagerService service, HostCommandDispatcher dispatcher,
         ArchiveCoordinator archives, RemoteJobCoordinator remoteJobs, RemoteCommands remoteCommands, RemoteProviderSetup remote,
-        HttpDownloadEngine engine, StoragePaths paths, DataFolderLock dataLock)
+        HttpDownloadEngine engine, StoragePaths paths, DataFolderLock dataLock, ServerUpdateCheck? updateCheck)
     {
         _dataLock = dataLock;
         _web = web;
@@ -64,6 +65,7 @@ public sealed class ServerApp : IAsyncDisposable
         _remoteCommands = remoteCommands;
         _remote = remote;
         _engine = engine;
+        _updateCheck = updateCheck;
         Paths = paths;
     }
 
@@ -226,9 +228,21 @@ public sealed class ServerApp : IAsyncDisposable
         service.SettingsChanged += (_, _) => log.Info("Settings updated.");
         dispatcher.Start();
 
+        // UPD.D1: the headless server checks for a newer Docker image once a day and at start; it never updates itself.
+        // The web bridge is not a separate install, so it checks nothing (its Host does).
+        ServerUpdateCheck? updateCheck = null;
+        if (!options.Bridge)
+        {
+            updateCheck = new ServerUpdateCheck(service, log.Info, ReleaseUpdates.PublicKey, Protocol.HostVersion);
+            updateCheck.Enabled = !string.Equals(
+                Environment.GetEnvironmentVariable(ServerUpdateCheck.DisableVariable)?.Trim(),
+                "false", StringComparison.OrdinalIgnoreCase);
+            updateCheck.Start();
+        }
+
         var auth = await ServerAuth.CreateAsync(options, paths.Root, log, cancellationToken).ConfigureAwait(false);
         var web = WebFront.Build(options, new DispatcherBackend(dispatcher, log), log, auth, uploads);
-        var app = new ServerApp(web, log, service, dispatcher, archives, remoteJobs, remoteCommands, remote, engine, paths, dataLock) { Auth = auth, Sites = sites };
+        var app = new ServerApp(web, log, service, dispatcher, archives, remoteJobs, remoteCommands, remote, engine, paths, dataLock, updateCheck) { Auth = auth, Sites = sites };
         try
         {
             await web.StartAsync(cancellationToken).ConfigureAwait(false);
@@ -273,6 +287,7 @@ public sealed class ServerApp : IAsyncDisposable
         if (Interlocked.Exchange(ref _stopped, 1) != 0) return;
         _log.Info("Server stopping.");
         _dispatcher.Stop();
+        _updateCheck?.Dispose();
         try
         {
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));

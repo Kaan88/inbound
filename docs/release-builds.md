@@ -181,6 +181,18 @@ Upload all three with the Windows files. When a release does not rebuild the App
 `releases/latest/download/manifest-linux-x64.json` keeps answering. The signed file must be the exact file uploaded:
 the manifest binds its size and SHA-256.
 
+## Docker image (UPD.D1)
+
+The Docker workflow (`docker.yml`) builds the image for a `v*` release and then signs `manifest-docker.json` with the same
+key (checked against the release's `public.pem`), attaching it with `SHA256SUMS-docker` to the release. The manifest has
+no package: it carries the version and the changelog lines only, and the server reads it once a day and at start to show
+the "update available" notice. It never updates itself, and `INBOUND_UPDATE_CHECK=false` turns the check off.
+
+`prepare-docker-release.sh X.Y.Z <path to update-signing.pem>` writes the same file locally
+(`artifacts/release/vX.Y.Z-docker/`). When a release does not rebuild the image (a Windows-only release), still upload
+the previous `manifest-docker.json` so `releases/latest/download/manifest-docker.json` keeps answering with the latest
+image that exists, exactly as the Linux manifest is carried.
+
 ### The other Linux packages (X.8)
 
 `scripts/package-linux.sh` makes four more files from the AppDir that `package-appimage.sh` leaves in

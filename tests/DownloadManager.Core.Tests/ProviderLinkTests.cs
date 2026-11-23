@@ -239,12 +239,22 @@ public sealed class NativeBridgePolicyTests
     [InlineData("settings.get")]
     [InlineData("host.shutdown")]
     [InlineData("update.install")]
+    [InlineData("update.dismiss")]
+    [InlineData("update.notes")]
     [InlineData("remote.add")]
     [InlineData("archive.extract")]
     [InlineData("HOST.PING")]
     [InlineData("")]
     [InlineData(null)]
     public void RefusesEverythingElseFromTheExtension(string? type) => Assert.False(NativeBridgePolicy.AllowFromExtension(type));
+
+    // UPD.D1: a paired browser extension never sees or dismisses the server update notice.
+    [Theory]
+    [InlineData("update.notice")]
+    [InlineData("update.latest")]
+    [InlineData("host.statusResult")]
+    [InlineData("update.notes")]
+    public void TheUpdateNoticeIsNeverSentToTheBrowser(string type) => Assert.False(NativeBridgePolicy.AllowToExtension(type));
 
     [Theory]
     [InlineData("remote.changed", false)]
@@ -280,6 +290,39 @@ public sealed class NativeBridgePolicyTests
         Assert.False(forwarded.Payload.Value.TryGetProperty("settings", out _));
         Assert.Equal("kept.bin", Assert.Single(forwarded.GetPayload<SnapshotDto>().Jobs).FileName);
     }
+
+    // UPD.D1 addendum: of the update state, the extension's snapshot carries the single boolean and nothing about versions.
+    [Fact]
+    public void ASnapshotCarriesOnlyTheUpdateWaitingFlagToTheExtension()
+    {
+        var snapshot = new SnapshotDto
+        {
+            Status = new HostStatusDto
+            {
+                UpdateWaiting = true,
+                LatestVersion = "9.8.7",
+                DockerLatestVersion = "9.8.6",
+                UpdateNoticeHiddenUntil = DateTimeOffset.UtcNow.AddDays(1),
+                UpdateNoticeSkippedVersion = "9.8.5",
+            },
+        };
+        foreach (var role in new[] { BridgeRole.BrowserExtension, BridgeRole.ServerExtension })
+        {
+            var forwarded = NativeBridgePolicy.To(role, IpcMessage.Create(MessageTypes.JobsSnapshot, snapshot, "request-1"));
+
+            Assert.NotNull(forwarded);
+            var raw = forwarded!.Payload!.Value.GetRawText();
+            Assert.DoesNotContain("9.8", raw);
+            Assert.DoesNotContain("updateNotice", raw);
+            Assert.DoesNotContain("latestVersion", raw);
+            Assert.DoesNotContain("dockerLatestVersion", raw);
+            Assert.True(forwarded.GetPayload<SnapshotDto>().Status.UpdateWaiting);
+        }
+    }
+
+    [Fact]
+    public void TheDockerLatestPushNeverReachesTheBrowser()
+        => Assert.False(NativeBridgePolicy.AllowToExtension(MessageTypes.UpdateDockerLatest));
 
     [Fact]
     public void EveryProviderMessageStaysOnTheHostsSideInBothDirections()

@@ -405,6 +405,34 @@ public sealed class HostStatusDto
     public string? LatestVersion { get; set; }
 
     /// <summary>
+    /// UPD.D1: when the server update notice is hidden until ("Not now"/× hides it for a day), kept on the server per
+    /// server, so the web UI and a paired desktop app agree. Null when it is not hidden. Only an admin session sees it; a
+    /// paired browser extension never does (<see cref="NativeBridgePolicy"/>). A client that doesn't know it ignores it.
+    /// </summary>
+    public DateTimeOffset? UpdateNoticeHiddenUntil { get; set; }
+
+    /// <summary>
+    /// UPD.D1: the version "Skip this version" hid, kept on the server per server; the notice comes back for a newer one.
+    /// Null when none is skipped. Admin sessions only, as <see cref="UpdateNoticeHiddenUntil"/>.
+    /// </summary>
+    public string? UpdateNoticeSkippedVersion { get; set; }
+
+    /// <summary>
+    /// UPD.D1: whether an update is waiting that an admin has not dismissed: this server's notice showing (not hidden nor
+    /// skipped), or, on the desktop Host, this PC's own update waiting (not the version the user skipped). The single field
+    /// a paired browser extension reads: it never sees the notice's dismiss details. Null from a Host older than this field
+    /// (it serialises as absent, which the extension reads as false).
+    /// </summary>
+    public bool UpdateWaiting { get; set; }
+
+    /// <summary>
+    /// UPD.D1 addendum: the newest Docker image version the desktop Host's own update check found from the signed
+    /// <c>manifest-docker.json</c> (fetched at the same moment it reads its own manifest, no extra timer). Null on a Host
+    /// that doesn't check it. Changes arrive as <see cref="MessageTypes.UpdateDockerLatest"/>.
+    /// </summary>
+    public string? DockerLatestVersion { get; set; }
+
+    /// <summary>
     /// UI.R41: the browsers whose extension has reached this Host through the native host (<see cref="ExtensionBrowsers"/>),
     /// each with the last day it did. Empty when none has yet; null from a Host that can't know (the headless server,
     /// whose extensions pair over the network) or one older than this field.
@@ -437,6 +465,49 @@ public sealed class UpdateLatestDto
 {
     /// <summary>As <see cref="HostStatusDto.LatestVersion"/>.</summary>
     public string? LatestVersion { get; set; }
+}
+
+/// <summary>UPD.D1: the payload of <see cref="MessageTypes.UpdateNoticeState"/>.</summary>
+public sealed class UpdateNoticeStateDto
+{
+    /// <summary>As <see cref="HostStatusDto.UpdateNoticeHiddenUntil"/>.</summary>
+    public DateTimeOffset? HiddenUntil { get; set; }
+
+    /// <summary>As <see cref="HostStatusDto.UpdateNoticeSkippedVersion"/>.</summary>
+    public string? SkippedVersion { get; set; }
+}
+
+/// <summary>UPD.D1: the values of <see cref="UpdateDismissRequest.Action"/>.</summary>
+public static class UpdateDismissActions
+{
+    /// <summary>Not now (and ×): hide the notice for a day.</summary>
+    public const string NotNow = "notNow";
+
+    /// <summary>Skip this version: hide until a newer version is out.</summary>
+    public const string Skip = "skip";
+}
+
+/// <summary>UPD.D1: the request of <see cref="MessageTypes.UpdateDismiss"/>.</summary>
+public sealed class UpdateDismissRequest
+{
+    /// <summary><see cref="UpdateDismissActions"/>.</summary>
+    public string Action { get; set; } = string.Empty;
+}
+
+/// <summary>UPD.D1: the answer of <see cref="MessageTypes.UpdateNotes"/>.</summary>
+public sealed class ServerUpdateNotesResult
+{
+    /// <summary>The version the server's Docker check found; null when it hasn't found one.</summary>
+    public string? AvailableVersion { get; set; }
+
+    /// <summary>
+    /// The available version's changelog lines from the signed Docker manifest, as <see cref="UpdateNotes.Read"/> sees them
+    /// and only when their signature verified. Null when there are none. Each surface shows its own and the shared lines.
+    /// </summary>
+    public List<ChangelogItem>? Notes { get; set; }
+
+    /// <summary>UPD.D1: the available version's release date (<c>yyyy-MM-dd</c>) from the embedded changelog; null when unknown.</summary>
+    public string? ReleaseDate { get; set; }
 }
 
 public sealed class HostHelloDto

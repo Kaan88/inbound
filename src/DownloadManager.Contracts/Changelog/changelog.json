@@ -13,7 +13,10 @@
             { "text": "One click opens a finished download in the browser extension's popup, as in the browser's own downloads list.", "tags": ["extension"] },
             { "text": "When a site refuses Inbound a download the extension sent (HTTP 401 or 403), the browser downloads it instead.", "tags": ["extension"] },
             { "text": "A transfer stopped by an expired sign-in or an untrusted certificate offers Sign in or Check the certificate, as browsing does.", "tags": ["desktop", "webui"] },
-            { "text": "The extension's row menu fits inside the popup instead of making it taller.", "tags": ["extension"] }
+            { "text": "The extension's row menu fits inside the popup instead of making it taller.", "tags": ["extension"] },
+            { "text": "A Docker server checks once a day for a newer image and the web UI says when one is out, with what changes and the commands to update. Not now hides it for a day; INBOUND_UPDATE_CHECK=false turns the check off.", "tags": ["webui", "docker"] },
+            { "text": "The window shows the same notice when switched to a Docker server that can be updated, and marks a saved Docker server with an update in the server menus.", "tags": ["desktop"] },
+            { "text": "The toolbar icon shows a small dot while the app or a paired server has an update waiting.", "tags": ["extension"] }
           ]
         },
         {

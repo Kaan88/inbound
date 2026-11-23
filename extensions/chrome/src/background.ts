@@ -14,7 +14,7 @@ import {
 import { RESTART_SAVED_WEB_PAGE_TEXT, restartInterruptedText, restartSavedWebPage } from "./keep-in-browser";
 import { REFUSED_RESTART_FAILED, freshFailure, refusedBySite, refusedNote } from "./refused-fallback";
 import { JOB_ACTION_MESSAGES, JOB_COMMAND_MESSAGES, POPUP_JOB_LIMIT, jobCommandOutcome, latestJobs, type JobAction, type JobCommand, type JobSummary } from "./job-list";
-import { DownloadWatch, IDLE, addFinished, drawKey, finishedBadge, finishedTitle, iconTitle, keepNames, offTitle, parseFinished, parseFinishedNames, sentFromBrowser } from "./toolbar-status";
+import { DownloadWatch, IDLE, UPDATE_DOT, UPDATE_DOT_COLOR, addFinished, drawKey, finishedBadge, finishedTitle, iconTitle, keepNames, offTitle, parseFinished, parseFinishedNames, readUpdateWaiting, sentFromBrowser, showsUpdateDot, updateWaitingTitle } from "./toolbar-status";
 import { DEFAULT_ICON_PATHS, RING_COLORS, ringFor, ringImages, type Ring } from "./toolbar-icon";
 import {
   NativeTransport, ServerTransport, SERVER_STORAGE_KEY, TARGET_LABELS, automaticTarget, availableTargets, extractError,
@@ -127,6 +127,13 @@ let flashing = false;
 let finishedIds: string[] = [];
 let finishedLoad: Promise<void> | null = null;
 const FINISHED_KEY = "finishedIds";
+/**
+ * UPD.D1: whether this PC's app, and a paired server, last said an update is waiting (only that one yes or no: the
+ * extension never learns which version, nor the notice's dismiss state). Learned from the jobs answers the popup already
+ * asks for, so there is no polling; kept in session storage so a restarted worker still draws the dot.
+ */
+let updateWaiting = { local: false, server: false };
+const UPDATE_WAITING_KEY = "updateWaiting";
 /** EXT.R16: the file names of those downloads (id to name), for the tooltip and the notification. */
 let finishedNames: Record<string, string> = {};
 const FINISHED_NAMES_KEY = "finishedNames";
@@ -413,10 +420,13 @@ function updateBadge(): void {
   // EXT.R12: while downloads sent from the browser are under way (or one failed or is paused), the tooltip says so.
   const downloads = iconTitle(watch.state());
   const finished = finishedIds.length;
+  const stateText = waiting > 0 ? String(Math.min(waiting, 99)) : off || paused ? "OFF" : serverDown ? "!" : finishedBadge(finished);
+  // UPD.D1: the update dot only when the badge has nothing else to say (OFF, a count, "!" and finished all win).
+  const updateDot = showsUpdateDot(stateText, updateWaiting.local || (server !== null && updateWaiting.server));
   try {
-    void action.setBadgeText({ text: waiting > 0 ? String(Math.min(waiting, 99)) : off || paused ? "OFF" : serverDown ? "!" : finishedBadge(finished) })
+    void action.setBadgeText({ text: updateDot ? UPDATE_DOT : stateText })
       ?.catch?.(() => undefined);
-    void action.setBadgeBackgroundColor?.({ color: waiting > 0 ? "#1f6fc5" : serverDown ? "#b3261e" : off || paused ? "#8a5a00" : finished > 0 ? "#1b7a3a" : "#8a5a00" })?.catch?.(() => undefined);
+    void action.setBadgeBackgroundColor?.({ color: updateDot ? UPDATE_DOT_COLOR : waiting > 0 ? "#1f6fc5" : serverDown ? "#b3261e" : off || paused ? "#8a5a00" : finished > 0 ? "#1b7a3a" : "#8a5a00" })?.catch?.(() => undefined);
     void (action as { setBadgeTextColor?: (details: { color: string }) => Promise<void> }).setBadgeTextColor?.({ color: "#ffffff" })
       ?.catch?.(() => undefined);
     void action.setTitle?.({
@@ -433,6 +443,8 @@ function updateBadge(): void {
           (finished > 0 ? ` (${finished === 1 ? "1 download" : `${finished} downloads`} finished)` : "")
         : finishedTitle(finished, newestFinishedName())
         ? finishedTitle(finished, newestFinishedName())!
+        : updateDot
+        ? updateWaitingTitle()
         : "Inbound Download Manager: sending downloads",
     })?.catch?.(() => undefined);
   } catch { /* the badge is a convenience */ }
@@ -1754,6 +1766,8 @@ function ensureFinishedLoaded(): Promise<void> {
       finishedIds = [...finishedIds, ...parseFinished(stored).filter((id) => !finishedIds.includes(id))];
       const names = (await chrome.storage.session.get(FINISHED_NAMES_KEY))[FINISHED_NAMES_KEY];
       finishedNames = { ...parseFinishedNames(names), ...finishedNames };
+      const waiting = (await chrome.storage.session.get(UPDATE_WAITING_KEY))[UPDATE_WAITING_KEY] as { local?: unknown; server?: unknown } | undefined;
+      updateWaiting = { local: updateWaiting.local || waiting?.local === true, server: updateWaiting.server || waiting?.server === true };
     } catch { /* the mark starts empty */ }
   })();
   return finishedLoad;
@@ -1769,6 +1783,15 @@ async function recordFinished(jobId: string, fileName?: string): Promise<void> {
   finishedNames = keepNames(finishedNames, finishedIds);
   await persistFinished();
   showDownloadState();
+}
+
+/** UPD.D1: a jobs answer from this PC or the paired server (null: it said nothing about it, so the last answer stays). */
+function noteUpdateWaiting(place: "local" | "server", answer: unknown): void {
+  const waiting = readUpdateWaiting(answer);
+  if (waiting === null || updateWaiting[place] === waiting) return;
+  updateWaiting = { ...updateWaiting, [place]: waiting };
+  try { void chrome.storage.session.set({ [UPDATE_WAITING_KEY]: updateWaiting })?.catch?.(() => undefined); } catch { /* memory still has it */ }
+  updateBadge();
 }
 
 async function persistFinished(): Promise<void> {
@@ -2473,6 +2496,7 @@ async function jobsAnswer(): Promise<unknown> {
       const jobs = latestJobs((snapshot?.jobs ?? []) as JobSummary[]);
       lastJobs = new Map(jobs.map((job) => [job.id, job]));
       watch.take(jobs);
+      noteUpdateWaiting("local", snapshot);
       return { ok: true, jobs };
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error), jobs: latestJobs([...lastJobs.values()]) };
@@ -2485,6 +2509,7 @@ async function jobsAnswer(): Promise<unknown> {
   const remote = (async (): Promise<JobsAnswer> => {
     try {
       const snapshot = await paired.send("jobs.query", query, 6000);
+      noteUpdateWaiting("server", snapshot);
       return { ok: true, jobs: latestJobs((snapshot?.jobs ?? []) as JobSummary[]) };
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error), jobs: [] };

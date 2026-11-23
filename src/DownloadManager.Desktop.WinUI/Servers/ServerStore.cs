@@ -30,6 +30,9 @@ internal sealed class SavedServer
 
     public DateTimeOffset PairedAt { get; set; }
 
+    /// <summary>UPD.D1 addendum: the version this server last reported while shown; the menus compare it with the latest known for its kind.</summary>
+    public string? LastVersion { get; set; }
+
     public override string ToString() => $"{Name} ({Address})";
 }
 
@@ -123,6 +126,16 @@ internal sealed class ServerStore
         server.PlainHttpConfirmed = plainHttpConfirmed;
         server.HostKind = hostKind ?? server.HostKind;
         server.PairedAt = DateTimeOffset.UtcNow;
+        Write(file);
+    }
+
+    /// <summary>UPD.D1 addendum: the version a saved server reported. No write when it is the same, or the server isn't saved.</summary>
+    public void NoteVersion(string id, string version)
+    {
+        var file = ReadForChange();
+        var server = file.Servers.FirstOrDefault(entry => entry.Id == id);
+        if (server is null || server.LastVersion == version) return;
+        server.LastVersion = version;
         Write(file);
     }
 

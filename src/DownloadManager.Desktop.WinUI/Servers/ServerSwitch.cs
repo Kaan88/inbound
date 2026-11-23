@@ -3,7 +3,7 @@ using DownloadManager.Contracts;
 namespace DownloadManager.Desktop.WinUI;
 
 /// <summary>One line of the server switcher: This PC or a saved server, whether it is the one shown, and its shortcut.</summary>
-internal sealed record ServerChoice(string? Id, string Name, bool IsCurrent, int? Number)
+internal sealed record ServerChoice(string? Id, string Name, bool IsCurrent, int? Number, string? HostKind = null, string? LastVersion = null)
 {
     public bool IsLocal => Id is null;
 
@@ -31,7 +31,7 @@ internal static class ServerSwitch
         foreach (var server in saved)
         {
             var current = shownId is not null && string.Equals(server.Id, shownId, StringComparison.OrdinalIgnoreCase);
-            choices.Add(new ServerChoice(server.Id, server.Name, current, number <= MostNumbered ? number : null));
+            choices.Add(new ServerChoice(server.Id, server.Name, current, number <= MostNumbered ? number : null, server.HostKind, server.LastVersion));
             number++;
         }
 
