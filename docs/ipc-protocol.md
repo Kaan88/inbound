@@ -292,11 +292,15 @@ trusting would not help (no subject alternative name, which Go needs; the name d
 `sites.trust {id, certificateFingerprint}` reads the certificate again and refuses when it is not the one with that
 fingerprint, or when `cannotTrust` is set; `{id, forgetCertificates: true}` forgets the site's. A site keeps at most 4
 (the newest first). `SiteDto.trustedCertificates` lists them as `{fingerprint, subject, notAfter}`; a change of address,
-port or FTP encryption forgets them. The Host writes every trusted certificate, with the system's root certificates
-(Root and, on Windows, third-party roots), to `trusted-certificates.pem` in its rclone folder and starts rclone with
-`--ca-cert` on it; with none trusted there is no file and rclone checks as it always did. rclone reads the file only at
-start, so after a change the running rclone is stopped at once if idle, or when its last transfer ends; a trust reply
-then carries a `message` saying the certificate is used after the running transfers. rclone's own check is never
+port or FTP encryption forgets them. An https site's (WebDAV, S3) trusted certificates, with the system's root
+certificates (Root and, on Windows, third-party roots), go in a file of that site's own in the `ca` folder of the Host's
+rclone folder, given to rclone for that site's remote only (`override.ca_cert`, SITES.10): such a certificate never
+vouches for another server. The file's name carries a hash of the certificates, so a change applies at the next call.
+FTPS sites can't use that (rclone 1.76's FTP backend keeps the first TLS settings it saw for a server), so their
+certificates, with the system's roots, go in `trusted-certificates.pem` in the rclone folder and rclone starts with
+`--ca-cert` on it; that file is read only at start, so after a change the running rclone is stopped at once if idle, or
+when its last transfer ends, and a trust reply then carries a `message` saying the certificate is used after the running
+transfers. A site with none trusted adds nothing and rclone checks as it always did. rclone's own check is never
 switched off. A root Windows would fetch only when first needed is not in the file, so while a certificate is trusted a
 service whose root this PC has never fetched can fail as untrusted.
 

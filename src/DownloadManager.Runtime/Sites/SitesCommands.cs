@@ -1572,8 +1572,9 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
 
                 _rcloneVersion = version!.ToString(3);
                 _rcloneProblem = null;
-                // SITES.6b: the trusted-certificates file as the sites have it now, with today's system roots.
-                await WriteTrustedCertificatesAsync(cancellationToken).ConfigureAwait(false);
+                // SITES.6b: the trusted-certificates file as the sites have it now, with today's system roots (SITES.10: and
+                // the https sites' files written again at their next use).
+                await WriteTrustedCertificatesAsync(cancellationToken, fresh: true).ConfigureAwait(false);
                 _supervisor = _createSupervisor(rclone, Path.Combine(_stateDirectory, "sites", "rclone"));
                 _supervisorFor = rclone;
                 _supervisor.Changed += OnSupervisorChanged;

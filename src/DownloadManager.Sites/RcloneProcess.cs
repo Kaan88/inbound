@@ -38,8 +38,15 @@ public sealed class RcloneProcess : IRcloneInstance
 {
     public const string PidFileName = "rclone.pid";
 
-    /// <summary>SITES.6b: the trusted-certificates file in the state folder, passed as <c>--ca-cert</c> when it exists.</summary>
+    /// <summary>
+    /// SITES.6b: the trusted-certificates file in the state folder, passed as <c>--ca-cert</c> when it exists. Since SITES.10
+    /// it holds only FTPS sites' certificates: rclone's FTP backend keeps the first TLS settings it is given, so a per-site
+    /// file (<see cref="SiteCertificateFiles"/>, used for https) can't be relied on there (seen with 1.76).
+    /// </summary>
     public const string TrustedCertificatesFileName = "trusted-certificates.pem";
+
+    /// <summary>SITES.10: the folder of per-site CA files for https sites (<see cref="SiteCertificateFiles"/>).</summary>
+    public const string CertificatesFolderName = "ca";
     private const int StartAttempts = 3;
 
     private readonly Process _process;
@@ -144,8 +151,8 @@ public sealed class RcloneProcess : IRcloneInstance
             "--use-json-log=false",
         }) info.ArgumentList.Add(argument);
 
-        // SITES.6b: certificates the user trusted for FTPS and https sites, with the system's roots, which this file
-        // replaces for the process. rclone reads it only here, at start.
+        // SITES.6b: certificates the user trusted for FTPS sites, with the system's roots, which this file replaces for
+        // the process. rclone reads it only here, at start. An https site's go in its own file (SITES.10).
         var trusted = Path.Combine(stateDirectory, TrustedCertificatesFileName);
         if (File.Exists(trusted))
         {
@@ -178,6 +185,7 @@ public sealed class RcloneProcess : IRcloneInstance
         var client = new RcloneClient(new Uri($"http://127.0.0.1:{port.ToString(CultureInfo.InvariantCulture)}/"), user, password,
             () => Volatile.Read(ref exitedFlag) == 1, handler);
         client.AddSecret(user);
+        client.CertificatesDirectory = Path.Combine(stateDirectory, CertificatesFolderName);
         var rclone = new RcloneProcess(process, lifetime, client, pidFile, log)
         {
             TiedByKernel = setpriv is not null || lifetime.InJob,
