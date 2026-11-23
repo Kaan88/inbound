@@ -14,7 +14,14 @@
   7, timeout 2147483647) restored and read back.
 - **Owner decisions:** FTPS certificates keep the warning (SITES.10 (1)); MoreKeys stays as x26b, no administrator
   tick; Skip this version stays (UPD.D1). R2 (rclone outliving a killed app on Android): left as it is, noted as a known limitation (owner).
-- **Left:** the desktop update bar seen on screen against a Docker server older than 0.9.1 (owner's window).
+- **Desktop update bar seen on screen (UPD.D1), 2026-11-23:** the released 0.9.1 Windows zip as an isolated test instance
+  (its own data folder and an `install.json`, since only an installed build runs the update check), paired with a
+  throwaway `ghcr.io/kaan88/inbound:0.9.0` container on the owner's test VM. The bar read "Check 0.9.0 can be updated to
+  0.9.1. It runs 0.9.0. A Docker server is updated where it runs: pull the new image and restart the container." with
+  How to update and Not now. The dialog showed 0.9.0 → 0.9.1, the steps, the Compose and docker run commands with Copy,
+  and Skip this version / Close; no changelog lines (a 0.9.0 server has none to give). Skip this version hid the bar on
+  that server (the window keeps it itself for a pre-0.9.1 server). Container, its folder and the image removed; test
+  processes ended by PID. Not tried: Not now, Copy, and a 0.9.1 server's own notice in the window.
 
 ## Release 0.9.1 and extension 0.7.1, 2026-11-23
 
