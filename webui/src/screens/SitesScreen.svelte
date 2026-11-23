@@ -5,10 +5,10 @@
   import { store } from '../lib/store.svelte';
   import {
     problems, rcloneLine, rcloneOffer,
-    type Site, type SiteKind, type SiteResult, type SitesStatus,
+    type Site, type SiteKind, type SiteResult, type SiteTransfer, type SitesStatus,
   } from '../lib/sites';
   import { allRemotes, busyRemotes, closeQuestion, phoneRemotesLine, unfinishedOn } from '../lib/sitesHome';
-  import { tabOf, type TransferTab } from '../lib/sitesTransfers';
+  import { fixableProblem, tabOf, type TransferTab } from '../lib/sitesTransfers';
   import RemotesHome from './sites/RemotesHome.svelte';
   import SiteBrowser from './sites/SiteBrowser.svelte';
   import SiteDialog from './sites/SiteDialog.svelte';
@@ -40,6 +40,8 @@
   let removing = $state<Site | null>(null);
   let closing = $state<{ site: Site; title: string; text: string } | null>(null);
   let fixing = $state<{ site: Site; problem: string } | null>(null);
+  // SITES.10 (6): the stopped transfer that asked for the fix; it is tried again once the site is ready.
+  let retryAfterFix = $state<string | null>(null);
   let testing = $state<string | null>(null);
   let switching = $state(false);
 
@@ -132,6 +134,22 @@
     } finally {
       testing = null;
     }
+  }
+
+  // SITES.10 (6): a transfer stopped by a sign-in, certificate or key problem. The fix is browsing's own question (SiteFix,
+  // as the pane asks it); once it is done the batch is tried again, and if the remote still refuses, its row offers the
+  // button again rather than this guessing whether the fix worked.
+  function fixTransfer(row: SiteTransfer) {
+    const problem = fixableProblem(row);
+    const found = sites.find((item) => item.id === row.siteId);
+    if (!problem || !found) return;
+    retryAfterFix = row.id;
+    fixing = { site: found, problem };
+  }
+
+  async function retryTransfer(id: string) {
+    const result = await store.attempt<{ ok: boolean; message?: string }>('sites.transfer.retry', { id });
+    if (result && !result.ok) store.toast(result.message ?? 'The transfer was not tried again.', 'error');
   }
 
   async function remove(item: Site) {
@@ -247,7 +265,7 @@
     {#if transfersOpen}
       <section id="remote-transfers" class="flex h-[42%] min-h-[210px] flex-col border-t border-divider bg-surface max-md:h-auto max-md:min-h-0 max-md:flex-1" aria-label="Transfers with {store.texts.hostName}">
         <h2 class="border-b border-divider px-3 py-2 text-[15px] font-semibold md:hidden">Transfers</h2>
-        <TransferList {transfers} bind:tab={transfersTab} bind:reveal onshow={open} />
+        <TransferList {transfers} bind:tab={transfersTab} bind:reveal onshow={open} onfix={fixTransfer} />
       </section>
     {/if}
     <TransfersBar {transfers} bind:open={transfersOpen} />
@@ -286,6 +304,14 @@
 
 {#if fixing}
   {@const current = fixing}
-  <SiteFix site={current.site} problem={current.problem} onclose={() => (fixing = null)}
-    onfixed={() => { fixing = null; void test(current.site); }} />
+  <SiteFix site={current.site} problem={current.problem}
+    onclose={() => { fixing = null; retryAfterFix = null; }}
+    onfixed={() => {
+      fixing = null;
+      // SITES.10 (6): the transfer that asked is tried again; any other fix puts the remote to the test, as before.
+      const retry = retryAfterFix;
+      retryAfterFix = null;
+      if (retry) void retryTransfer(retry);
+      else void test(current.site);
+    }} />
 {/if}

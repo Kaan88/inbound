@@ -6,8 +6,9 @@
   import ProgressBar from '../../components/ProgressBar.svelte';
   import { store } from '../../lib/store.svelte';
   import type { SiteTransfer } from '../../lib/sites';
+  import { fixButtonText } from '../../lib/sitesBrowse';
   import {
-    canClear, clearDoneTargets, commandLabel, commandType, description, emptyMessage, fullRoute, inTab, isDownload, menu as commandMenu,
+    canClear, clearDoneTargets, commandLabel, commandType, description, emptyMessage, fixableProblem, fullRoute, inTab, isDownload, menu as commandMenu,
     pauseAllAction, phoneButton, phoneHeader, phoneRows, phoneSheet, phoneSheetLabel, rateText, routeLine, retryFailedTargets, sizeText, spaceCommand, status, tabLabel, tabOf, timeLeft, title, valid,
     type TransferCommand, type TransferTab,
   } from '../../lib/sitesTransfers';
@@ -15,7 +16,10 @@
   // The transfers between remote files and this computer (SITES.11 R6b): the main download list's look (its columns, its
   // two-line rows on a phone, its status colours and bar), with a view model of its own. A row offers only what a transfer
   // supports (lib/sitesTransfers: menu), so none of the download list's commands leak in.
-  let { transfers, onshow, tab = $bindable('active'), reveal = $bindable(null) }: { transfers: SiteTransfer[]; onshow: (siteId: string) => void; tab?: TransferTab; reveal?: string | null } = $props();
+  let { transfers, onshow, onfix, tab = $bindable('active'), reveal = $bindable(null) }: {
+    transfers: SiteTransfer[]; onshow: (siteId: string) => void; onfix: (row: SiteTransfer) => void;
+    tab?: TransferTab; reveal?: string | null;
+  } = $props();
 
   let selected = $state<Set<string>>(new Set());
   let menuAt = $state<{ items: MenuItem[]; x: number; y: number } | null>(null);
@@ -177,7 +181,22 @@
         <span class="tl-eta tabular text-right">{timeLeft(row)}</span>
         <span class="tl-rate tabular text-right">{rateText(row)}</span>
         <span class="tl-route truncate text-muted md:hidden">{routeLine(row, store.texts.hostName)}</span>
-        <span class="tl-desc truncate {row.state === 'failed' ? 'tone-failed' : 'text-muted'}" title={description(row)}>{description(row)}</span>
+        <span class="tl-desc flex min-w-0 items-center gap-2">
+          <span class="min-w-0 flex-1 truncate {row.state === 'failed' ? 'tone-failed' : 'text-muted'}" title={description(row)}>{description(row)}</span>
+          <!-- SITES.10 (6): a batch stopped by a sign-in, certificate or key problem offers the fix a listing offers
+               (Sign in, Check the certificate), and Retry once it works. -->
+          {#if fixableProblem(row)}
+            {@const problem = fixableProblem(row)!}
+            <button class="tl-fix" title="Sign in again or trust the server, then try this transfer again"
+              onclick={(event) => { event.stopPropagation(); onfix(row); }}>{fixButtonText(problem)}</button>
+          {/if}
+        </span>
+        {#if phone && fixableProblem(row)}
+          {@const problem = fixableProblem(row)!}
+          <span class="tl-fix-phone">
+            <button class="tl-fix" onclick={(event) => { event.stopPropagation(); onfix(row); }}>{fixButtonText(problem)}</button>
+          </span>
+        {/if}
       </div>
     {/each}
   </div>
@@ -212,6 +231,10 @@
   .tl-menu { display: inline-flex; border-radius: 4px; padding: 2px; color: var(--muted); opacity: 0; }
   .tl-menu:hover { background: var(--hover); color: var(--text); }
   .tl-row:hover .tl-menu, .tl-row:focus-within .tl-menu, .tl-menu:focus-visible { opacity: 1; }
+  /* SITES.10 (6): the button on a stopped batch, as small as the list's own controls. */
+  .tl-fix { flex-shrink: 0; border: 1px solid var(--divider); border-radius: 4px; background: var(--surface); padding: 1px 8px; font-size: 11.5px; line-height: 1.25rem; color: var(--text); white-space: nowrap; }
+  .tl-fix:hover { background: var(--hover); }
+  .tl-fix-phone { display: none; }
   /* A phone: each transfer is lines, as in the mockup: name and size, then status with rate and time, then where. */
   @media (max-width: 767px) {
     .tl-grid { display: none; }
@@ -222,6 +245,8 @@
     .tl-name { grid-area: name; font-size: 14px; }
     .tl-status { grid-area: status; }
     .tl-route { grid-area: route; font-size: 11.5px; }
+    /* The fix sits under the card's lines, across its width: its words don't fit the button column. */
+    .tl-fix-phone { display: flex; grid-column: 1 / -1; padding-top: 4px; }
     .tl-eta, .tl-rate, .tl-size, .tl-desc { display: none; }
     .tl-menu { display: none; }
   }

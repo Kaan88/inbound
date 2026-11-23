@@ -1689,6 +1689,20 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
 
     public string? TransferLocalFolder(string transferId) => _transfers.LocalFolderOf(transferId);
 
+    public async Task<string?> LinkedFolderAsync(string siteId, CancellationToken cancellationToken)
+    {
+        if (!SiteStore.IsId(siteId)) return null;
+        try
+        {
+            return (await _sites.GetAsync(siteId, cancellationToken).ConfigureAwait(false))?.LocalFolder;
+        }
+        catch (SiteStoreException)
+        {
+            // A damaged record is refused by the save itself, with its own words; here it is only "no folder known".
+            return null;
+        }
+    }
+
     /// <summary>On the Host's exit.</summary>
     public async ValueTask DisposeAsync()
     {

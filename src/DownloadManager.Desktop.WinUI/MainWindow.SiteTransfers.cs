@@ -27,8 +27,32 @@ public sealed partial class MainWindow
         TransfersBar.Act = (type, id) => _remote.SiteTransferActionAsync(type, id);
         TransfersBar.ActFile = (type, id, path) => _remote.SiteTransferFileActionAsync(type, id, path);
         TransfersBar.Details = id => _remote.GetSiteTransferAsync(id);
+        TransfersBar.Fix = FixStoppedTransferAsync;
         TransfersBar.LocalCommandRequested += (command, row) => OnTransferLocalCommand(command, row);
     }
+
+    /// <summary>
+    /// SITES.10 (6): a batch stopped because the remote refuses the sign-in or its certificate (or key) is not trusted.
+    /// The same questions browsing asks are asked here (<see cref="FixSiteAsync"/>); when the remote now has what it
+    /// lacked the batch is tried again, and when the user cancelled or it still lacks it the row keeps its button.
+    /// </summary>
+    private async Task FixStoppedTransferAsync(SiteTransferDto batch)
+    {
+        if (SiteTransferRules.FixableProblem(batch) is not { } problem || FindSite(batch.SiteId) is not { } site) return;
+        await FixSiteAsync(site, problem);
+        if (!ReadyForRetry(problem, FindSite(site.Id))) return;
+        var retried = await _remote.SiteTransferActionAsync(SitesMessageTypes.TransferRetry, batch.Id);
+        if (!retried.Ok && retried.Message is { Length: > 0 } message) SetSitesStatus(message);
+    }
+
+    /// <summary>SITES.10 (6): the site now holds what stopped the batch (a sign-in, a trusted certificate, a key).</summary>
+    private static bool ReadyForRetry(string problem, SiteDto? site) => site is not null && problem switch
+    {
+        SiteProblems.SignInNeeded => site.SignedIn,
+        SiteProblems.CertificateNotTrusted => site.TrustedCertificates.Count > 0,
+        SiteProblems.HostKeyChanged => site.HostKeys.Count > 0,
+        _ => false,
+    };
 
     /// <summary>Asks for the batches once per connection; later changes are pushed.</summary>
     private async Task ReadSiteTransfersAsync(HostConnection connection)

@@ -639,6 +639,15 @@ internal static class SiteTransferRules
 
     public static bool CanRetry(SiteTransferDto t) => t.State == "failed" && t.FilesFailed > 0;
 
+    /// <summary>
+    /// SITES.10 (6): the problem a stopped batch's row offers to fix, as a listing names it (<see cref="SitesBrowseRules"/>
+    /// has the words): a sign-in the service no longer accepts, a certificate this PC doesn't trust, or a changed key.
+    /// Null for any other failure, and on a batch that is not stopped.
+    /// </summary>
+    public static string? FixableProblem(SiteTransferDto t) =>
+        t.State == "failed" && t.Problem is SiteProblems.SignInNeeded or SiteProblems.CertificateNotTrusted or SiteProblems.HostKeyChanged
+            ? t.Problem : null;
+
     public static bool CanCancel(SiteTransferDto t) => t.State is "running" or "paused" || CanResume(t);
 
     public static bool CanClear(SiteTransferDto t) => t.State is "done" or "failed" or "canceled";

@@ -370,7 +370,11 @@ public sealed class SiteTransfers : IAsyncDisposable
         }
         catch (Exception e) when (e is RcloneCallException or RcloneUnavailableException or SiteStoreException)
         {
-            return Fail(SiteErrorText.Friendly(e.Message));
+            // SITES.10 (6): a start refused for the same reasons browsing reports kept its code, so the client offers the
+            // same fix (Sign in, Trust) instead of a plain message; a site not signed in yet is that same sign-in.
+            var failure = Fail(SiteErrorText.Friendly(e.Message));
+            failure.Problem = e is SiteSignInNeededException ? SiteProblems.SignInNeeded : BatchProblem(e.Message);
+            return failure;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
@@ -1257,6 +1261,7 @@ public sealed class SiteTransfers : IAsyncDisposable
         string? error = null;
         SshHostKeyProblem? keyProblem = null;
         string? stopBatch = null;
+        string? stopProblem = null;
         var connection = false;
         var rcloneGone = false;
         var retry = false;
@@ -1284,6 +1289,8 @@ public sealed class SiteTransfers : IAsyncDisposable
             // Every file would be refused the same way, and a server may lock the account after many tries.
             state = SiteTransferItemStates.Waiting;
             stopBatch = SiteErrorText.Friendly(e.Message);
+            // SITES.10 (6): the clients offer the fix browsing offers for the same refusal.
+            stopProblem = BatchProblem(e.Message);
         }
         catch (Exception e) when (e is RcloneUnavailableException || (e is RcloneCallException && CantReach(e.Message)))
         {
@@ -1380,6 +1387,9 @@ public sealed class SiteTransfers : IAsyncDisposable
             else if (stopBatch is not null && record.State == SiteTransferStates.Running)
             {
                 record.State = SiteTransferStates.Failed;
+                // SITES.10 (6): a refused sign-in or an untrusted certificate keeps the code browsing gives it, so the row
+                // can offer Sign in again or Trust; the key's own code above takes precedence.
+                record.Problem = stopProblem;
                 record.Message = stopBatch;
                 record.FinishedAt = _time.GetUtcNow();
                 others = ActiveLocked(batch);
@@ -2216,6 +2226,16 @@ public sealed class SiteTransfers : IAsyncDisposable
     private SiteTransferResultDto Ok(Batch batch) => new() { Ok = true, Transfer = ToDto(batch) };
 
     private static SiteTransferResultDto Fail(string message) => new() { Ok = false, Message = message };
+
+    /// <summary>
+    /// SITES.10 (6): the code browsing gives the same failure (<see cref="SiteProblems.SignInNeeded"/> for a sign-in the
+    /// service no longer accepts, <see cref="SiteProblems.CertificateNotTrusted"/> for a certificate this PC doesn't
+    /// trust), so a client offers Sign in again or Trust on a batch as it does on a listing; null for any other failure.
+    /// </summary>
+    internal static string? BatchProblem(string message) =>
+        SiteErrorText.IsSignInRefused(message) ? SiteProblems.SignInNeeded
+        : SiteErrorText.IsUntrustedCertificate(message) ? SiteProblems.CertificateNotTrusted
+        : null;
 
     /// <summary>Whether the server path <paramref name="candidate"/> is <paramref name="root"/> or inside it.</summary>
     private static bool Within(string candidate, string root) =>

@@ -54,8 +54,12 @@ public sealed class HostCommandDispatcherSitesTests : IAsyncLifetime
         public List<string> Seen { get; } = [];
         public List<IpcMessage> Messages { get; } = [];
         public Dictionary<string, string> Folders { get; } = [];
+        /// <summary>SITES.10 (5): the linked folder of each saved remote, as the store holds it.</summary>
+        public Dictionary<string, string?> Linked { get; } = [];
 
         public string? TransferLocalFolder(string transferId) => Folders.GetValueOrDefault(transferId);
+
+        public Task<string?> LinkedFolderAsync(string siteId, CancellationToken cancellationToken) => Task.FromResult(Linked.GetValueOrDefault(siteId));
 
         public Task<IpcMessage> HandleAsync(IpcMessage request, CancellationToken cancellationToken)
         {
@@ -326,6 +330,56 @@ public sealed class HostCommandDispatcherSitesTests : IAsyncLifetime
         // A copy batch has no folder here (null), so Resume and Retry go on from the browser.
         foreach (var type in new[] { SitesMessageTypes.TransferResume, SitesMessageTypes.TransferRetry })
             Assert.Equal(SitesMessageTypes.Status, (await AskAsync(dispatcher, web, type, new SiteTransferIdRequest { Id = "copybatch" })).Type);
+    }
+
+    [Fact]
+    public async Task AnEditKeepsALinkedFolderOutsideTheSessionsFoldersAndStillHoldsAChangedOne()
+    {
+        var service = await ServiceAsync();
+        var profile = new WebSessionProfile(service, PlatformCapabilities.Desktop);
+        _cleanup.Add(new Disposer(profile.Dispose));
+        var sites = new RecordingSites();
+        var dispatcher = new HostCommandDispatcher(service, new FakePlatform(PlatformCapabilities.Desktop, _timeline), new ListLog())
+        {
+            WebSessions = profile.Rights,
+            Sites = sites,
+        };
+        var web = Session();
+        await dispatcher.OpenSessionAsync(web, new ClientHelloDto { Role = ClientRoles.Web }, CancellationToken.None);
+
+        // SITES.10 (5): the user at this PC linked the remote to a folder the browser's folders do not hold. An edit that
+        // sends it back unchanged is saved, so Options→Save no longer refuses a folder nobody changed.
+        const string outside = "/srv/in";
+        sites.Linked[SiteId] = outside;
+        var saved = await AskAsync(dispatcher, web, SitesMessageTypes.Save,
+            new SiteSaveRequest { Id = SiteId, Name = "Box", Host = "srv.example", LocalFolder = outside });
+        Assert.Equal(SitesMessageTypes.Status, saved.Type);
+        lock (sites.Seen) Assert.Equal(outside, sites.Messages[^1].GetPayload<SiteSaveRequest>().LocalFolder);
+
+        // A folder inside them is resolved as the Host reads it.
+        var inside = Path.Combine(profile.Roots.Roots[0], "from-site");
+        Assert.Equal(SitesMessageTypes.Status, (await AskAsync(dispatcher, web, SitesMessageTypes.Save,
+            new SiteSaveRequest { Id = SiteId, Name = "Box", Host = "srv.example", LocalFolder = inside })).Type);
+        lock (sites.Seen) Assert.Equal(inside, sites.Messages[^1].GetPayload<SiteSaveRequest>().LocalFolder);
+
+        // A folder the user changed is held to them, and a new remote has none to keep.
+        foreach (var request in new[]
+                 {
+                     new SiteSaveRequest { Id = SiteId, Name = "Box", Host = "srv.example", LocalFolder = "/srv/elsewhere" },
+                     new SiteSaveRequest { Name = "Box", Host = "srv.example", LocalFolder = outside },
+                 })
+        {
+            var refused = await AskAsync(dispatcher, web, SitesMessageTypes.Save, request);
+            Assert.Equal(MessageTypes.HostActionResult, refused.Type);
+            Assert.False(refused.GetPayload<HostActionResult>().Ok);
+        }
+
+        // SITES.11 R4: a test of an edit follows the same rule, so Test and Save agree about the folder.
+        Assert.Equal(SitesMessageTypes.Status, (await AskAsync(dispatcher, web, SitesMessageTypes.TestDraft,
+            new SiteTestDraftRequest { Site = new SiteSaveRequest { Id = SiteId, Name = "Box", Host = "srv.example", LocalFolder = outside } })).Type);
+        lock (sites.Seen) Assert.Equal(outside, sites.Messages[^1].GetPayload<SiteTestDraftRequest>().Site.LocalFolder);
+        Assert.Equal(MessageTypes.HostActionResult, (await AskAsync(dispatcher, web, SitesMessageTypes.TestDraft,
+            new SiteTestDraftRequest { Site = new SiteSaveRequest { Id = SiteId, Name = "Box", Host = "srv.example", LocalFolder = "/srv/elsewhere" } })).Type);
     }
 
     [Fact]
