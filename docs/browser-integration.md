@@ -468,6 +468,7 @@ configurable window but remain keyed by `(extensionId, requestId)`.
 | GET with query/signed URL | **Supported while valid** | Replayable; refresh flow needed when expired |
 | GET after cross-origin redirect | **Supported with scope checks** | Cookies selected per origin; auth headers dropped cross-origin |
 | Cookie-authenticated GET | **Supported** | Cookies for the original address go with it, and only to that site; not logged |
+| 401/403 before any byte (the site wanted more than the browser gave the extension) | **Falls back to the browser** | The browser downloads it again with its own cookies, the app's failed job and its empty part file are removed, and the user is told once (EXT.B12) |
 | Basic/Bearer-auth GET | **Conditional** | Only if header is visible and user enables header transfer |
 | POST form/file upload | **Cannot be detected** | Chrome's download API does not show the method, so it is treated like any other download. If the app accepts it, Chrome's copy is gone and the app's GET may fail. Pause sending first |
 | `blob:` / `data:` generated downloads | **Unsupported → Chrome** | Not addressable by the native client |

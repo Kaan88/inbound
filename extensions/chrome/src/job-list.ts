@@ -11,7 +11,8 @@ export interface JobSummary {
   progress?: number;
   bytesPerSecond?: number;
   estimatedRemaining?: string | number | null;
-  failure?: { message?: string };
+  /** Why it failed. httpStatus: the server's answer for an HTTP failure (EXT.B12 reads 401 and 403). */
+  failure?: { message?: string; httpStatus?: number; occurredAt?: string };
   createdAt?: string;
   canPause?: boolean;
   canResume?: boolean;

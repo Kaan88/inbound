@@ -12,8 +12,9 @@ import {
   applySettingChanges, DEFAULT_SETTINGS, decideCapture, isHttpUrl, migrateSettings, type Settings, type StartMode,
 } from "./capture-rules";
 import { RESTART_SAVED_WEB_PAGE_TEXT, restartInterruptedText, restartSavedWebPage } from "./keep-in-browser";
+import { REFUSED_RESTART_FAILED, freshFailure, refusedBySite, refusedNote } from "./refused-fallback";
 import { JOB_ACTION_MESSAGES, JOB_COMMAND_MESSAGES, POPUP_JOB_LIMIT, jobCommandOutcome, latestJobs, type JobAction, type JobCommand, type JobSummary } from "./job-list";
-import { DownloadWatch, IDLE, addFinished, drawKey, finishedBadge, finishedTitle, iconTitle, keepNames, offTitle, parseFinished, parseFinishedNames } from "./toolbar-status";
+import { DownloadWatch, IDLE, addFinished, drawKey, finishedBadge, finishedTitle, iconTitle, keepNames, offTitle, parseFinished, parseFinishedNames, sentFromBrowser } from "./toolbar-status";
 import { DEFAULT_ICON_PATHS, RING_COLORS, ringFor, ringImages, type Ring } from "./toolbar-icon";
 import {
   NativeTransport, ServerTransport, SERVER_STORAGE_KEY, TARGET_LABELS, automaticTarget, availableTargets, extractError,
@@ -1104,6 +1105,86 @@ async function restartChanged(delta: chrome.downloads.DownloadDelta): Promise<vo
   }
 }
 
+// ---- EXT.B12: a site that refuses the app's request is tried in the browser once -----------------------------------
+
+/**
+ * The done set, kept in session storage so a restarted worker does not try the same download twice: the ids of
+ * downloads that already failed once (only the first failure after the handoff counts; a later one is the user's own
+ * retry in the app) and the addresses given back to the browser in this session.
+ */
+const REFUSED_KEY = "refusedInBrowser";
+/** Its newest entries only. */
+const REFUSED_KEEP = 50;
+let refusedJobIds: string[] = [];
+let refusedUrls: string[] = [];
+let refusedLoad: Promise<void> | null = null;
+
+function refusedStrings(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string" && item.length > 0).slice(0, REFUSED_KEEP)
+    : [];
+}
+
+function ensureRefusedLoaded(): Promise<void> {
+  refusedLoad ??= (async () => {
+    try {
+      const stored = (await chrome.storage.session.get(REFUSED_KEY))[REFUSED_KEY] as { jobs?: unknown; urls?: unknown } | undefined;
+      // A failure this worker already saw stays first.
+      refusedJobIds = [...refusedJobIds, ...refusedStrings(stored?.jobs).filter((id) => !refusedJobIds.includes(id))]
+        .slice(0, REFUSED_KEEP);
+      refusedUrls = [...refusedUrls, ...refusedStrings(stored?.urls).filter((url) => !refusedUrls.includes(url))]
+        .slice(0, REFUSED_KEEP);
+    } catch { /* memory still has it */ }
+  })();
+  return refusedLoad;
+}
+
+async function persistRefused(): Promise<void> {
+  try {
+    await chrome.storage.session.set({ [REFUSED_KEY]: { jobs: refusedJobIds, urls: refusedUrls } });
+  } catch { /* memory still has it */ }
+}
+
+/** EXT.B12: takes the failed download, and the part file that holds no bytes, off the app's list. */
+async function removeFailedJob(job: JobSummary): Promise<void> {
+  try {
+    await native.request("job.remove", { jobId: job.id, deleteFile: true }, 10000, "Timed out waiting for the desktop app.");
+  } catch {
+    // The app is gone: its list keeps the failed download, and the browser still downloads the file.
+  }
+}
+
+/**
+ * EXT.B12 (owner, 2026-11-23): the site refused the app's own request (HTTP 401 or 403) before any byte arrived, so it
+ * most likely wanted something only the browser has (its cookies for that site, say). The browser downloads the file
+ * once, with what the page gave it; the app's failed job goes; the user is told once. Only a download this extension
+ * sent to this PC's app is given back, only its first failure after the handoff, and only once per address in this
+ * browser session.
+ */
+async function appRefusedToBrowser(job: JobSummary | undefined, eventType: string | undefined): Promise<void> {
+  if (!job || job.state !== "failed" || !freshFailure(job, eventType, Date.now())) return;
+  // Not a server's, not another browser's, not one the app added or the user started again by hand.
+  if ((job.target ?? "local") !== "local" || !sentFromBrowser(job, chrome.runtime.id)) return;
+  const url = (job.url ?? "").trim();
+  if (!isHttpUrl(url) || job.addressHidden === true) return;
+  await ensureRefusedLoaded();
+  if (refusedJobIds.includes(job.id)) return;
+  refusedJobIds = [job.id, ...refusedJobIds].slice(0, REFUSED_KEEP);
+  await persistRefused();
+  const status = refusedBySite(job);
+  if (status === null || refusedUrls.includes(url)) return;
+  refusedUrls = [url, ...refusedUrls].slice(0, REFUSED_KEEP);
+  await persistRefused();
+  // The browser has it now: whatever the app keeps for this address is not the download the user watches (EXT.B11).
+  watch.handedBack(url);
+  showDownloadState();
+  await startAgainInBrowser(
+    { id: job.id, url, userAgent: "", suggestedFileName: job.fileName, isAutoIntercept: true, createdAt: Date.now() },
+    {}, undefined, REFUSED_RESTART_FAILED);
+  await removeFailedJob(job);
+  await noteLeftInBrowser(job.fileName || "download", refusedNote(status), false);
+}
+
 /** The folder window's port closed: a window closed without a choice leaves the download in the browser. */
 async function handoffWindowClosed(id: string): Promise<void> {
   if (confirmingHandoffs.has(id)) {
@@ -1517,6 +1598,8 @@ function handleNativeEvent(message: Envelope): void {
   if (message.type === "job.event") {
     const event = message.payload as { job?: JobSummary; eventType?: string };
     followJob(event.job, event.eventType);
+    // EXT.B12: a refusal for a sign-in or a key is the browser's to win, not the app's to lose.
+    void appRefusedToBrowser(event.job, event.eventType);
     if (event.job?.id) {
       lastJobs.set(event.job.id, event.job);
       if (lastJobs.size > 20) {
