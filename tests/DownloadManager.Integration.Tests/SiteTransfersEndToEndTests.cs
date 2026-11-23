@@ -108,6 +108,40 @@ public sealed partial class SiteTransfersEndToEndTests : IAsyncLifetime
         Assert.True(File.Exists(Path.Combine(target, "one-mb.bin")));
     }
 
+    /// <summary>
+    /// SITES.10 (3): a "Keep both" file whose name was free is copied under a name kept beforehand. A Host killed after the
+    /// copy but before its Done was saved finds the file again on restart and writes it again, never "name (1)".
+    /// </summary>
+    [SiteTransfersFact]
+    public async Task AKeepBothFileFinishedJustBeforeAKillIsNotKeptTwiceAfterTheRestart()
+    {
+        var (commands, siteId) = await OpenSiteAsync(StartServer(slow: false));
+        var target = Path.Combine(Local, "keep-both-restart");
+        var done = await StartAndFinishAsync(commands, siteId, target, SiteTransferConflicts.KeepBoth, "one-mb.bin");
+        Assert.Equal(1, done.FilesDone);
+        var detail = await Call<SiteTransferResultDto>(commands, SitesMessageTypes.TransferGet, new SiteTransferIdRequest { Id = done.Id });
+        Assert.Null(Assert.Single(detail.Items!).Target); // the kept name is the file's own: no new name to show
+        await commands.DisposeAsync();
+        _commands.Remove(commands);
+
+        // As the batch was saved before the copy: the file kept its name and still waits; the batch still runs.
+        var file = Path.Combine(State, "sites", "transfers", done.Id + ".json");
+        var record = JsonNode.Parse(await File.ReadAllTextAsync(file))!.AsObject();
+        var item = record["items"]!.AsArray().Single()!.AsObject();
+        Assert.Equal("one-mb.bin", item["target"]!.GetValue<string>());
+        item["state"] = SiteTransferItemStates.Waiting;
+        record["state"] = SiteTransferStates.Running;
+        record.Remove("finishedAt");
+        await File.WriteAllTextAsync(file, record.ToJsonString());
+
+        var again = Open();
+        await Call<SitesStatusDto>(again, SitesMessageTypes.SetEnabled, new SitesSetEnabledRequest { Enabled = true, OwnRclonePath = Rclone });
+        var finished = await WaitForAsync(again, done.Id, t => SiteTransferStates.IsFinished(t.State));
+        Assert.Equal(SiteTransferStates.Done, finished.State);
+        Assert.Equal(["one-mb.bin"], Directory.GetFiles(target).Select(Path.GetFileName).ToArray());
+        AssertSame(Path.Combine(Served, "pub", "one-mb.bin"), Path.Combine(target, "one-mb.bin"));
+    }
+
     [SiteTransfersFact]
     public async Task AnUploadOfAFolderArrivesWholeOnTheServer()
     {
