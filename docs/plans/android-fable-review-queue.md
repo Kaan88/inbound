@@ -53,7 +53,10 @@ branches had each built the same two features; review the merge commit's resolut
 - Hello capabilities: this branch's site capabilities kept beside main's `savingPauses`; `TestDraft`, `Preview`,
   `SyncPlan`/`SyncRun` and `SafeDownloadStart`/`DeleteFiles`/`DeviceCreateOpen` all in the remote-session lists.
 
-## Open: fixes released in 0.1.1 without Fable, 41ef14a8..5aa45d0a (2026-11-22)
+## Done: fixes released in 0.1.1 without Fable, 41ef14a8..5aa45d0a (2026-11-22)
+
+Fable reviewed this entry and 0.1.2's `d1e414fb` on 2026-11-23: approved, three lows (fixed in `baf51405` and
+`94faa3f5`; PROGRESS "SITES.10 (1)-(3), Android review fixes").
 
 Owner, 2026-11-22: "no fable, release", then "note needed fable review for later". Fable approved the 0.1.0 code at
 `41ef14a8`; the commits after it shipped in 0.1.1 unreviewed (a Fable review was started and stopped by the owner).
@@ -79,6 +82,10 @@ Two Fable agents reviewed the range and then approved every fix and follow-up (`
 A1, A2, A8 and S6 were approved in the same pass.
 
 ## Open: Android work from 49f5663c to c745317f (2026-11-21)
+
+**Fable, 2026-11-23:** the fixes for this range's findings are right; one new medium (F1, SFTP MoreKeys offered when
+a trusted key was gone) fixed in `d86960f1`. Still open only on two owner decisions: R2 (rclone can outlive a killed app
+on Android) and whether the MoreKeys sheet also asks for the "I checked with the administrator" tick.
 
 **Reviewed 2026-11-21:** four Opus agents and then Fable reviewed this range; findings, verdicts and the fix order are in [android-review-49f5663c-c745317f.md](android-review-49f5663c-c745317f.md). It stays open until the findings are fixed and Fable checks the fixes.
 
@@ -120,7 +127,11 @@ Signing (d2e06d27, 178fdb41), what to check:
 - Future distribution: signer identity must remain stable across updates; version
   increments, updater/download trust and installer behavior are later work.
 
-## Open
+## Done: steps 2 to 6 and the first APK (2026-11-17/18)
+
+Fable reviewed what was still open here on 2026-11-23: `IsUserStart` and the CA-trusted https case closed; one new
+medium-low (F2, other user starts did not lift a tripped crash guard) fixed in `baf51405`. Two lows left for later: the
+Keystore read in `MainActivity.OnCreate` on the UI thread, and `InboundBackground.Evaluate`'s lock scope.
 
 Owner, 2026-11-17: "from now on, hold fable reviews until completion. and use opus for reviews." Opus agents review
 each slice and step; Fable reviews everything below once the Android work is complete.
