@@ -1,5 +1,21 @@
 # Progress - session handoff
 
+## Android 0.1.4 published; owner decisions, 2026-11-23
+
+- **Released:** [android-v0.1.4](https://github.com/Kaan88/inbound/releases/tag/android-v0.1.4) from `d6834dca`
+  (branch `android/release-0.1.4`, fast-forwarded into `main`), versionCode 16, APK SHA-256
+  `3ee4f3ca8769d1fa627c33d327d3eee4c340bd04cefcde2335f992440380dc52`, manifest
+  `b2bd0ba9e0d17b65ded3196335f6018157153aea41e1db5e3ba2db0925a525e0` also on `android-latest`; downloads match; desktop
+  latest is still v0.9.1. Holds F1, F2, L1-L6 and N1 (inside the Fable-approved `12d4b8b2..50d57d69`) and the shared
+  Sites follow-ups. The pinned librclone.so, lib7zz.so and libinbound-torrent.so came from the 0.1.3 APK (hashes match
+  the csproj pins). `check-apk.py --release` and the release verifier passed.
+- **S24 start (owner allowed adb):** installed over 0.1.3, started on the locked phone (MainActivity in 369 ms, still
+  running after 8 s, empty crash buffer). Not unlocked, so nothing seen on screen. Display baseline (auto brightness,
+  7, timeout 2147483647) restored and read back.
+- **Owner decisions:** FTPS certificates keep the warning (SITES.10 (1)); MoreKeys stays as x26b, no administrator
+  tick; Skip this version stays (UPD.D1). R2 (rclone outliving a killed app on Android): no answer yet.
+- **Left:** the desktop update bar seen on screen against a Docker server older than 0.9.1 (owner's window).
+
 ## Release 0.9.1 and extension 0.7.1, 2026-11-23
 
 - Tag `v0.9.1` on `22c3f812`. Firefox 0.7.1 submitted to the AMO listing (version 6748869), waiting for review, so the
