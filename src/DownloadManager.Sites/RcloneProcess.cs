@@ -186,6 +186,7 @@ public sealed class RcloneProcess : IRcloneInstance
             () => Volatile.Read(ref exitedFlag) == 1, handler);
         client.AddSecret(user);
         client.CertificatesDirectory = Path.Combine(stateDirectory, CertificatesFolderName);
+        client.SharedCaCertInUse = info.ArgumentList.Contains("--ca-cert");
         var rclone = new RcloneProcess(process, lifetime, client, pidFile, log)
         {
             TiedByKernel = setpriv is not null || lifetime.InJob,

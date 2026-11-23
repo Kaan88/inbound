@@ -140,7 +140,7 @@ public sealed partial class SitesCommands
     }
 
     /// <summary>
-    /// Removes the https sites' CA files no site uses now (a new trust is a new file, used at the next call), writes the FTPS
+    /// An https site's new trust is a new CA file, used at the next call; this writes the FTPS
     /// file again and, when it changed, lets rclone go so the next one reads it. True when the next call uses the new
     /// certificates; false when rclone waits for its running work first.
     /// </summary>
@@ -165,9 +165,9 @@ public sealed partial class SitesCommands
 
     /// <summary>
     /// The file rclone gets as <c>--ca-cert</c>: the system's roots and every certificate an FTPS site trusts. With none
-    /// trusted there is no file, and rclone uses the system's own check as it always did. Also removes the https sites' CA
-    /// files no site uses (with <paramref name="fresh"/>, at rclone's start, all of them, so each is written again with
-    /// today's roots). True when the FTPS file changed.
+    /// trusted there is no file, and rclone uses the system's own check as it always did. With <paramref name="fresh"/>
+    /// (at rclone's start) every https CA file is removed too, so each is written again with today's roots. True when the
+    /// FTPS file changed.
     /// </summary>
     private async Task<bool> WriteTrustedCertificatesAsync(CancellationToken cancellationToken, bool fresh = false)
     {
@@ -176,8 +176,11 @@ public sealed partial class SitesCommands
         {
             // SITES.11: an unsaved site's trusted certificates count while it is open.
             var sites = await _sites.ListAsync(cancellationToken, includeUnsaved: true).ConfigureAwait(false);
-            SiteCertificateFiles.Prune(Path.Combine(_stateDirectory, "sites", "rclone", RcloneProcess.CertificatesFolderName),
-                sites, all: fresh, _log);
+            // Only at rclone's start: a file a running rclone may be about to read (a transfer's next file) is never
+            // taken from under it; a superseded one waits for the next start.
+            if (fresh)
+                SiteCertificateFiles.Prune(Path.Combine(_stateDirectory, "sites", "rclone", RcloneProcess.CertificatesFolderName),
+                    sites, all: true, _log);
             return await WriteTrustedCertificatesLockedAsync(sites, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)

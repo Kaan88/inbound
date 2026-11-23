@@ -29,8 +29,19 @@ public sealed partial class MainWindow
         var now = DateTimeOffset.UtcNow;
         if (_status?.UpdateNoticeHiddenUntil is { } hidden && hidden > now) return false;
         if (_status?.UpdateNoticeSkippedVersion is { } skipped && VersionStatus.Compare(ShownServerLatest, skipped) is not > 0) return false;
+        if (_connection.Target.Id is { } id && _localNoticeDismissals.TryGetValue(id, out var local))
+        {
+            if (local.HiddenUntil is { } until && until > now) return false;
+            if (local.SkippedVersion is { } kept && VersionStatus.Compare(ShownServerLatest, kept) is not > 0) return false;
+        }
         return true;
     }
+
+    /// <summary>
+    /// A dismiss the server could not keep (a server older than 0.9.1 doesn't know <c>update.dismiss</c>, or it couldn't be
+    /// reached), kept by this window per saved server for as long as it runs, so the buttons never do nothing.
+    /// </summary>
+    private readonly Dictionary<string, (DateTimeOffset? HiddenUntil, string? SkippedVersion)> _localNoticeDismissals = new(StringComparer.Ordinal);
 
     /// <summary>Shows or hides the bar to match what the shown server knows, and writes its words.</summary>
     private void UpdateServerNotice()
@@ -72,25 +83,36 @@ public sealed partial class MainWindow
     private void ServerUpdateNoticeLater_Click(object sender, RoutedEventArgs e) => _ = DismissServerNoticeAsync(UpdateDismissActions.NotNow);
 
     /// <summary>
-    /// Sends the dismiss to the server and, once it took it, hides the bar. The server's push updates <see cref="_status"/>
-    /// too; the local update keeps the bar gone at once without waiting for it.
+    /// Sends the dismiss to the server, with the version shown, and hides the bar. The server's push updates
+    /// <see cref="_status"/> too; the local update keeps the bar gone at once without waiting for it. When the server
+    /// doesn't take it (older than 0.9.1, or out of reach), this window keeps the dismiss itself.
     /// </summary>
     private async Task DismissServerNoticeAsync(string action)
     {
+        var shownLatest = ShownServerLatest;
+        var serverId = _connection.Target.Id;
+        var kept = false;
         try
         {
-            var reply = await _connection.DismissUpdateNoticeAsync(action);
-            if (reply.GetPayload<HostActionResult>() is not { Ok: true }) return;
+            var reply = await _connection.DismissUpdateNoticeAsync(action, shownLatest);
+            kept = reply.GetPayload<HostActionResult>() is { Ok: true };
         }
         catch (Exception ex) when (ex is IOException or TimeoutException or InvalidOperationException or OperationCanceledException or InvalidDataException)
         {
-            return; // Couldn't reach the server: the bar stays and says so on the next snapshot.
+            // Out of reach: kept here below.
         }
 
-        if (_status is { } shown)
+        var hiddenUntil = action == UpdateDismissActions.NotNow ? DateTimeOffset.UtcNow.AddDays(1) : (DateTimeOffset?)null;
+        var skipped = action == UpdateDismissActions.Skip ? shownLatest : null;
+        if (kept && _status is { } shown)
         {
-            if (action == UpdateDismissActions.NotNow) shown.UpdateNoticeHiddenUntil = DateTimeOffset.UtcNow.AddDays(1);
-            if (action == UpdateDismissActions.Skip) shown.UpdateNoticeSkippedVersion = ShownServerLatest;
+            if (hiddenUntil is not null) shown.UpdateNoticeHiddenUntil = hiddenUntil;
+            if (skipped is not null) shown.UpdateNoticeSkippedVersion = skipped;
+        }
+        else if (!kept && serverId is not null)
+        {
+            _localNoticeDismissals.TryGetValue(serverId, out var local);
+            _localNoticeDismissals[serverId] = (hiddenUntil ?? local.HiddenUntil, skipped ?? local.SkippedVersion);
         }
 
         UpdateServerNotice();
@@ -132,12 +154,13 @@ public sealed partial class MainWindow
             RequestedTheme = RootGrid.ActualTheme,
             Title = $"Update {name}",
             Content = body,
-            PrimaryButtonText = "Close",
-            SecondaryButtonText = "Skip this version",
-            DefaultButton = ContentDialogButton.Primary,
+            // DesktopDialog board: "Skip this version | Close", Close the default.
+            PrimaryButtonText = "Skip this version",
+            CloseButtonText = "Close",
+            DefaultButton = ContentDialogButton.Close,
         };
         var result = await ShowDialogAsync(dialog);
-        if (result == ContentDialogResult.Secondary) await DismissServerNoticeAsync(UpdateDismissActions.Skip);
+        if (result == ContentDialogResult.Primary) await DismissServerNoticeAsync(UpdateDismissActions.Skip);
     }
 
     /// <summary>A command row: its name, the command, and a Copy button that briefly says Copied.</summary>

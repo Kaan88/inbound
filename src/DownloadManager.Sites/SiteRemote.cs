@@ -30,6 +30,16 @@ public static class SiteRemote
             fs["override.ca_cert"] = caFile;
             fs["description"] = "Inbound trusted certificates " + Path.GetFileNameWithoutExtension(caFile);
         }
+        else if (site.Kind is SiteKinds.WebDav or SiteKinds.S3 or SiteKinds.B2 && client?.SharedCaCertInUse == true &&
+                 client.CertificatesDirectory is { } rootsDirectory)
+        {
+            // The FTPS sites' --ca-cert file is this rclone's root pool for every other remote: an https remote without
+            // certificates of its own gets the system's roots alone. (Sign-in remotes are named rclone remotes, where the
+            // override was not shown to work; they keep the shared pool.)
+            var roots = SiteCertificateFiles.RootsPath(rootsDirectory);
+            fs["override.ca_cert"] = roots;
+            fs["description"] = "Inbound system roots";
+        }
         return fs;
     }
 

@@ -52,6 +52,38 @@ public static class SiteCertificateFiles
         return path;
     }
 
+    /// <summary>The system's roots alone, for an https remote of an rclone that has the FTPS sites' <c>--ca-cert</c>.</summary>
+    public static string RootsPath(string directory)
+    {
+        var path = Path.Combine(directory, RootsFileName);
+        if (File.Exists(path)) return path;
+        var text = new StringBuilder();
+        text.Append("# Written by Inbound: the system's root certificates.\n");
+        foreach (var pem in SystemRoots()) text.Append(pem).Append('\n');
+        lock (WriteLock)
+        {
+            if (File.Exists(path)) return path;
+            Directory.CreateDirectory(directory);
+            var temp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            try
+            {
+                File.WriteAllText(temp, text.ToString(), new UTF8Encoding(false));
+                File.Move(temp, path, overwrite: false);
+            }
+            catch (IOException) when (File.Exists(path))
+            {
+            }
+            finally
+            {
+                try { File.Delete(temp); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+            }
+        }
+
+        return path;
+    }
+
+    private const string RootsFileName = "system-roots.pem";
+
     /// <summary>
     /// Removes the files no site uses now (a forgotten certificate, a deleted site). With <paramref name="all"/>, every file
     /// goes, so the next use writes it with today's system roots (at rclone's start).
@@ -60,7 +92,7 @@ public static class SiteCertificateFiles
     {
         if (!Directory.Exists(directory)) return;
         var keep = all ? [] : sites.Select(s => (s.Id, Trusted: Trusted(s))).Where(s => s.Trusted.Count > 0)
-            .Select(s => FileName(s.Id, s.Trusted)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            .Select(s => FileName(s.Id, s.Trusted)).Append(RootsFileName).ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (var file in Directory.EnumerateFiles(directory))
         {
             if (keep.Contains(Path.GetFileName(file))) continue;

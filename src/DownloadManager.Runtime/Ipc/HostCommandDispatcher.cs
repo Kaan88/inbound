@@ -648,7 +648,9 @@ public sealed partial class HostCommandDispatcher
                 // shows the notice though it never updates itself, and an admin session (never the extension) dismisses it.
                 case MessageTypes.UpdateDismiss:
                     await Reply(client, message, MessageTypes.HostActionResult,
-                        _service.DismissUpdateNotice(message.GetPayload<UpdateDismissRequest>().Action))
+                        message.GetPayload<UpdateDismissRequest>() is var dismiss
+                            ? _service.DismissUpdateNotice(dismiss.Action, dismiss.Version)
+                            : null)
                         .ConfigureAwait(false);
                     break;
 

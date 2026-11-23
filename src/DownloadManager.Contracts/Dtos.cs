@@ -420,7 +420,7 @@ public sealed class HostStatusDto
     /// <summary>
     /// UPD.D1: whether an update is waiting that an admin has not dismissed: this server's notice showing (not hidden nor
     /// skipped), or, on the desktop Host, this PC's own update waiting (not the version the user skipped). The single field
-    /// a paired browser extension reads: it never sees the notice's dismiss details. Null from a Host older than this field
+    /// a paired browser extension reads: it never sees the notice's dismiss details. Absent from a Host older than this field
     /// (it serialises as absent, which the extension reads as false).
     /// </summary>
     public bool UpdateWaiting { get; set; }
@@ -492,6 +492,12 @@ public sealed class UpdateDismissRequest
 {
     /// <summary><see cref="UpdateDismissActions"/>.</summary>
     public string Action { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The version the client showed the notice for (optional). Skip uses it when the server's own check has found none
+    /// (turned off with <c>INBOUND_UPDATE_CHECK=false</c>, or not yet); a server that knows a version uses its own.
+    /// </summary>
+    public string? Version { get; set; }
 }
 
 /// <summary>UPD.D1: the answer of <see cref="MessageTypes.UpdateNotes"/>.</summary>
