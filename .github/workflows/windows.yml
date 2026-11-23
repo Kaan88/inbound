@@ -2,7 +2,8 @@
 #
 # - When a version tag (v*) is pushed, or by hand with a tag: a release build from that tag. Setup carries the signed
 #   Firefox add-on, the update file (manifest.json) is signed with the UPDATE_SIGNING_KEY repository secret, and the
-#   six files (five with no_firefox_xpi; Setup, zip, manifest.json, public.pem, the Firefox add-on, SHA256SUMS) are put in a DRAFT release with
+#   seven files (six with no_firefox_xpi; Setup, zip, manifest.json, public.pem, the Firefox add-on, SHA256SUMS, and
+#   hub.txt, which tells Hub the new version; tools\write-hub-txt.ps1 refuses a release Hub could not read) are put in a DRAFT release with
 #   notes drafted from changelog.json. Nothing is public until the owner reads the draft, finishes the notes and
 #   publishes it; publishing then starts the Linux packages and the Docker image (their workflows).
 # - By hand without a tag: a test build of the chosen branch, kept as run artifacts for 14 days. Setup then has no
@@ -202,6 +203,26 @@ jobs:
           Get-Content (Join-Path $out "SHA256SUMS")
           "RELEASE_DIR=$out" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
+      - name: hub.txt (for Hub), checked
+        if: env.TAG != ''
+        shell: powershell
+        run: |
+          # The one-line note for Hub: the first bullet of the drafted release notes (the draft's own notes are
+          # finished by hand later; Hub shows this line as it stands when the release is published).
+          $notesFile = Join-Path $env:RUNNER_TEMP "hub-notes.md"
+          .\scripts\release-notes.ps1 -Version $env:VERSION -OutFile $notesFile
+          $line = @(Get-Content -LiteralPath $notesFile | Where-Object { $_ -match '^- ' } | Select-Object -First 1)
+          $note = if ($line.Count -eq 1) { $line[0].Substring(2).Trim() } else { '' }
+          $setup = "InboundSetup-$env:VERSION.exe"
+          .\tools\write-hub-txt.ps1 -App inbound -Repo inbound -Version $env:VERSION -Notes $note `
+            -Kind setup -Exe 'app\DownloadManager.Host.exe' -Uninstall '{6F4B7C2E-3D91-4E8A-9B57-2C1D0A8E5F13}_is1' `
+            -Wait 'app\DownloadManager.Host.exe','app\DownloadManager.Desktop.WinUI.exe','app\DownloadManager.NativeHost.exe' `
+            -Files @{ Name = $setup; Role = 'setup'; Path = (Join-Path $env:RELEASE_DIR $setup); Silent = '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CURRENTUSER'; Scope = 'user' } `
+            -Out (Join-Path $env:RELEASE_DIR "hub.txt")
+          # The script exits 1 without throwing, so a refused release shows here as no file (and, run by hand, as the exit code).
+          if (-not (Test-Path -LiteralPath (Join-Path $env:RELEASE_DIR "hub.txt") -PathType Leaf)) { throw "hub.txt was not written; nothing was released." }
+          Get-Content -LiteralPath (Join-Path $env:RELEASE_DIR "hub.txt")
+
       - name: Put them in a draft release
         if: env.TAG != ''
         shell: powershell
@@ -209,7 +230,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $files = @(Get-ChildItem -LiteralPath $env:RELEASE_DIR -File | ForEach-Object { $_.FullName })
-          $expected = if ($env:NO_FIREFOX_XPI) { 5 } else { 6 }
+          $expected = if ($env:NO_FIREFOX_XPI) { 6 } else { 7 }
           if ($files.Count -ne $expected) { throw "Expected $expected release files, found $($files.Count)." }
           $ErrorActionPreference = 'Continue'
           $state = gh release view $env:TAG -R $env:GITHUB_REPOSITORY --json isDraft --jq '.isDraft' 2>$null
