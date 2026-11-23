@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
-      contents: read
+      contents: write
       packages: write
     env:
       IMAGE: ghcr.io/kaan88/inbound
@@ -71,3 +71,29 @@ jobs:
           build-args: |
             VERSION=${{ steps.meta.outputs.version }}
             REVISION=${{ github.sha }}
+
+      # UPD.D1: the server reads a small signed file, manifest-docker.json, so Docker installs notice a new image. It is
+      # signed with the same UPDATE_SIGNING_KEY as the Windows and Linux manifests, checked against the release's
+      # public.pem first.
+      - name: Sign the Docker update file
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+        run: |
+          test -n "$UPDATE_SIGNING_KEY" || { echo "The UPDATE_SIGNING_KEY secret is missing."; exit 1; }
+          key="$RUNNER_TEMP/update-signing.pem"
+          umask 077
+          printf '%s\n' "$UPDATE_SIGNING_KEY" > "$key"
+          trap 'rm -f "$key"' EXIT
+          gh release download "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" -p public.pem -D "$RUNNER_TEMP/release"
+          test "$(openssl pkey -in "$key" -pubout | tr -d '\r\n')" = "$(tr -d '\r\n' < "$RUNNER_TEMP/release/public.pem")" \
+            || { echo "The signing key does not match the release's public.pem."; exit 1; }
+          version="$(grep -oPm1 '(?<=<Version>)[^<]+' Directory.Build.props)"
+          sh scripts/prepare-docker-release.sh "$version" "$key" "$GITHUB_REPOSITORY"
+          out="artifacts/release/v$version-docker"
+          test -f "$out/manifest-docker.json" && test -f "$out/SHA256SUMS-docker"
+          test ! -e "$out/public.pem"
+          cat "$out/SHA256SUMS-docker"
+          gh release upload "$GITHUB_REF_NAME" "$out/manifest-docker.json" "$out/SHA256SUMS-docker" \
+            -R "$GITHUB_REPOSITORY" --clobber
+          echo "Attached manifest-docker.json and SHA256SUMS-docker to $GITHUB_REF_NAME."

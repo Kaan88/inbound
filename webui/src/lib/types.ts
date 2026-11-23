@@ -357,6 +357,9 @@ export interface HostStatus {
   lastError?: string;
   /** UI.R37: the newest version the server's own update check found; absent when it hasn't one (or is older). */
   latestVersion?: string | null;
+  /** UPD.D1: the update notice's dismiss state, kept on the server; null/absent means it has never been dismissed. */
+  updateNoticeHiddenUntil?: string | null;
+  updateNoticeSkippedVersion?: string | null;
 }
 
 export interface Snapshot {

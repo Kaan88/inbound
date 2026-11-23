@@ -129,6 +129,24 @@ public static class MessageTypes
     public const string UpdateInstall = "update.install";
     public const string UpdateInstallResult = "update.installResult";
     public const string UpdateDefer = "update.defer";
+    /// <summary>
+    /// UPD.D1, Host push: the server update notice's dismiss state changed (<see cref="UpdateNoticeStateDto"/>). Sent only
+    /// to admin sessions (a signed-in web UI, a desktop app paired as remoteClient); a paired browser extension never
+    /// hears it. A client that doesn't know it ignores it.
+    /// </summary>
+    public const string UpdateNoticeState = "update.notice";
+    /// <summary>
+    /// UPD.D1: dismiss the server update notice for a day or until a newer version
+    /// (<see cref="UpdateDismissRequest"/>), answered with <see cref="HostActionResult"/>. Admin sessions only; a paired
+    /// browser extension is refused (it never sends it: <see cref="NativeBridgePolicy"/>).
+    /// </summary>
+    public const string UpdateDismiss = "update.dismiss";
+    /// <summary>
+    /// UPD.D1: the server's available version and its changelog lines from the signed Docker manifest
+    /// (<see cref="ServerUpdateNotesResult"/>), for the update dialog. A Host that never checked, or a desktop Host, answers
+    /// with null fields.
+    /// </summary>
+    public const string UpdateNotes = "update.notes";
 
     /// <summary>
     /// UPD.N1: <c>{}</c>; answered with <see cref="ChangelogResult"/>, this Host's changelog (<see cref="ChangelogDto"/>),

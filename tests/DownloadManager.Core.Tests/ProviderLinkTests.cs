@@ -239,12 +239,22 @@ public sealed class NativeBridgePolicyTests
     [InlineData("settings.get")]
     [InlineData("host.shutdown")]
     [InlineData("update.install")]
+    [InlineData("update.dismiss")]
+    [InlineData("update.notes")]
     [InlineData("remote.add")]
     [InlineData("archive.extract")]
     [InlineData("HOST.PING")]
     [InlineData("")]
     [InlineData(null)]
     public void RefusesEverythingElseFromTheExtension(string? type) => Assert.False(NativeBridgePolicy.AllowFromExtension(type));
+
+    // UPD.D1: a paired browser extension never sees or dismisses the server update notice.
+    [Theory]
+    [InlineData("update.notice")]
+    [InlineData("update.latest")]
+    [InlineData("host.statusResult")]
+    [InlineData("update.notes")]
+    public void TheUpdateNoticeIsNeverSentToTheBrowser(string type) => Assert.False(NativeBridgePolicy.AllowToExtension(type));
 
     [Theory]
     [InlineData("remote.changed", false)]

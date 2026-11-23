@@ -36,6 +36,7 @@ public sealed partial class DownloadManagerService
     private readonly ISleepPrevention _sleepPrevention;
     private readonly IRemoteLinkBroker? _linkBroker;
     private readonly IRemoteSecretMatcher? _linkSecrets;
+    private readonly UpdateNoticeStore _updateNoticeStore;
     private static readonly HttpClient UpdateClient = new() { Timeout = TimeSpan.FromSeconds(30) };
     private const int MaxManifestBytes = 1024 * 1024;
     internal static string WindowsPowerShellPath => Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe");
@@ -56,6 +57,17 @@ public sealed partial class DownloadManagerService
     // The channel and manifest the value came from: after either changes in settings it says nothing until a new check.
     private string? _latestChannel;
     private string? _latestManifestUrl;
+    // UPD.D1: the newest Docker image version the server's own check found (manifest-docker.json); null on the desktop
+    // Host, whose own check fills _latestVersion instead.
+    private string? _serverLatestVersion;
+    // UPD.D1: the available version's changelog lines from the signed Docker manifest; null when there are none.
+    private List<ChangelogItem>? _serverUpdateNotes;
+    // UPD.D1: the server update notice's dismiss state, kept on the server per server.
+    private DateTimeOffset? _noticeHiddenUntil;
+    private string? _noticeSkippedVersion;
+
+    /// <summary>UPD.D1: raised with the new state when the server update notice's dismiss state changes.</summary>
+    public event EventHandler<UpdateNoticeState>? UpdateNoticeChanged;
 
     /// <summary>
     /// UI.R37: the newest version the last successful update check found on this Host's own channel, while it runs; null
@@ -68,12 +80,14 @@ public sealed partial class DownloadManagerService
     }
 
     private string? CurrentLatestVersionLocked()
-        => _latestVersion is not null &&
-           !string.IsNullOrWhiteSpace(_settings.UpdateManifestUrl) && !string.IsNullOrWhiteSpace(_settings.UpdatePublicKey) &&
-           string.Equals(_latestChannel, _settings.UpdateChannel, StringComparison.OrdinalIgnoreCase) &&
-           string.Equals(_latestManifestUrl, _settings.UpdateManifestUrl, StringComparison.Ordinal)
-            ? _latestVersion
-            : null;
+        => _serverLatestVersion is not null
+            ? _serverLatestVersion
+            : _latestVersion is not null &&
+              !string.IsNullOrWhiteSpace(_settings.UpdateManifestUrl) && !string.IsNullOrWhiteSpace(_settings.UpdatePublicKey) &&
+              string.Equals(_latestChannel, _settings.UpdateChannel, StringComparison.OrdinalIgnoreCase) &&
+              string.Equals(_latestManifestUrl, _settings.UpdateManifestUrl, StringComparison.Ordinal)
+                ? _latestVersion
+                : null;
 
     /// <summary>Records what a check found on the current channel and manifest; null when it found that none is known.</summary>
     private void NoteLatestVersion(string? version)
@@ -100,6 +114,71 @@ public sealed partial class DownloadManagerService
             _latestAnnounced = current;
         }
         LatestVersionChanged?.Invoke(this, current);
+    }
+
+    /// <summary>
+    /// UPD.D1: records what the server's own check found: the newest Docker image version and its changelog lines from the
+    /// signed manifest. Never called on the desktop Host, which has its own install check. Announces the change as
+    /// <see cref="LatestVersionChanged"/> does, so the same <c>update.latest</c> reaches every session.
+    /// </summary>
+    public void NoteServerUpdate(string? version, IReadOnlyList<ChangelogItem>? notes)
+    {
+        lock (_sync)
+        {
+            _serverLatestVersion = version;
+            _serverUpdateNotes = notes is null ? null : new List<ChangelogItem>(notes);
+        }
+        AnnounceLatestVersion();
+    }
+
+    /// <summary>UPD.D1: the server update notice's dismiss state, kept on the server per server.</summary>
+    public UpdateNoticeState UpdateNotice()
+    {
+        lock (_sync) return new UpdateNoticeState(_noticeHiddenUntil, _noticeSkippedVersion);
+    }
+
+    /// <summary>UPD.D1: the server's available version and its changelog lines, for the update dialog.</summary>
+    public ServerUpdateNotesResult ServerUpdateNotes()
+    {
+        lock (_sync) return new ServerUpdateNotesResult
+        {
+            AvailableVersion = _serverLatestVersion,
+            Notes = _serverUpdateNotes is null ? null : new List<ChangelogItem>(_serverUpdateNotes),
+            ReleaseDate = _serverLatestVersion is null ? null : Changelog.Find(Changelog.Embedded, _serverLatestVersion)?.Date,
+        };
+    }
+
+    /// <summary>
+    /// UPD.D1: dismisses the server update notice: "Not now" (and ×) for a day, "Skip this version" until a newer one. The
+    /// state is kept on the server per server and announced to every admin session.
+    /// </summary>
+    public HostActionResult DismissUpdateNotice(string action)
+    {
+        var now = _timeProvider.GetUtcNow();
+        string? latest;
+        UpdateNoticeState current;
+        lock (_sync)
+        {
+            latest = CurrentLatestVersionLocked();
+            current = new UpdateNoticeState(_noticeHiddenUntil, _noticeSkippedVersion);
+        }
+
+        if (action == UpdateDismissActions.Skip && string.IsNullOrWhiteSpace(latest))
+            return new HostActionResult { Ok = false, Message = "No update is known to skip." };
+
+        var next = UpdateNoticeState.Dismiss(action, latest, current, now);
+        if (next is null)
+            return new HostActionResult { Ok = false, Message = "Unknown dismiss action." };
+
+        lock (_sync)
+        {
+            _noticeHiddenUntil = next.HiddenUntil;
+            _noticeSkippedVersion = next.SkippedVersion;
+        }
+
+        _updateNoticeStore.Save(next);
+        UpdateNoticeChanged?.Invoke(this, next);
+        return new HostActionResult { Ok = true };
     }
     private readonly object _sync = new();
     private readonly List<string> _orphanPartFiles = new();
@@ -135,6 +214,7 @@ public sealed partial class DownloadManagerService
         ITorrentDownloadEngine? torrentEngine = null)
     {
         _paths = paths;
+        _updateNoticeStore = new UpdateNoticeStore(paths.Root, log);
         _jobStore = jobStore;
         _checkpointStore = checkpointStore;
         _settingsStore = settingsStore;
@@ -223,6 +303,13 @@ public sealed partial class DownloadManagerService
         await _jobStore.InitializeAsync(cancellationToken).ConfigureAwait(false);
         _settings = await _settingsStore.LoadAsync(cancellationToken).ConfigureAwait(false);
         _settings.Revision = StartingRevision(_timeProvider);
+        // UPD.D1: the notice's dismiss state survives a restart, so "Not now" and "Skip this version" keep holding.
+        var notice = _updateNoticeStore.Load();
+        lock (_sync)
+        {
+            _noticeHiddenUntil = notice.HiddenUntil;
+            _noticeSkippedVersion = notice.SkippedVersion;
+        }
         _engine.UpdateProxy(_settings.Proxy);
         _engine.UpdateSiteLogins(BuildSiteLogins(_settings));
         _engine.UpdateHostConnectionLimit(_settings.MaxConnectionsPerHost);
@@ -6072,6 +6159,8 @@ public sealed partial class DownloadManagerService
             BrowserIntegration = nativeHost.IntegrationText(_settings.BrowserIntegrationEnabled),
             OrphanPartFiles = _orphanPartFiles.Where(File.Exists).ToList(),
             LatestVersion = CurrentLatestVersionLocked(),
+            UpdateNoticeHiddenUntil = _noticeHiddenUntil,
+            UpdateNoticeSkippedVersion = _noticeSkippedVersion,
             ExtensionsSeen = ExtensionSightings?.Snapshot(),
             WaitingForMeteredNetwork = MeteredRuleHoldsLocked(),
         };

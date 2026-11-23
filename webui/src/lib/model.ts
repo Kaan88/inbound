@@ -109,6 +109,17 @@ export function apply(model: Model, message: Envelope): boolean {
       return true;
     }
 
+    // UPD.D1: the server update notice's dismiss state changed on the server (someone dismissed or skipped it).
+    case 'update.notice': {
+      const state = message.payload as { hiddenUntil?: string | null; skippedVersion?: string | null } | undefined;
+      if (!model.status) return false;
+      const hiddenUntil = state?.hiddenUntil ?? null;
+      const skippedVersion = state?.skippedVersion ?? null;
+      if (model.status.updateNoticeHiddenUntil === hiddenUntil && model.status.updateNoticeSkippedVersion === skippedVersion) return false;
+      model.status = { ...model.status, updateNoticeHiddenUntil: hiddenUntil, updateNoticeSkippedVersion: skippedVersion };
+      return true;
+    }
+
     case 'settings.result': {
       const result = message.payload as { ok: boolean; settings?: Settings };
       if (!result?.settings) return false;

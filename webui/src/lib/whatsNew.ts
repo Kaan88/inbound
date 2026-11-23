@@ -92,6 +92,19 @@ export function filterChangelog(versions: readonly ChangelogVersion[], features:
   return { versions: shown, elsewhere };
 }
 
+/** A flat list of notes (the server's update notice) as this surface shows them: its own lines and the others folded. */
+export function filterNotes(notes: readonly ChangelogItem[] | null | undefined, features: Features): { here: string[]; elsewhere: ElsewhereLine[] } {
+  const here: string[] = [];
+  const elsewhere: ElsewhereLine[] = [];
+  for (const item of notes ?? []) {
+    if (typeof item?.text !== 'string' || !item.text.trim()) continue;
+    const place = placeOf(Array.isArray(item.tags) ? item.tags : [], features);
+    if (place === 'here') here.push(item.text);
+    else if (place) elsewhere.push({ place, text: item.text });
+  }
+  return { here, elsewhere };
+}
+
 /** "the Windows app and the browser extension", in the order the lines name them. */
 export function placesText(elsewhere: readonly ElsewhereLine[]): string {
   const names = [...new Set(elsewhere.map((line) => placeNames[line.place] ?? 'the server'))];

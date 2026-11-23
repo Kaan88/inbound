@@ -28,9 +28,17 @@ if (notesAt >= 0)
     args = args.Where((_, index) => index != notesAt && index != notesAt + 1).ToArray();
 }
 
-if (args.Length is < 5 or > 7)
+// UPD.D1: --docker signs a Docker manifest (no package to hash); the "installer-url" is the image reference, and the
+// manifest carries size 0 and an empty sha256, which the server's check never reads.
+var docker = Array.IndexOf(args, "--docker") >= 0;
+if (docker) args = args.Where(arg => arg != "--docker").ToArray();
+
+var minArgs = docker ? 4 : 5;
+var maxArgs = docker ? 6 : 7;
+if (args.Length < minArgs || args.Length > maxArgs)
 {
     Console.Error.WriteLine("usage: UpdateSigner <output-dir> <version> <installer-url> <package-file> <private-key-file> [channel] [manifest-name] [--notes-from <changelog.json>]");
+    Console.Error.WriteLine("       UpdateSigner --docker <output-dir> <version> <image> <private-key-file> [channel] [manifest-name] [--notes-from <changelog.json>]");
     Console.Error.WriteLine("       UpdateSigner --generate-key <new-private-key-file>");
     return 2;
 }
@@ -38,11 +46,11 @@ if (args.Length is < 5 or > 7)
 var outputDir = args[0];
 var version = args[1];
 var installerUrl = args[2];
-var packagePath = args[3];
-var privateKeyPath = args[4];
-var channel = args.Length > 5 ? args[5] : "stable";
-// The AppImage's manifest is manifest-linux-x64.json, beside the Windows manifest.json in the same release.
-var manifestName = args.Length > 6 ? args[6] : "manifest.json";
+var packagePath = docker ? null : args[3];
+var privateKeyPath = args[docker ? 3 : 4];
+var channel = args.Length > (docker ? 4 : 5) ? args[docker ? 4 : 5] : "stable";
+// The AppImage's manifest is manifest-linux-x64.json, the Docker one manifest-docker.json, beside the Windows manifest.json.
+var manifestName = args.Length > (docker ? 5 : 6) ? args[docker ? 5 : 6] : "manifest.json";
 if (manifestName != Path.GetFileName(manifestName) || !manifestName.EndsWith(".json", StringComparison.Ordinal))
 {
     Console.Error.WriteLine("manifest-name must be a plain .json file name.");
@@ -77,8 +85,20 @@ if (changelogPath is not null)
     }
 }
 
-var bytes = await File.ReadAllBytesAsync(packagePath);
-var sha256 = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+long size;
+string sha256;
+if (docker)
+{
+    size = 0;
+    sha256 = string.Empty;
+}
+else
+{
+    var bytes = await File.ReadAllBytesAsync(packagePath!);
+    sha256 = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+    size = bytes.Length;
+}
+
 Directory.CreateDirectory(outputDir);
 
 using var rsa = RSA.Create();
@@ -86,7 +106,7 @@ rsa.ImportFromPem(await File.ReadAllTextAsync(privateKeyPath));
 // Validate that the supplied PEM includes private material before writing output.
 _ = rsa.ExportParameters(includePrivateParameters: true);
 await File.WriteAllTextAsync(Path.Combine(outputDir, "public.pem"), rsa.ExportSubjectPublicKeyInfoPem());
-var canonical = $"{version}\n{channel}\n{installerUrl}\n{bytes.Length}\n{sha256}";
+var canonical = $"{version}\n{channel}\n{installerUrl}\n{size}\n{sha256}";
 var signature = rsa.SignData(
     Encoding.UTF8.GetBytes(canonical), HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
 var camelCase = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
@@ -105,7 +125,7 @@ var manifest = new
     version,
     channel,
     installerUrl,
-    size = bytes.Length,
+    size,
     sha256,
     signature = Convert.ToBase64String(signature),
     notes,
@@ -119,5 +139,7 @@ await File.WriteAllTextAsync(
         WriteIndented = true,
         DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
     }));
-Console.WriteLine($"signed {version} ({bytes.Length} bytes, {sha256})" + (notes is null ? string.Empty : $", {notes.Count} note lines"));
+Console.WriteLine(docker
+    ? $"signed {version} (Docker manifest, no package)" + (notes is null ? string.Empty : $", {notes.Count} note lines")
+    : $"signed {version} ({size} bytes, {sha256})" + (notes is null ? string.Empty : $", {notes.Count} note lines"));
 return 0;

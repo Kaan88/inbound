@@ -553,6 +553,7 @@ public sealed partial class MainWindow : Window
         // UPD.N1: once per window start, after this PC's first snapshot.
         if (!_connection.IsRemote && !_whatsNewDecided) MaybeOpenWhatsNewAtStart();
         UpdateExtensionHint(snapshot.Jobs.Any(job => ExtensionPromoRules.FromBrowser(job.Source)));
+        UpdateServerNotice();
 
         if (_pendingSettingsOpen)
         {
@@ -764,6 +765,7 @@ public sealed partial class MainWindow : Window
         NoteShownConnection(connected, error);
         OnTorrentControlsConnection(connected);
         UpdateStatusText();
+        UpdateServerNotice();
 
         // The rows stay on the list while the Host is away, so it isn't empty.
         EmptyText.Visibility = _visibleJobs.Count == 0 ? Visibility.Visible : Visibility.Collapsed;

@@ -65,6 +65,8 @@ public sealed partial class HostConnection : IAsyncDisposable
     public event Action<UpdateProgressDto>? UpdateProgressChanged;
     /// <summary>UI.R37: the newest version the connected Host's update check found changed; this PC's or a server's.</summary>
     public event Action<string?>? LatestVersionChanged;
+    /// <summary>UPD.D1: the connected server's update-notice dismiss state changed (a web session or another window dismissed it).</summary>
+    public event Action<DateTimeOffset?, string?>? UpdateNoticeStateChanged;
     /// <summary>UI.R41: this PC's Host saw a browser's extension for the first time; the whole list. Never raised for a server.</summary>
     public event Action<Dictionary<string, DateTimeOffset>>? ExtensionsSeenChanged;
     public event Action<JobDto, string>? JobChanged;
@@ -654,6 +656,13 @@ public sealed partial class HostConnection : IAsyncDisposable
     public Task<IpcMessage> ShutdownAsync(CancellationToken cancellationToken = default)
         => RequestAsync(MessageTypes.HostShutdown, new EmptyPayload(), TimeSpan.FromSeconds(5), cancellationToken);
 
+    // UPD.D1: dismissing the shown server's update notice ("notNow" or "skip"), and reading its available version and notes.
+    public Task<IpcMessage> DismissUpdateNoticeAsync(string action, CancellationToken cancellationToken = default)
+        => RequestAsync(MessageTypes.UpdateDismiss, new UpdateDismissRequest { Action = action }, TimeSpan.FromSeconds(10), cancellationToken);
+
+    public Task<IpcMessage> ServerUpdateNotesAsync(CancellationToken cancellationToken = default)
+        => RequestAsync(MessageTypes.UpdateNotes, new EmptyPayload(), TimeSpan.FromSeconds(10), cancellationToken);
+
     private async Task<IpcMessage> RequestAsync<T>(
         string type,
         T payload,
@@ -926,6 +935,12 @@ public sealed partial class HostConnection : IAsyncDisposable
         {
             // An unreadable one is skipped and said, like update.progress (audit L8).
             LatestVersionChanged?.Invoke(message.GetPayload<UpdateLatestDto>()?.LatestVersion);
+            return;
+        }
+        if (message.Type == MessageTypes.UpdateNoticeState)
+        {
+            var state = message.GetPayload<UpdateNoticeStateDto>();
+            UpdateNoticeStateChanged?.Invoke(state?.HiddenUntil, state?.SkippedVersion);
             return;
         }
         if (message.Type == MessageTypes.ExtensionsSeen)

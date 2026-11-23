@@ -117,6 +117,14 @@ public sealed partial class MainWindow
             // UI.B30: an open Get the Browser Extension dialog or Options shows it too.
             RefreshExtensionLinkPanels();
         });
+        // UPD.D1: the shown server's notice dismiss state changed (dismissed here, or in a web session of the same server).
+        connection.UpdateNoticeStateChanged += (hiddenUntil, skippedVersion) => DispatcherQueue.TryEnqueue(() =>
+        {
+            if (connection != _connection || _status is not { } shown) return;
+            shown.UpdateNoticeHiddenUntil = hiddenUntil;
+            shown.UpdateNoticeSkippedVersion = skippedVersion;
+            UpdateServerNotice();
+        });
         // Only this PC's Host raises it (HostConnection never does for a server).
         connection.HostExiting += () => DispatcherQueue.TryEnqueue(() =>
         {
