@@ -1042,7 +1042,7 @@ public sealed partial class RemoteJobCoordinator
         var rawState = Words(entry, item.RawState, 100);
         var name = Words(entry, item.Name, 300);
         // TB.F18: only for an item that failed (this runs on every poll). The site is only worth asking about when
-        // TorBox said nothing of its own, or only a code.
+        // The provider said nothing of its own, or only a code.
         string? reason = null;
         var errorWords = outcome == RemoteItemOutcome.Failed ? Words(entry, item.Error, 500, SecretsOf(job)) : null;
         var errorCode = outcome == RemoteItemOutcome.Failed ? CodeWord(item.Error) : null;
