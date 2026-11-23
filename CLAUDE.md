@@ -51,8 +51,7 @@ Android accessibility polish and expanded TalkBack acceptance are optional
 follow-up, not gates for the remaining milestones. Preserve existing accessibility
 and record findings without diverting milestone work (owner, 2026-11-19).
 
-Commits `49f5663c..c745317f` were made outside Claude sessions and are unreviewed
-by Fable; they are the first open entry in the
+Commits `49f5663c..c745317f` (made outside Claude sessions) were reviewed by Fable and closed on 2026-11-23; see the
 [Fable review queue](docs/plans/android-fable-review-queue.md).
 
 ## What this project is
