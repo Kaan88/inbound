@@ -1,5 +1,29 @@
 # Progress - session handoff
 
+## UPD.D1 and the 0.9.1 release review, 2026-11-23 (branches `w/upd-d1`, `w/rr-opus`, `w/rr-sonnet`; merged into main)
+
+- **UPD.D1** (DeepSeek, then Sonnet for the addendum after DeepSeek's balance ran out; reviewed by Opus). Server:
+  `ServerUpdateCheck` reads the signed `manifest-docker.json` daily and at start (`INBOUND_UPDATE_CHECK=false`), keeps the
+  last version on a failed check; dismiss state in `update-notice.json`. Web UI notice bar and dialog; desktop bar and
+  dialog on a Docker server; the desktop Host's own scheduled check also reads the Docker manifest (no new timer) so the
+  window marks a saved Docker server with an update; a paired extension gets only `updateWaiting` and draws a dot.
+  `prepare-docker-release.sh` run by hand with a throwaway key: it signs 25 note lines.
+- **Fable release review** of `12d4b8b2..50d57d69`: approve after fixes. Fixed: (1) on a Docker server older than 0.9.1
+  the desktop bar's Not now and Skip did nothing (the server doesn't know `update.dismiss`): the window now keeps such a
+  dismiss itself, and `update.dismiss` takes the shown version so a server whose own check found none can Skip it;
+  (2) the Docker signing step had no `setup-dotnet`: signing is now its own job after the image, the only one with
+  `contents: write`; (3) the bar now follows `update.latest`/`update.dockerLatest` pushes; (4) a certificate trusted for an
+  FTPS site still vouched for https remotes through the shared `--ca-cert`: WebDAV, S3 and B2 remotes without their own
+  trust now get a roots-only CA file while it is in use (end-to-end test). Sign-in remotes (Drive, OneDrive, Dropbox) are
+  named rclone remotes, where the override was not shown to work by hand, so they keep the shared pool: part of the FTPS
+  question for the owner; (5) a file stopped with another file's hung copy no longer spends a try (test fails without the
+  fix); (6) the Docker check runs after the Host's own update handling, in its own try; (8) per-site CA files are pruned
+  only at rclone's start (by hand, rclone 1.76 answers an unreadable `override.ca_cert` with an error, "panic received",
+  and keeps running). UI: the desktop dialog reads Skip this version | Close; the web dialog's tag sentence follows the
+  running version; a refused web dismiss hides the notice for the session and says so; the server's manifest read is
+  bounded without Content-Length; the keyboard-opened row menu flips above its row. Left: (7) the extension dot changes
+  only when the popup asks for the list (the ping answer has no status).
+
 ## SITES.10 (1)-(3), Android review fixes, 2026-11-23 (branches `sites10-audit-followups`, `w/android-f2`; merged into main)
 
 - **(1) Trusted certificates per site** (Opus). An https site's (WebDAV, S3) certificates go in
