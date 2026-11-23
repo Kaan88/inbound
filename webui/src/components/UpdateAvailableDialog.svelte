@@ -2,7 +2,7 @@
   import Dialog from './Dialog.svelte';
   import { copyText } from '../lib/clipboard';
   import { displayDate } from '../lib/whatsNew';
-  import { composeCommand, runCommand, dialogSubtitle, windowsHowTo, type UpdateKind } from '../lib/updateNotice';
+  import { composeCommand, runCommand, dialogSubtitle, tagNote, windowsHowTo, type UpdateKind } from '../lib/updateNotice';
 
   // UPD.D1: the update dialog the notice bar opens. Docker: the changelog lines for this server, then the compose and
   // docker run commands with a Copy each and a Docker guide link. A normal install (the Windows bridge): the same notes,
@@ -67,7 +67,7 @@
         <button class="btn h-7 px-2.5 py-0 text-[12px]" onclick={() => copy(runCommand, 'run')}>{copied === 'run' ? 'Copied' : 'Copy'}</button>
       </div>
     </div>
-    <p class="mt-1.5 text-[12px] leading-snug text-muted">Then start the container again with the same options. An image pinned to :0.7 gets 0.7.x updates; a new 0.8 needs the tag changed. <a class="text-accent hover:underline" href="https://github.com/Kaan88/inbound/blob/main/docs/docker.md" target="_blank" rel="noopener noreferrer">Docker guide</a></p>
+    <p class="mt-1.5 text-[12px] leading-snug text-muted">Then start the container again with the same options. {tagNote(current)} <a class="text-accent hover:underline" href="https://github.com/Kaan88/inbound/blob/main/docs/docker.md" target="_blank" rel="noopener noreferrer">Docker guide</a></p>
   {/if}
 
   {#snippet footer()}

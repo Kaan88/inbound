@@ -18,6 +18,8 @@ test('EXT.R17: the menu opens downward when there is room, upward when there is 
   assert.deepEqual(placeMenu({ width: 180, height: 60, viewport, at: { x: 40, y: 160 } }),
     { left: 40, top: 100, maxHeight: 200 - EDGE * 2 });
 
+  // Opened from the keyboard on a row: flipped upward it sits above the row's top edge, not over the row.
+  assert.equal(placeMenu({ width: 180, height: 60, viewport, at: { x: 40, y: 160 }, above: 130 }).top, 70);
   // From a row: under it, then above it.
   const row = { left: 20, top: 40, bottom: 70 };
   assert.equal(placeMenu({ width: 180, height: 60, viewport, anchor: row }).top, 72);
@@ -156,7 +158,7 @@ test('EXT.R17: the row menu of the popup itself is placed inside it, the popup\'
     'dm.jobs': async () => ({ ok: true, jobs: [job] }),
     'dm.askQueue': async () => ({ ok: true, items: [] }),
   } });
-  layout(page, { width: 360, height: 240, menuHeight: 200 });
+  layout(page, { width: 360, height: 240, menuHeight: 100 });
   try {
     page.load('popup.ts');
     await page.ready();
@@ -165,14 +167,15 @@ test('EXT.R17: the row menu of the popup itself is placed inside it, the popup\'
     const row = [...doc.querySelectorAll('.job')].find((item) => item.textContent.includes('report.pdf'));
     assert.ok(row, 'the download is listed');
     // A row low in the popup. The keyboard's contextmenu has no point of its own, so the popup uses the row's.
-    rowRect(row, { left: 8, top: 200, bottom: 230 });
+    rowRect(row, { left: 8, top: 150, bottom: 180 });
     const opening = new page.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 30, clientY: 220 });
     row.dispatchEvent(opening);
     assert.equal(opening.defaultPrevented, true, 'the browser\'s own menu stays shut');
     const menu = doc.querySelector('.popup-menu');
     assert.ok(menu, 'the row menu opened');
-    // at = the row's bottom; 230 + 200 does not fit in 240, so it is above that point.
-    assert.equal(menu.style.top, `${230 - 200}px`, 'above the row, inside the popup');
+    // The row's bottom is 180; 180 + 100 does not fit in 240, so the menu goes above the row's top edge (150 - 100),
+    // not over the row from its bottom edge (180 - 100).
+    assert.equal(menu.style.top, '50px', 'above the row, inside the popup');
     assert.equal(menu.style.maxHeight, `${240 - 8}px`);
     assert.equal(doc.documentElement.style.minHeight, '', 'the popup is not made taller');
     assert.deepEqual([...menu.querySelectorAll('.menu-item')].map((item) => item.textContent),

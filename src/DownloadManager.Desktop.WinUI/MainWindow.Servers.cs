@@ -104,12 +104,21 @@ public sealed partial class MainWindow
             if (connection == _local && _localStatus is { } local) local.LatestVersion = latest;
             if (connection == _connection && _status is { } shown) shown.LatestVersion = latest;
             // This PC's latest is also what a shown server without a check of its own is held to.
-            if (connection == _local || connection == _connection) UpdateStatusText();
+            if (connection == _local || connection == _connection)
+            {
+                UpdateStatusText();
+                UpdateServerNotice();
+            }
         });
         // UPD.D1 addendum: this PC's Host found another newest Docker image version; the switcher menus mark saved servers by it.
         connection.DockerLatestChanged += latest => DispatcherQueue.TryEnqueue(() =>
         {
-            if (connection == _local && _localStatus is { } local) local.DockerLatestVersion = latest;
+            if (connection != _local || _localStatus is not { } local) return;
+            local.DockerLatestVersion = latest;
+            UpdateStatusText();
+            UpdateServerNotice();
+            // The Tasks submenu's saved-server marks follow the Docker latest too.
+            FillServerMenu(TasksServersItem.Items);
         });
         // UI.R41, review: an extension reached this PC's Host for the first time, so the hint goes now.
         connection.ExtensionsSeenChanged += seen => DispatcherQueue.TryEnqueue(() =>

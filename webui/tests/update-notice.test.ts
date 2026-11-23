@@ -3,6 +3,8 @@ import { apply, emptyModel } from '../src/lib/model';
 import type { Envelope } from '../src/lib/protocol';
 import {
   composeCommand,
+  dismissFailure,
+  tagNote,
   dialogSubtitle,
   filterUpdateNotes,
   noticeShown,
@@ -70,5 +72,22 @@ describe('update notice', () => {
     expect(model.status?.updateNoticeHiddenUntil).toBe('x');
     expect(model.status?.updateNoticeSkippedVersion).toBe('0.7.4');
     expect(apply(model, message('update.notice', { hiddenUntil: 'x', skippedVersion: '0.7.4' }))).toBe(false);
+  });
+});
+
+describe('update dialog tag note and dismiss failure', () => {
+  it('derives the tag line from the running version', () => {
+    expect(tagNote('0.9.0')).toBe('An image pinned to :0.9 gets 0.9.x updates; a new 0.10 needs the tag changed.');
+    expect(tagNote('v1.2')).toContain(':1.2 gets 1.2.x');
+    expect(tagNote('1.2')).toContain('a new 1.3 ');
+    expect(tagNote('nightly')).toBe('');
+    expect(tagNote(null)).toBe('');
+  });
+
+  it('reports an ok: false dismiss answer and ignores a good one', () => {
+    expect(dismissFailure({ ok: true })).toBeNull();
+    expect(dismissFailure(null)).toBeNull();
+    expect(dismissFailure({ ok: false, message: 'Not allowed.' })).toBe('Not allowed.');
+    expect(dismissFailure({ ok: false })).toBe("The server couldn't hide the update notice.");
   });
 });

@@ -242,8 +242,6 @@ internal sealed class HostUpdateMonitor : IDisposable
         try
         {
             var check = await _service.CheckForUpdatesAsync().ConfigureAwait(false);
-            // UPD.D1: the same scheduled check also reads the Docker manifest (no timer of its own); it never throws on a failed fetch.
-            await _service.CheckDockerAsync().ConfigureAwait(false);
             if (!check.Ok || check.Status != "updateAvailable")
             {
                 lock (_sync)
@@ -287,6 +285,16 @@ internal sealed class HostUpdateMonitor : IDisposable
             {
                 _checking = false;
             }
+        }
+
+        // UPD.D1: the same scheduled check also reads the Docker manifest (no timer of its own), after this Host's own result is handled.
+        try
+        {
+            await _service.CheckDockerAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _log($"Docker update check failed: {ex.Message}");
         }
     }
 

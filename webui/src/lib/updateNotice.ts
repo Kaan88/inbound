@@ -66,3 +66,20 @@ export function filterUpdateNotes(
   const tail = elsewhereText(view.elsewhere);
   return { here: view.here, elsewhere: tail ? [tail] : [] };
 }
+
+/**
+ * The docker tag line of the update dialog, from the running server's version: an image pinned to :0.9 gets 0.9.x
+ * updates, a new 0.10 needs the tag changed. Empty when the version can't be read as major.minor.
+ */
+export function tagNote(version: string | null | undefined): string {
+  const match = /^v?(\d+)\.(\d+)(?:\.\d+)?/.exec((version ?? '').trim());
+  if (!match) return '';
+  const minor = `${match[1]}.${match[2]}`;
+  return `An image pinned to :${minor} gets ${minor}.x updates; a new ${match[1]}.${Number(match[2]) + 1} needs the tag changed.`;
+}
+
+/** What to tell the user when the server answered a dismiss with ok: false (null when it took it). */
+export function dismissFailure(answer: { ok?: boolean; message?: string | null } | null | undefined): string | null {
+  if (!answer || answer.ok !== false) return null;
+  return answer.message?.trim() || "The server couldn't hide the update notice.";
+}

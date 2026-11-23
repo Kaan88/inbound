@@ -57,6 +57,28 @@ public sealed class ServerUpdateCheckTests
     }
 
     [Fact]
+    public async Task AnOversizeBodyWithoutContentLengthIsRefusedAndReadOnlyToTheLimit()
+    {
+        var service = NewService(out var paths, out var engine);
+        var logs = new List<string>();
+        var endless = new EndlessContent();
+        using var check = new ServerUpdateCheck(service, logs.Add, "public-key", "0.7.2", "https://update.test/manifest-docker.json",
+            new StubHandler(_ => Json(endless)));
+        try
+        {
+            await check.CheckAsync();
+            Assert.Null(service.LatestVersion);
+            Assert.Contains(logs, line => line.Contains("too large"));
+            Assert.True(endless.Served <= 1024 * 1024 + 64 * 1024, $"read {endless.Served} bytes");
+        }
+        finally
+        {
+            engine.Dispose();
+            Delete(paths);
+        }
+    }
+
+    [Fact]
     public async Task AFailedFetchRecordsNothingButDoesNotThrow()
     {
         var service = NewService(out var paths, out var engine);
@@ -151,6 +173,44 @@ public sealed class ServerUpdateCheckTests
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
             => Task.FromResult(respond(request));
+    }
+
+    /// <summary>A body with no Content-Length that never ends; it counts the bytes the reader took.</summary>
+    private sealed class EndlessContent : HttpContent
+    {
+        public long Served;
+
+        protected override Task SerializeToStreamAsync(Stream stream, System.Net.TransportContext? context) => throw new NotSupportedException();
+
+        protected override Task<Stream> CreateContentReadStreamAsync() => Task.FromResult<Stream>(new Endless(this));
+
+        protected override bool TryComputeLength(out long length)
+        {
+            length = 0;
+            return false;
+        }
+
+        private sealed class Endless(EndlessContent owner) : Stream
+        {
+            public override bool CanRead => true;
+            public override bool CanSeek => false;
+            public override bool CanWrite => false;
+            public override long Length => throw new NotSupportedException();
+            public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+            public override void Flush() { }
+            public override int Read(byte[] buffer, int offset, int count) => Fill(buffer.AsSpan(offset, count));
+            public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) => new(Fill(buffer.Span));
+            public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+            public override void SetLength(long value) => throw new NotSupportedException();
+            public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+            private int Fill(Span<byte> span)
+            {
+                span.Fill((byte)'x');
+                owner.Served += span.Length;
+                return span.Length;
+            }
+        }
     }
 
     private static HttpResponseMessage Json(HttpContent content)

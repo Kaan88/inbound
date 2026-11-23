@@ -517,13 +517,15 @@ function openRowMenu(job: JobSummary, row: HTMLElement, at?: { x: number; y: num
   // From the keyboard: under the row's start (EXT.R17 puts it above the row when it doesn't fit), kept inside the popup
   // like a right-click's.
   const rect = row.getBoundingClientRect();
+  // Flipped upward it sits above the row (its top edge), not over the row itself.
+  const above = at ? undefined : rect.top;
   at ??= { x: rect.left + 24, y: rect.bottom };
   openMenu(row, rowMenuEntries(job).map((entry) => ({
     label: entry.label,
     disabled: !entry.enabled,
     title: entry.title,
     onSelect: () => runMenuChoice(job, entry.id),
-  })), { at });
+  })), { at, above });
 }
 
 /** EXT.R13, EXT.R18: a finished download's file opens on one click, not the app; the app shows a program in its folder. */
