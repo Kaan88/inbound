@@ -187,6 +187,7 @@ internal sealed partial class RemoteFilesScreen : IDisposable
     {
         _generation++;
         _busy = false;
+        _openTransfersPending = false;
     }
 
     private async Task LoadLocationsAsync()
@@ -208,7 +209,7 @@ internal sealed partial class RemoteFilesScreen : IDisposable
         catch (Exception) { if (!_closed && generation == _generation) _error = LoadErrorText; }
         finally
         {
-            if (!_closed && generation == _generation) { _busy = false; Render(); ApplyPendingShow(); }
+            if (!_closed && generation == _generation) { _busy = false; Render(); ApplyPendingShow(); if (_openTransfersPending) OpenTransfers(); } // (Fable L2)
         }
     }
 

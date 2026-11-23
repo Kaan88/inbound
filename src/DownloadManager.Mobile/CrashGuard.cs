@@ -63,12 +63,19 @@ public static class CrashGuard
         s.SessionRunId is { } own && own.AsSpan().SequenceEqual(runId) ? new CrashGuardState(0, null) : s;
 
     /// <summary>
-    /// A command only the user sends that starts downloads (add, resume, retry, download again, resume all): it resets a tripped
-    /// guard. A download the queue starts on its own does not, even with the app visible (Fable finding 9).
+    /// A command only the user sends that starts downloads (add, resume, retry, download again, resume all, a torrent,
+    /// a TorBox download or a Remote Files transfer): it resets a tripped guard. A download the queue starts on its own
+    /// does not, even with the app visible (Fable finding 9).
     /// </summary>
     public static bool IsUserStart(string messageType) => messageType is DownloadManager.Contracts.MessageTypes.JobAdd
         or DownloadManager.Contracts.MessageTypes.JobResume or DownloadManager.Contracts.MessageTypes.JobRetry
-        or DownloadManager.Contracts.MessageTypes.JobRedownload or DownloadManager.Contracts.MessageTypes.JobsResumeAll;
+        or DownloadManager.Contracts.MessageTypes.JobRedownload or DownloadManager.Contracts.MessageTypes.JobsResumeAll
+        // (Fable F2) The phone's own starts: torrents, TorBox downloads and Remote Files transfers.
+        or DownloadManager.Contracts.TorrentMessageTypes.Add or DownloadManager.Contracts.TorrentMessageTypes.Import
+        or DownloadManager.Contracts.MessageTypes.RemoteAdd or DownloadManager.Contracts.MessageTypes.RemoteStartQueued
+        or DownloadManager.Contracts.MessageTypes.RemoteContainerAdd
+        or DownloadManager.Contracts.SitesMessageTypes.TransferStart or DownloadManager.Contracts.SitesMessageTypes.SafeDownloadStart
+        or DownloadManager.Contracts.SitesMessageTypes.TransferResume or DownloadManager.Contracts.SitesMessageTypes.TransferRetry;
 
     /// <summary>Only explicit client starts lift the guard; queue policy and stop operations never do.</summary>
     public static bool IsUserStart(DownloadManager.Contracts.IpcMessage request)

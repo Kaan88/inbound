@@ -74,10 +74,12 @@ internal sealed partial class RemoteFilesScreen
             if (review.Case == SftpKeyCase.MoreKeys)
                 AddInset(column, Banner(BannerKind.Info, "The server also offers other key types. Trusting them lets this phone connect whichever one the server uses.", null,
                     Resource.Drawable.ic_remote_info));
-            foreach (var key in review.Offered) AddInset(column, CopyBox(KeyText(key), "Copy key", null, key.Fingerprint));
-            if (review.Case != SftpKeyCase.MoreKeys)
-                AddInset(column, Banner(BannerKind.Info, "Compare a fingerprint with the one from the server's administrator before you trust it.", null,
-                    Resource.Drawable.ic_remote_info));
+            // x26b shows only the new keys: the ones already trusted are not the question (Fable F1).
+            var shown = review.Case == SftpKeyCase.MoreKeys ? review.NewKeys : review.Offered;
+            foreach (var key in shown) AddInset(column, CopyBox(KeyText(key), "Copy key", null, key.Fingerprint));
+            // A new key is checked as a first one is (Fable F1): the advice stays for MoreKeys too.
+            AddInset(column, Banner(BannerKind.Info, "Compare a fingerprint with the one from the server's administrator before you trust it.", null,
+                Resource.Drawable.ic_remote_info));
         }
         CheckBox? confirmed = null;
         if (changed)
@@ -85,7 +87,8 @@ internal sealed partial class RemoteFilesScreen
             confirmed = new CheckBox(_activity) { Text = "I checked the new key with the server's administrator", SaveEnabled = false };
             AddInset(column, confirmed);
         }
-        string primaryText = changed ? "Replace trusted key" : review.Offered.Count > 1 ? "Trust keys" : "Trust key";
+        int asked = review.Case == SftpKeyCase.MoreKeys ? review.NewKeys.Count : review.Offered.Count;
+        string primaryText = changed ? "Replace trusted key" : asked > 1 ? "Trust keys" : "Trust key";
         var accept = SheetButtons(column, primaryText, Resource.Drawable.ic_remote_key,
             () => _ = SaveSftpKeyAsync(site, review, reviewedGeneration, trusted));
         if (confirmed is not null)

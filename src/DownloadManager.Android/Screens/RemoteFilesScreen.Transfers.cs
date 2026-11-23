@@ -32,9 +32,14 @@ internal sealed partial class RemoteFilesScreen
     private SwipeRefreshLayout? _tfSwipe;
     private FrameLayout? _tfRefreshDisc;
 
+    private bool _openTransfersPending;
+
     private void OpenTransfers()
     {
-        if (!SameHost() || _busy) return;
+        if (!SameHost()) return;
+        // (Fable L2) A tap while the locations load is in flight opens Transfers when it ends instead of doing nothing.
+        if (_busy) { _openTransfersPending = true; return; }
+        _openTransfersPending = false;
         _showTransfers = true;
         _transfersGen++;
         _transferLoading = false;
@@ -51,6 +56,7 @@ internal sealed partial class RemoteFilesScreen
         _transfersGen++;
         _transferLoading = false;
         _showTransfers = false;
+        _gapScroll = null; _gapTarget = 0; // (Fable L3) the old screen's scroll view is gone with it
         _error = null;
         _confirm?.Dismiss();
         _sheet?.Dismiss();

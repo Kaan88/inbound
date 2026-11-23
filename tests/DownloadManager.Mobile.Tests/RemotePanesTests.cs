@@ -177,6 +177,21 @@ public sealed class RemotePanesTests
         var review = SftpKeyReview.Compare([Key("ssh-ed25519", "SHA256:a")], [Key("ssh-ed25519", "SHA256:a"), Key("ssh-rsa", "SHA256:b")]);
         Assert.Equal(SftpKeyCase.MoreKeys, review.Case);
         Assert.Equal(2, review.Entries.Count);
+        Assert.Equal("SHA256:b", Assert.Single(review.NewKeys).Fingerprint);
+    }
+
+    [Fact]
+    public void NewKeysWhileATrustedKeyIsNoLongerOfferedIsAChange()
+    {
+        // Fable F1: two trusted types, one passed through, the other no longer offered and a new type in its place: a
+        // man in the middle answering the other types with its own key looks like this, so it is a warning, not MoreKeys.
+        var trusted = new[] { Key("ssh-ed25519", "SHA256:a"), Key("ecdsa-sha2-nistp256", "SHA256:c") };
+        Assert.Equal(SftpKeyCase.Changed,
+            SftpKeyReview.Compare(trusted, [Key("ssh-ed25519", "SHA256:a"), Key("ssh-rsa", "SHA256:evil")]).Case);
+        // Every trusted key still offered, plus a new type: MoreKeys, asking about the new key only.
+        var more = SftpKeyReview.Compare(trusted, [Key("ssh-ed25519", "SHA256:a"), Key("ecdsa-sha2-nistp256", "SHA256:c"), Key("ssh-rsa", "SHA256:b")]);
+        Assert.Equal(SftpKeyCase.MoreKeys, more.Case);
+        Assert.Equal(["SHA256:b"], more.NewKeys.Select(key => key.Fingerprint).ToArray());
     }
 
     [Fact]

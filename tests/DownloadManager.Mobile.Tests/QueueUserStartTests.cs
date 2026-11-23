@@ -92,6 +92,40 @@ public class QueueUserStartTests
         Assert.True(CrashGuard.IsUserStart(IpcMessage.Create(type)));
     }
 
+    [Theory]
+    [InlineData(TorrentMessageTypes.Add)]
+    [InlineData(TorrentMessageTypes.Import)]
+    [InlineData(MessageTypes.RemoteAdd)]
+    [InlineData(MessageTypes.RemoteStartQueued)]
+    [InlineData(MessageTypes.RemoteContainerAdd)]
+    [InlineData(SitesMessageTypes.TransferStart)]
+    [InlineData(SitesMessageTypes.SafeDownloadStart)]
+    [InlineData(SitesMessageTypes.TransferResume)]
+    [InlineData(SitesMessageTypes.TransferRetry)]
+    public void Phone_starts_of_torrents_torbox_and_transfers_also_reset_the_guard(string type)
+    {
+        Assert.True(CrashGuard.IsUserStart(IpcMessage.Create(type)));
+    }
+
+    [Theory]
+    [InlineData(TorrentMessageTypes.Inspect)]
+    [InlineData(TorrentMessageTypes.Files)]
+    [InlineData(TorrentMessageTypes.Details)]
+    [InlineData(MessageTypes.RemoteList)]
+    [InlineData(MessageTypes.RemoteItemGet)]
+    [InlineData(MessageTypes.RemoteCheckNow)]
+    [InlineData(SitesMessageTypes.Get)]
+    [InlineData(SitesMessageTypes.ListRequest)]
+    [InlineData(SitesMessageTypes.TransferList)]
+    [InlineData(SitesMessageTypes.TransferGet)]
+    [InlineData(SitesMessageTypes.TransferPause)]
+    [InlineData(SitesMessageTypes.TransferCancel)]
+    [InlineData(SitesMessageTypes.TransferClear)]
+    public void Phone_commands_that_only_list_pause_or_stop_do_not_reset_the_guard(string type)
+    {
+        Assert.False(CrashGuard.IsUserStart(IpcMessage.Create(type)));
+    }
+
     private static IpcMessage Request(string type, string action) => type switch
     {
         MessageTypes.QueueAction => IpcMessage.Create(type, new QueueActionRequest { Action = action }),

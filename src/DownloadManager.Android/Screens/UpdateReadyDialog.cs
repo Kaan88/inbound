@@ -78,16 +78,16 @@ internal static class UpdateReadyDialog
     {
         var builder = new Android.Text.SpannableStringBuilder();
         if (placeholder) { builder.Append(value); return builder; }
-        var lines = value.Replace("\r\n", "\n").Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var lines = ReleaseNotesText.Lines(value);
         var bullet = Motion.Attr(context, Resource.Attribute.colorPrimary);
-        for (int i = 0; i < lines.Length; i++)
+        for (int i = 0; i < lines.Count; i++)
         {
             int start = builder.Length();
-            builder.Append(lines[i].TrimStart('•', '-', '*', ' ', '\t'));
-            if (i < lines.Length - 1) builder.Append("\n");
+            builder.Append(lines[i]);
+            if (i < lines.Count - 1) builder.Append("\n");
             builder.SetSpan(new Android.Text.Style.BulletSpan(Motion.Dp(context, 10), new Android.Graphics.Color(bullet), Motion.Dp(context, 3)),
                 start, builder.Length(), Android.Text.SpanTypes.ExclusiveExclusive);
-            if (i < lines.Length - 1)
+            if (i < lines.Count - 1)
             {
                 // A short blank line between items keeps each bullet centred on its first line.
                 int gap = builder.Length();

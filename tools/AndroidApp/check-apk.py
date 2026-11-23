@@ -1,7 +1,7 @@
 # Checks an Inbound APK before it goes to a phone or the owner (2026-11-18: a release APK from a stale obj folder had no
 # net.dot.jni.nativeaot.NativeAotRuntimeProvider and crashed at start).
 #   python -I tools/AndroidApp/check-apk.py <apk> [--release] [--bundled-rclone] [--bundled-7zip] [--bundled-torrent]
-# Fails unless: the runtime provider class and our activity are in the dex; the native library exports the TLS trust
+# Fails unless: the runtime provider class is in the dex; the native library exports the TLS trust
 # callback; the launcher icon is there; every bundled native library has 16 KiB-aligned (p_align >= 0x4000) PT_LOAD segments;
 # with --release, the test hooks are not in the native library and the bundled 7-Zip, torrent worker and rclone are there
 # (--release implies all three --bundled-* checks; the flags also work on their own).
@@ -51,8 +51,14 @@ def main(argv):
     apk = argv[1]; release = "--release" in argv
     z = zipfile.ZipFile(apk); names = z.namelist()
     dex = b"".join(z.read(n) for n in names if n.endswith(".dex"))
-    so = z.read("lib/arm64-v8a/libDownloadManager.Android.so") if "lib/arm64-v8a/libDownloadManager.Android.so" in names \
-        else z.read(next(n for n in names if n.endswith("libDownloadManager.Android.so")))
+    library = "lib/arm64-v8a/libDownloadManager.Android.so"
+    # --release ships arm64 only, so another ABI's folder must not stand in for the required one.
+    if library not in names and not release:
+        library = next((n for n in names if n.endswith("libDownloadManager.Android.so")), None)
+    if library is None or library not in names:
+        print("FAIL native library: no lib/arm64-v8a/libDownloadManager.Android.so in the APK")
+        return 1
+    so = z.read(library)
     checks = {
         "runtime provider in dex": b"net/dot/jni/nativeaot/NativeAotRuntimeProvider" in dex,
         "TLS callback in the library": b"Java_net_dot_android_crypto_DotnetProxyTrustManager_verifyRemoteCertificate" in so,
