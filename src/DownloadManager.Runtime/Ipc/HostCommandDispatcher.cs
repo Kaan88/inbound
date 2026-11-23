@@ -647,10 +647,9 @@ public sealed partial class HostCommandDispatcher
                 // UPD.D1: dismissing the server update notice is not the install updater's to gate; the headless server
                 // shows the notice though it never updates itself, and an admin session (never the extension) dismisses it.
                 case MessageTypes.UpdateDismiss:
+                    var dismiss = message.GetPayload<UpdateDismissRequest>();
                     await Reply(client, message, MessageTypes.HostActionResult,
-                        message.GetPayload<UpdateDismissRequest>() is var dismiss
-                            ? _service.DismissUpdateNotice(dismiss.Action, dismiss.Version)
-                            : null)
+                        _service.DismissUpdateNotice(dismiss.Action, dismiss.Version))
                         .ConfigureAwait(false);
                     break;
 

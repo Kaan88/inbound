@@ -276,9 +276,10 @@
   const noticeLatest = $derived(store.model.status?.latestVersion ?? null);
   const noticeKind = $derived<UpdateKind>(hostKindOf(store.model.hello?.hostKind));
   // The server refused to keep a dismissal: the notice stays hidden for this browser session so its buttons are never dead.
-  let noticeHiddenHere = $state(false);
+  // Holds the version it was hidden for, so a newer one found later in this page's life shows again.
+  let noticeHiddenHere = $state<string | null>(null);
   const noticeVisible = $derived(
-    !noticeHiddenHere &&
+    noticeHiddenHere !== noticeLatest &&
       store.connection === 'open' &&
       noticeShown(noticeCurrent, noticeLatest, store.model.status?.updateNoticeHiddenUntil, store.model.status?.updateNoticeSkippedVersion, Date.now()),
   );
@@ -289,11 +290,11 @@
       const answer = await store.ask<{ ok?: boolean; message?: string | null }>('update.dismiss', { action, version: noticeLatest ?? undefined });
       const failure = dismissFailure(answer);
       if (failure) {
-        noticeHiddenHere = true;
+        noticeHiddenHere = noticeLatest;
         store.toast(failure, 'error');
       }
     } catch {
-      noticeHiddenHere = true;
+      noticeHiddenHere = noticeLatest;
       store.toast("The server couldn't hide the update notice.", 'error');
     }
   }

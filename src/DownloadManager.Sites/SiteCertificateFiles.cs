@@ -53,13 +53,22 @@ public static class SiteCertificateFiles
     }
 
     /// <summary>The system's roots alone, for an https remote of an rclone that has the FTPS sites' <c>--ca-cert</c>.</summary>
-    public static string RootsPath(string directory)
+    /// <remarks>Null when the system gives no root at all (a container without a CA store): rclone would refuse such a
+    /// file for every call, so the remote stays on rclone's own pool.</remarks>
+    public static string? RootsPath(string directory)
     {
         var path = Path.Combine(directory, RootsFileName);
         if (File.Exists(path)) return path;
         var text = new StringBuilder();
         text.Append("# Written by Inbound: the system's root certificates.\n");
-        foreach (var pem in SystemRoots()) text.Append(pem).Append('\n');
+        var any = false;
+        foreach (var pem in SystemRoots())
+        {
+            text.Append(pem).Append('\n');
+            any = true;
+        }
+
+        if (!any) return null;
         lock (WriteLock)
         {
             if (File.Exists(path)) return path;

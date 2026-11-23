@@ -241,43 +241,25 @@ internal sealed class HostUpdateMonitor : IDisposable
 
         try
         {
-            var check = await _service.CheckForUpdatesAsync().ConfigureAwait(false);
-            if (!check.Ok || check.Status != "updateAvailable")
+            try
             {
-                lock (_sync)
-                {
-                    _available = null;
-                }
-
-                return;
+                await CheckOwnAsync().ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _log($"Update check failed: {ex.Message}");
             }
 
-            var skipped = _service.GetSettings().SkippedUpdateVersion;
-            if (string.Equals(check.AvailableVersion, skipped, StringComparison.OrdinalIgnoreCase))
+            // UPD.D1: the same scheduled check also reads the Docker manifest (no timer of its own), after this Host's own
+            // result is handled, whichever way that ended (review of 0.9.1: a return in the own check skipped it).
+            try
             {
-                lock (_sync)
-                {
-                    _available = null;
-                }
-
-                return;
+                await _service.CheckDockerAsync().ConfigureAwait(false);
             }
-
-            if (!_autoCheck) return;
-            lock (_sync) _available = check;
-            if (_service.UpdateBeingInstalled()) return;
-            // The tray's Install update still offers it (it opens the window's update dialog); only the automatic retry waits.
-            if (_service.UpdateFailedRecently(check.AvailableVersion ?? string.Empty))
+            catch (Exception ex)
             {
-                _log($"Not retrying update {check.AvailableVersion} automatically yet; it failed recently.");
-                return;
+                _log($"Docker update check failed: {ex.Message}");
             }
-
-            await InstallAsync().ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            _log($"Update check failed: {ex.Message}");
         }
         finally
         {
@@ -286,16 +268,44 @@ internal sealed class HostUpdateMonitor : IDisposable
                 _checking = false;
             }
         }
+    }
 
-        // UPD.D1: the same scheduled check also reads the Docker manifest (no timer of its own), after this Host's own result is handled.
-        try
+    /// <summary>This Host's own check and what follows from it: remember the update, or install it unattended.</summary>
+    private async Task CheckOwnAsync()
+    {
+        var check = await _service.CheckForUpdatesAsync().ConfigureAwait(false);
+        if (!check.Ok || check.Status != "updateAvailable")
         {
-            await _service.CheckDockerAsync().ConfigureAwait(false);
+            lock (_sync)
+            {
+                _available = null;
+            }
+
+            return;
         }
-        catch (Exception ex)
+
+        var skipped = _service.GetSettings().SkippedUpdateVersion;
+        if (string.Equals(check.AvailableVersion, skipped, StringComparison.OrdinalIgnoreCase))
         {
-            _log($"Docker update check failed: {ex.Message}");
+            lock (_sync)
+            {
+                _available = null;
+            }
+
+            return;
         }
+
+        if (!_autoCheck) return;
+        lock (_sync) _available = check;
+        if (_service.UpdateBeingInstalled()) return;
+        // The tray's Install update still offers it (it opens the window's update dialog); only the automatic retry waits.
+        if (_service.UpdateFailedRecently(check.AvailableVersion ?? string.Empty))
+        {
+            _log($"Not retrying update {check.AvailableVersion} automatically yet; it failed recently.");
+            return;
+        }
+
+        await InstallAsync().ConfigureAwait(false);
     }
 
     public void Dispose()
