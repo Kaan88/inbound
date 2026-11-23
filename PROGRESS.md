@@ -1,5 +1,33 @@
 # Progress — session handoff
 
+## Follow-ups after 0.9.1, 2026-11-23 (branch `w/followups`)
+
+Four small fixes from the 0.9.1 review's "recorded for after the release" list. No release; nothing was seen in the
+running app (none of these changes a screen).
+
+- **S5, queue create/delete with an unreachable default folder:** the Host's own queue create and delete now save
+  settings without making the default folder or checking a server's allowed roots (`UpdateSettingsCoreAsync`'s new
+  `folderChecks`, false in `QueuePolicyCommands`); a user's settings save keeps both. New integration test
+  `RuntimeServiceTests.QueueCreateAndDeleteWorkWhileTheDefaultFolderCannotBeMade` (the default folder is replaced by a
+  file): create, delete and the persistence check pass, a user settings save is still refused; without the flag the
+  create throws `IOException`, as reported.
+- **Cloud token renewal, old record reused later in the same browse:** `BrowseAsync` re-reads the site after the list and
+  gives folder counts the stored (renewed) record instead of the one the browse started with, so the next
+  `config/create` no longer puts the old token back into rclone. New integration test
+  `SitesSignInRenewalBrowseTests.AFolderCountsBuildAfterARenewalUsesTheRenewedToken` (fake rclone rc, real version check;
+  skips without `INBOUND_RCLONE`): one `config/create`, renewed token held and stored, counts shown; without the change
+  two creates, the second with the old token.
+- **`dm settings import` with hand-written nulls:** `"queues": null`, `"proxy": null` and `"siteLogins": null` are read as
+  empty/absent instead of throwing. New case in `CliSettingsRestoreTests`; the import exits 0 and keeps the Host's
+  queues.
+- **UPD.N3 (ROADMAP row):** `UpdateNotes.ForManifest` removed and its `spellOutDesktop` parameter with it, so the update
+  manifest carries `desktop` as written; `UpdateSigner` calls `UpdateNotes.From(entry)`; the rewrite's test assertions and
+  the sentence in `docs/release-builds.md` are gone. `ChangelogTests` pass (35).
+
+Verification: `dotnet build DownloadManager.slnx -c Release` (0 errors; no new warnings in the changed files),
+`ChangelogTests` 35/35, the two new integration tests plus the CLI restore class, and the new Sites test with
+`INBOUND_RCLONE` set to the local rclone 1.76.0.
+
 ## 0.9.1 release (extension 0.7.1), 2026-11-23
 
 - **Owner:** "make full release with extensions" (after the owner-report fixes merged); UI.B40 part 2 (zero line
@@ -15,10 +43,10 @@
   `12d4b8b2` with a resumed failed torrent no longer renamed "(1)", the PuTTY test on CRLF checkouts, and macOS CI
   skipping Android releases. Both re-checked the fixes: **APPROVED for release**. Open review entry
   `49f5663c..c745317f`: its shared-code fixes (S1-S3, S6, S9, P3, P4, P6, M2, M3, M5) checked correct.
-- **Recorded for after the release:** queue create/delete fails when the default download folder is unreachable (S5,
-  kept); after a cloud token renewal a later rebuild in the same browse uses the old token once (phone folder counts
-  only); EXT.B11 matches addresses exactly; a hand-edited settings file with `"queues": null` throws in `dm settings
-  import`.
+- **Recorded for after the release:** queue create/delete fails when the default download folder is unreachable (S5),
+  after a cloud token renewal a later rebuild in the same browse uses the old token once (phone folder counts only),
+  EXT.B11 matches addresses exactly, a hand-edited settings file with `"queues": null` throws in `dm settings import`,
+  and UPD.N3. S5, the token renewal, the import and UPD.N3 are fixed on `w/followups` (above); EXT.B11 stays open.
 
 ## Owner reports of 2026-11-23 fixed, 2026-11-23 (branch `claude/owner-reports-1123-87174e`)
 
