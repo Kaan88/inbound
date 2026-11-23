@@ -1,17 +1,49 @@
 # Progress — session handoff
 
-## Owner reports, 2026-11-23 (recorded, not started)
+## Owner reports of 2026-11-23 fixed, 2026-11-23 (branch `claude/owner-reports-1123-87174e`)
 
-The owner asked for these to be noted without starting work. Rows in ROADMAP:
+Owner: fix the eight reports for the next desktop release, DeepSeek Flash implementing, Claude reviewing before the
+merge; no release. UI.B41, SITES.B1 and SITES.B2 were done by Claude; T14.B1, TB.F18, EXT.B11, EXT.R18 and EXT.B12 by
+DeepSeek, each diff reviewed (two corrections: T14.B1's words used Core types the window can't build with, and TB.F18
+read the hoster list on every poll of a healthy item). **Nothing here was seen in the running app or a browser yet**;
+the owner's checks are listed per item. Rows in ROADMAP.
 
-- EXT.B11: the finished-download popup also opens for downloads left to the browser.
-- EXT.B12: attachments from a Claude chat on the web fail with 403.
-- EXT.R18: open a finished download in the popup with one click, like Edge, without selecting text.
-- TB.F18: on a TorBox failure, say whether the hoster is down or not supported.
-- SITES.B1: Windows: OneDrive, Google Drive and Dropbox crash the add-a-remote dialog (likely a regression).
-- SITES.B2: Two panes: the remote picker makes the first pane look taller than the second.
-- UI.B41: with the window closed, magnets and .torrent files bring up the window but aren't added; seems general.
-- T14.B1: torrents go to E: with no setting pointing there; the folder isn't shown and "Each torrent's category folder" is unclear.
+- **UI.B41** (magnet or .torrent with the window closed): `ui-trace.log` of 2026-11-23 01:48 shows the window's first
+  list 60 ms after start, before the second connection's hello says torrents are on, so the queued magnet was opened as
+  if torrents were off. Now taken from the queue at once, held, and opened when both have answered. The other hand-ins
+  (Options, Check for Updates, Show in app) don't depend on that hello. Owner: close the window, open a magnet and a
+  .torrent from Windows.
+- **SITES.B1** (cloud kinds crash Add a remote): Windows' log has three 0.9.0 crashes on 2026-11-22 04:32-04:33, a
+  stowed XAML exception (0xc000027b). Cause 983f33af (SITES.11 R4): the client ID and secret boxes were in the form
+  and were also added under Advanced for sign-in kinds. `SiteDialogPlacementTests` stays. Owner: choose OneDrive,
+  Google Drive and Dropbox in Add a remote.
+- **SITES.B2** (Two panes uneven): the picker now sits in the left card's header in place of its icon and name; both
+  headers are 40 px, so the cards start level as in `4-agreed-design.html` (the mockup has no picker; its cards start
+  level with a header row each). Owner: Two panes with a remote on each side and with This PC on the left.
+- **T14.B1** (torrents to E:): E: was the last folder used; with no torrent folder and kind folders off a torrent of
+  this PC's window follows it (a web session's doesn't). The dialog's Save to, Options › Save to and Options › Torrents
+  now say "Torrents go to E:\ (the last folder used)." (or the real folder), and the label is "Sort torrents into
+  folders by kind (Video, Music, …)" in Options, the web UI's Settings and the dialog. Routing unchanged. Owner: open
+  the torrent dialog and Options.
+- **TB.F18** (TorBox failure reasons): `RemoteHosterFailure.Text`, fed only by TorBox's code and words and its hoster
+  list in hand: "TorBox lists Rapidgator as down right now. Try again later.", "TorBox doesn't list files.example among
+  the hosters it supports.", and plain lead sentences for `UNSUPPORTED_SITE` and `TEMPORARILY_DISABLED` with TorBox's
+  own detail. Anything else keeps today's text. The item-failure text rests on invented fixtures, not a captured
+  failed web download; no live call.
+- **EXT.B11** (finish popup for a download the browser kept): the finish popup only follows an app job, so the case is
+  an address the app also took while the browser kept it (keep in browser, a refused or lost answer, the ask popup
+  closed). Such addresses are remembered and the app's job for them isn't followed. Inferred from the code, not
+  replayed: owner, say if it happens again and how the download was left to the browser.
+- **EXT.R18**: one click opens a finished download of this PC; row buttons don't; rows don't select text.
+- **EXT.B12** (claude.ai attachment, 403): the failed request wasn't kept, so what it lacked is unknown. General
+  fallback: a 401 or 403 before any byte on a download this extension just sent (failed in the last 2 minutes, added
+  in the last 15) is downloaded again by the browser once, the app's job and empty part file are removed, and the user
+  is told "The site refused Inbound (HTTP 403), so your browser downloads it." Claude's review limited it to fresh
+  failures: the Host sends "updated" for any change, so a rename of an old 403 job would have downloaded it again.
+  Owner: download a claude.ai attachment with sending on.
+- **Tests:** solution build clean (no new warnings); Core 2620, TorBox 327, Integration (Remote, Scenario D, Torrent:
+  531, 3 skipped) pass; Sites 321 pass, 20 skip, and `PuttyKeyFileTests.AnOversizedFileOrLineIsDamaged` fails, in code
+  this branch doesn't touch (follow-up); extension `npm test` 374 pass, `tsc` clean; web UI 845 pass.
 
 ## Android 0.1.3 published; Android official on main, 2026-11-23
 
