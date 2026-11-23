@@ -81,7 +81,7 @@ Two Fable agents reviewed the range and then approved every fix and follow-up (`
 [android-review-android9.md](android-review-android9.md). The fixes for the earlier range's S1-S3, M2, M3, P1-P5,
 A1, A2, A8 and S6 were approved in the same pass.
 
-## Open: Android work from 49f5663c to c745317f (2026-11-21)
+## Done: Android work from 49f5663c to c745317f (2026-11-21; closed 2026-11-23)
 
 **Fable, 2026-11-23:** the fixes for this range's findings are right; one new medium (F1, SFTP MoreKeys offered when
 a trusted key was gone) fixed in `d86960f1`. Owner decisions, 2026-11-23: R2 (rclone can outlive a killed app on Android) is left as it is,

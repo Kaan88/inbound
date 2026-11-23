@@ -34,7 +34,7 @@
 - Firefox: AMO had approved 0.7.1 within the hour (API: file public). The signed XPI (from the AMO API) passed
   `sign-extension-firefox.ps1 -SignedXpi` (signed, same files as the build), was attached to the release with its line in
   `SHA256SUMS`, and `extensions/firefox-updates.json` points at it. Setup of this release links the AMO listing.
-- **Left:** the desktop update bar and dialog are first seen on screen with the owner's window against a 0.9.0 Docker server.
+- **Done since:** the desktop update bar and dialog were seen on screen against a 0.9.0 Docker server (UPD.D1 entry above).
 
 ## UPD.D1 and the 0.9.1 release review, 2026-11-23 (branches `w/upd-d1`, `w/rr-opus`, `w/rr-sonnet`; merged into main)
 
