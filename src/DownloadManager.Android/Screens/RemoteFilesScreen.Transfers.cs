@@ -38,7 +38,9 @@ internal sealed partial class RemoteFilesScreen
     {
         if (!SameHost()) return;
         // (Fable L2) A tap while the locations load is in flight opens Transfers when it ends instead of doing nothing.
-        if (_busy) { _openTransfersPending = true; return; }
+        // Only that load (its list not in yet) consumes the flag; another busy step (a key probe, a save) keeps the old
+        // behaviour, so Transfers never opens by itself at a later reload (Fable N1).
+        if (_busy) { if (!_listLoaded) _openTransfersPending = true; return; }
         _openTransfersPending = false;
         _showTransfers = true;
         _transfersGen++;
