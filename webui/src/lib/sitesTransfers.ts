@@ -2,7 +2,7 @@
 // decisions: Remote/SiteTransferRules.cs. A transfer row looks like a download row of the main list but has its own view
 // model and offers only the commands a transfer supports. No UI, so the tests call it directly.
 import { bytes, duration, speed } from './format';
-import type { SiteTransfer } from './sites';
+import { problems, type SiteTransfer } from './sites';
 
 export type TransferTab = 'active' | 'failed' | 'done';
 
@@ -152,6 +152,15 @@ export const canResume = (t: SiteTransfer) => t.state === 'paused' || (t.state =
 export const canRetry = (t: SiteTransfer) => t.state === 'failed' && t.filesFailed > 0;
 export const canCancel = (t: SiteTransfer) => t.state === 'running' || t.state === 'paused' || canResume(t);
 export const canClear = (t: SiteTransfer) => t.state === 'done' || t.state === 'failed' || t.state === 'canceled';
+
+/**
+ * SITES.10 (6): the problem a stopped batch's row offers to fix, as a listing names it (a sign-in the service no longer
+ * accepts, a certificate this server's PC doesn't trust, a changed key); null for any other failure and unless it stopped.
+ */
+export function fixableProblem(t: SiteTransfer): string | null {
+  const fixable: readonly string[] = [problems.signInNeeded, problems.certificateNotTrusted, problems.hostKeyChanged];
+  return t.state === 'failed' && t.problem && fixable.includes(t.problem) ? t.problem : null;
+}
 
 /** The commands the web has for a transfer: the desktop's, minus Open and Open folder (they need this PC's shell). */
 export type TransferCommand = 'stop' | 'resume' | 'wait' | 'retry' | 'showOnRemote' | 'cancel' | 'remove';

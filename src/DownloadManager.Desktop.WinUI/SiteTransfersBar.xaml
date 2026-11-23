@@ -124,8 +124,20 @@
                             <TextBlock Typography.NumeralAlignment="Tabular" Grid.Column="4" Text="{Binding RateText}" FontSize="11"
                                        HorizontalAlignment="Right" TextAlignment="Right" Margin="0,0,8,0" VerticalAlignment="Center"
                                        Foreground="{ThemeResource InboundSecondaryTextBrush}" TextTrimming="CharacterEllipsis" />
-                            <TextBlock Typography.NumeralAlignment="Tabular" Grid.Column="5" Text="{Binding Description}" FontSize="11" Margin="0,0,6,0"
-                                       VerticalAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}" TextTrimming="CharacterEllipsis" />
+                            <Grid Grid.Column="5" ColumnSpacing="6" VerticalAlignment="Center">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" MinWidth="0" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Typography.NumeralAlignment="Tabular" Text="{Binding Description}" FontSize="11" Margin="0,0,6,0"
+                                           VerticalAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}" TextTrimming="CharacterEllipsis" />
+                                <!-- SITES.10 (6): a batch stopped by a sign-in, certificate or key problem offers the fix a listing
+                                     offers, in the same words (Sign in, Check the certificate), and Retry once it works. -->
+                                <Button Grid.Column="1" Content="{Binding FixText}" Click="Fix_Click" Visibility="{Binding FixVisibility}"
+                                        Padding="10,1" FontSize="11" Height="22" MinHeight="0" MinWidth="0" CornerRadius="4"
+                                        VerticalAlignment="Center" AutomationProperties.Name="{Binding FixText}"
+                                        ToolTipService.ToolTip="Sign in again or trust the server, then try this transfer again" />
+                            </Grid>
                         </Grid>
                     </DataTemplate>
                 </ListView.ItemTemplate>

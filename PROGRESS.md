@@ -1,4 +1,40 @@
-# Progress — session handoff
+# Progress - session handoff
+
+## SITES.10 (5) and (6): linked folder kept, a stopped batch's problem code, 2026-11-23 (branch `w/sites10-56`)
+
+Two follow-ups from the 0.8.0 audit (ROADMAP SITES.10), on code that was released; nothing here was seen on screen yet.
+
+- **(5) An unchanged linked folder is kept.** A web session's `sites.save` (or `sites.testDraft`) now asks the Host for
+  the folder the saved remote already has (`ISitesCommands.LinkedFolderAsync`) and keeps it as it is when the request
+  sends that same folder back, even when it is outside the server's allowed folders. A new or changed folder is held to
+  them as before (resolved, or refused with `PathRoots.OutsideTextFor`). The user at this PC is unaffected: no roots
+  apply. `HostCommandDispatcher.Sites.cs` (`ScopedSitesAsync`, `KeptLinkedFolderAsync`), `ISitesCommands`,
+  `SitesCommands.LinkedFolderAsync`.
+  Tests: `HostCommandDispatcherSitesTests.AnEditKeepsALinkedFolderOutsideTheSessionsFoldersAndStillHoldsAChangedOne`
+  (unchanged out-of-roots folder saves; inside one is resolved; a changed one and a new remote are refused; the same for
+  a draft test).
+- **(6) A stopped batch names its problem.** `SiteTransfers` sets `SiteTransferDto.Problem` (the field was already
+  there, set only for a changed host key) to `signInNeeded` or `certificateNotTrusted` when the batch stops because
+  `SiteErrorText.IsSignInRefused` or `IsUntrustedCertificate` saw it (`BatchProblem`), and a start refused for the same
+  reason carries the code on its result too. The desktop Transfers bar shows the button browsing shows for that code
+  (`SiteTransferRules.FixableProblem`, `SitesBrowseRules.FixButtonText`: "Sign in", "Check the certificate", "Check the
+  key") in the stopped batch's Description cell; pressing it runs browsing's own flow (`MainWindow.FixSiteAsync` →
+  `SiteFlows.TestSiteAsync`, which asks about the sign-in, the certificate or the key) and then retries the batch, so a
+  remote that still refuses stops again with the same button. The web UI's transfers list has the same button
+  (`sitesTransfers.fixableProblem`, `TransferList.svelte`, wired in `SitesScreen.svelte` to `SiteFix`), and retries the
+  batch on `onfixed`.
+  Tests: `SiteTransferProblemTests` (Runtime: a batch stopped by an `invalid_grant` carries `signInNeeded`, one stopped by
+  an untrusted-certificate error carries `certificateNotTrusted`, neither fails its file, Retry clears the code, a
+  connection failure carries none); `SiteTransferRulesTests.AStoppedBatchOffersTheFixBrowsingOffersForItsProblem`;
+  `webui/tests/sites-transfer-fix.test.ts` (vitest: the action shows for those two codes and for nothing else).
+- **Build/checks:** `dotnet build DownloadManager.slnx -c Release` 0 errors, no new warnings; the two test projects above
+  pass; `npm test` 847 passed (51 files); `npx svelte-check` 0 errors, 0 warnings. Each of the two Host tests was also
+  run with its new branch disabled and failed there (the unchanged folder was refused; the stopped batch's Problem was
+  null), so neither passes by accident.
+- **Not verified:** the button on screen in the WinUI window or in a browser (no app or browser was started), and the
+  real-world trigger end to end (an expired cloud token or a self-signed certificate stopping a transfer); the Runtime
+  tests inject rclone's own error at the lease instead. A batch stopped by the *target* remote of a remote-to-remote copy
+  offers the fix on the source remote's dialog (the problem code doesn't say which side stopped it).
 
 ## 0.9.1 release (extension 0.7.1), 2026-11-23
 

@@ -65,6 +65,14 @@ public sealed class SiteTransferRow : INotifyPropertyChanged
     public string? ToolTip { get; private set; }
     public string AccessibleName { get; private set; } = "";
 
+    /// <summary>
+    /// SITES.10 (6): the words of the button on a batch stopped by a sign-in, certificate or key problem, as a listing
+    /// names it ("Sign in", "Check the certificate"); empty and hidden on every other row.
+    /// </summary>
+    public string FixText { get; private set; } = "";
+
+    public Visibility FixVisibility { get; private set; } = Visibility.Collapsed;
+
     private static Brush BrushOf(StatusKind kind) => kind switch
     {
         StatusKind.Active => StatusBrushes.Active,
@@ -96,7 +104,15 @@ public sealed class SiteTransferRow : INotifyPropertyChanged
         RateText = SiteTransferRules.RateText(t);
         Description = SiteTransferRules.Description(t);
         ToolTip = $"{Name}\n{FullRoute(t)}\n{Description}";
+        SetFix(SiteTransferRules.FixableProblem(t));
         Finish();
+    }
+
+    /// <summary>The button beside a stopped batch's description, or none.</summary>
+    private void SetFix(string? problem)
+    {
+        FixText = problem is null ? "" : SitesBrowseRules.FixButtonText(problem);
+        FixVisibility = problem is null ? Visibility.Collapsed : Visibility.Visible;
     }
 
     internal void UpdateFile(SiteTransferDto t, SiteTransferItemDto item)
@@ -118,6 +134,7 @@ public sealed class SiteTransferRow : INotifyPropertyChanged
         RateText = SiteTransferRules.RateText(t, item);
         Description = SiteTransferRules.Description(item);
         ToolTip = Description.Length > 0 ? $"{item.Path}\n{Description}" : item.Path;
+        SetFix(null);
         Finish();
     }
 
@@ -137,6 +154,7 @@ public sealed class SiteTransferRow : INotifyPropertyChanged
         Percent = 0;
         DownBarVisibility = UpBarVisibility = Visibility.Collapsed;
         ToolTip = kind == TransferRowKind.More ? "Show the next files of this transfer" : null;
+        SetFix(null);
         Finish();
     }
 
@@ -151,10 +169,10 @@ public sealed class SiteTransferRow : INotifyPropertyChanged
     private void Finish()
     {
         AccessibleName = Kind is TransferRowKind.More or TransferRowKind.Note ? Name
-            : $"{Name}. {StatusText}. {EtaText}. {Description}";
+            : $"{Name}. {StatusText}. {EtaText}. {Description}{(FixText.Length > 0 ? " " + FixText : "")}";
         // Only a row whose figures changed is told so: a list of hundreds of files is touched once a second.
         var stamp = string.Join('\u001f', Name, ChevronGlyph, SizeText, StatusText, Percent.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture),
-            EtaText, RateText, Description, ChevronVisibility, DownArrowVisibility, UpArrowVisibility);
+            EtaText, RateText, Description, ChevronVisibility, DownArrowVisibility, UpArrowVisibility, FixText, FixVisibility);
         if (stamp == _stamp) return;
         _stamp = stamp;
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(string.Empty));
@@ -292,6 +310,12 @@ public sealed partial class SiteTransfersBar : UserControl
 
     /// <summary>One batch with its files.</summary>
     internal Func<string, Task<SiteTransferResultDto>>? Details { get; set; }
+
+    /// <summary>
+    /// SITES.10 (6): a stopped batch's button (Sign in, Check the certificate) for its problem; the window asks what
+    /// browsing asks (the sign-in, the certificate, the key) and then tries the batch again. Without it no button shows.
+    /// </summary>
+    internal Func<SiteTransferDto, Task>? Fix { get; set; }
 
     /// <summary>Open, Open folder and Show on the remote are about this PC and the Remote files view: the window does them.</summary>
     internal event Action<TransferCommand, TransferRef>? LocalCommandRequested;
@@ -780,6 +804,24 @@ public sealed partial class SiteTransfersBar : UserControl
             }
 
             if (!reply.Ok && (reply.Message ?? "That didn't work.") is var message && !problems.Contains(message)) problems.Add(message);
+        }
+    }
+
+    /// <summary>
+    /// SITES.10 (6): the button on a stopped batch. The window asks what browsing asks about the problem (the sign-in,
+    /// the certificate, the key), then tries the batch again; a fix that did not work brings the same button back.
+    /// </summary>
+    private async void Fix_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { DataContext: SiteTransferRow { Ref: { } reference } } || Fix is not { } fix) return;
+        ErrorText.Text = "";
+        try
+        {
+            await fix(reference.Batch);
+        }
+        catch (Exception ex)
+        {
+            ErrorText.Text = "That didn't work: " + ex.Message;
         }
     }
 

@@ -76,6 +76,20 @@ public sealed class SiteTransferRulesTests
     }
 
     [Fact]
+    public void AStoppedBatchOffersTheFixBrowsingOffersForItsProblem()
+    {
+        // SITES.10 (6): the sign-in, certificate and key a listing asks about are asked about here too, in its words.
+        Assert.Equal(SiteProblems.SignInNeeded, SiteTransferRules.FixableProblem(Batch("failed", problem: SiteProblems.SignInNeeded)));
+        Assert.Equal(SiteProblems.CertificateNotTrusted, SiteTransferRules.FixableProblem(Batch("failed", problem: SiteProblems.CertificateNotTrusted)));
+        Assert.Equal(SiteProblems.HostKeyChanged, SiteTransferRules.FixableProblem(Batch("failed", problem: SiteProblems.HostKeyChanged)));
+        Assert.Equal("Sign in", SitesBrowseRules.FixButtonText(SiteTransferRules.FixableProblem(Batch("failed", problem: SiteProblems.SignInNeeded))));
+        // Nothing to fix on another failure, on a batch still moving, or on one whose files spent their tries.
+        Assert.Null(SiteTransferRules.FixableProblem(Batch("failed", done: 3, failed: 1, message: "The file is gone.")));
+        Assert.Null(SiteTransferRules.FixableProblem(Batch("running", running: 1, problem: SiteProblems.SignInNeeded)));
+        Assert.Null(SiteTransferRules.FixableProblem(Batch("paused", problem: SiteProblems.SignInNeeded)));
+    }
+
+    [Fact]
     public void StoppedFilesDoNotWaitAndClearDoneLeavesFailures()
     {
         // 4 files: 1 done, 2 stopped, none running: only 1 still waits, so a failed batch with nothing else left can't resume.
