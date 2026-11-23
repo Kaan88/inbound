@@ -1,0 +1,16 @@
+{"v":3,"createdOnFiles":{"v":1,"at":"2026-11-13T00:20:00Z"},"title":"Docker update notice","launch":{"view":"canvas"},"pages":[],
+"boards":{
+"Main.dc.html":{"x":0,"y":0,"w":1280,"h":620,"title":"1 · Web UI on a Docker server: the notice"},
+"WebDialog.dc.html":{"x":1360,"y":0,"w":1280,"h":760,"title":"2 · Web UI: Update available (from the notice or the version)"},
+"WebPhone.dc.html":{"x":2720,"y":0,"w":390,"h":760,"title":"3 · Web UI on a phone"},
+"Desktop.dc.html":{"x":0,"y":880,"w":1280,"h":620,"title":"4 · Desktop window switched to the Docker server"},
+"DesktopDialog.dc.html":{"x":1360,"y":880,"w":1280,"h":760,"title":"5 · Desktop: how to update that server"},
+"Dismissed.dc.html":{"x":2720,"y":880,"w":390,"h":760,"title":"6 · After Not now / Skip this version"}
+},
+"order":["Main.dc.html","WebDialog.dc.html","WebPhone.dc.html","Desktop.dc.html","DesktopDialog.dc.html","Dismissed.dc.html"],
+"notes":{
+"t1":{"x":0,"y":-300,"text":"Docker update notice: web UI and desktop","kind":"title1","maxW":3110},
+"q1":{"x":3200,"y":0,"w":420,"fill":"blue","text":"How the server would know (proposal):\n\nThe Docker server has no update check today, so its version shows alone. It would read a small signed file, manifest-docker.json, that the Docker workflow attaches to each release it builds. A Windows-only release (like 0.7.3) carries the previous one, as with the Linux file, so Docker users are only told about images that exist.\n\nOnce a day, plus at start. INBOUND_UPDATE_CHECK=false turns it off. It never updates by itself."},
+"q2":{"x":3200,"y":620,"w":420,"fill":"orange","text":"Open questions:\n\n1. Not now hides it until the next start of the page (or a day). Skip this version hides it until a newer one. Kept on the server per user, so the web UI and the desktop window agree. OK?\n\n2. Show it to every signed-in user, or only to the server's admin?\n\n3. Notice in the desktop window too (4), or only the version note in the status bar?"}
+},
+"designSystems":[]}
