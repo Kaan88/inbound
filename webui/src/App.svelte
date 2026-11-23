@@ -286,7 +286,7 @@
   async function dismissNotice(action: 'notNow' | 'skip') {
     if (store.connection !== 'open') return;
     try {
-      const answer = await store.ask<{ ok?: boolean; message?: string | null }>('update.dismiss', { action });
+      const answer = await store.ask<{ ok?: boolean; message?: string | null }>('update.dismiss', { action, version: noticeLatest ?? undefined });
       const failure = dismissFailure(answer);
       if (failure) {
         noticeHiddenHere = true;
