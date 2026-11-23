@@ -171,8 +171,8 @@ test('EXT.R17: the row menu of the popup itself is placed inside it, the popup\'
     assert.equal(opening.defaultPrevented, true, 'the browser\'s own menu stays shut');
     const menu = doc.querySelector('.popup-menu');
     assert.ok(menu, 'the row menu opened');
-    // at = the row's bottom - 4; 226 + 200 does not fit in 240, so it is above that point.
-    assert.equal(menu.style.top, `${226 - 200}px`, 'above the row, inside the popup');
+    // at = the row's bottom; 230 + 200 does not fit in 240, so it is above that point.
+    assert.equal(menu.style.top, `${230 - 200}px`, 'above the row, inside the popup');
     assert.equal(menu.style.maxHeight, `${240 - 8}px`);
     assert.equal(doc.documentElement.style.minHeight, '', 'the popup is not made taller');
     assert.deepEqual([...menu.querySelectorAll('.menu-item')].map((item) => item.textContent),

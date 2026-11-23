@@ -15,9 +15,10 @@
   comparison missed. Kept addresses are now stored normalised in the session too.
 - **Tests:** extension `npm test` 388 pass (378 before): 6 new tests in `tests/ext-r17-menu-inside-popup.test.cjs`
   (downward with room, upward without, shifted sideways, capped and scrollable, root style never changed, and the
-  popup's own row menu end to end) and 3 new tests in `tests/ext-b11-kept-in-browser.test.cjs` (unit marks, a
-  background run with the browser's `HTTPS://Site.Test:443/a.zip#part` against the app's `https://site.test/a.zip`, and
-  another path/query/host still followed). `npx tsc --noEmit` clean; `npm run build` clean.
+  popup's own row menu end to end) and 4 new tests in `tests/ext-b11-kept-in-browser.test.cjs` (the watch's marks in
+  both spellings, `addressKey` itself, a background run with the browser's `HTTPS://Site.Test:443/a.zip#part` against
+  the app's `https://site.test/a.zip`, and another path/query/host still followed). `npx tsc --noEmit` clean;
+  `npm run build` clean.
 - **Not verified:** the real popup was not opened in a browser (jsdom only). To check: load `extensions/chrome/dist`
   unpacked, open the popup with one or two downloads, right-click a row near the bottom of the short popup (it must
   open upward and inside), right-click the first row (downward), and check the popup keeps its size both ways; a menu

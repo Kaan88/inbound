@@ -514,9 +514,10 @@ function runMenuChoice(job: JobSummary, choice: RowMenuChoice): void {
 
 function openRowMenu(job: JobSummary, row: HTMLElement, at?: { x: number; y: number }): void {
   if (dialogOpen()) return;
-  // From the keyboard: under the row's start, kept inside the popup like a right-click's.
+  // From the keyboard: under the row's start (EXT.R17 puts it above the row when it doesn't fit), kept inside the popup
+  // like a right-click's.
   const rect = row.getBoundingClientRect();
-  at ??= { x: rect.left + 24, y: rect.bottom - 4 };
+  at ??= { x: rect.left + 24, y: rect.bottom };
   openMenu(row, rowMenuEntries(job).map((entry) => ({
     label: entry.label,
     disabled: !entry.enabled,
