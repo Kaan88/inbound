@@ -345,8 +345,8 @@ internal sealed class SiteDialog
         _form.Children.Add(_userSolo);
         _form.Children.Add(_plainWarning);
         _form.Children.Add(_note);
-        _form.Children.Add(_clientId);
-        _form.Children.Add(_clientSecret);
+        // _clientId and _clientSecret are placed by MoveToAdvanced, never here: a XAML element has one parent, and adding
+        // them to Advanced while they were still in the form crashed the window for every sign-in kind (SITES.B1).
         _form.Children.Add(_auth);
         _form.Children.Add(_password);
         _form.Children.Add(_keyRow);
@@ -464,6 +464,8 @@ internal sealed class SiteDialog
     private void MoveToAdvanced(FrameworkElement control, bool shown)
     {
         control.Visibility = Visible(shown);
+        // SITES.B1: never a second parent, whoever placed it before.
+        if (shown && control.Parent is Panel other && !ReferenceEquals(other, _advancedBody)) other.Children.Remove(control);
         if (shown && !_advancedBody.Children.Contains(control)) _advancedBody.Children.Add(control);
         else if (!shown) _advancedBody.Children.Remove(control);
     }
