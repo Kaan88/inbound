@@ -74,6 +74,29 @@ public sealed class ServerUpdateCheckTests
         }
     }
 
+    [Fact]
+    public async Task AFailedCheckAfterAGoodOneKeepsTheKnownVersion()
+    {
+        var (publicKey, json) = SignedManifest("0.7.4", "ghcr.io/kaan88/inbound:latest");
+        var service = NewService(out var paths, out var engine);
+        var fail = false;
+        using var check = new ServerUpdateCheck(service, _ => { }, publicKey, "0.7.2", "https://update.test/manifest-docker.json",
+            new StubHandler(_ => fail ? throw new HttpRequestException("no network") : Json(new StringContent(json))));
+        try
+        {
+            await check.CheckAsync();
+            fail = true;
+            await check.CheckAsync();
+            Assert.Equal("0.7.4", service.LatestVersion);
+            Assert.Equal("0.7.4", service.ServerUpdateNotes().AvailableVersion);
+        }
+        finally
+        {
+            engine.Dispose();
+            Delete(paths);
+        }
+    }
+
     private static DownloadManagerService NewService(out StoragePaths paths, out HttpDownloadEngine engine)
     {
         var dir = Path.Combine(AppContext.BaseDirectory, "test-work", "upd-check-" + Guid.NewGuid().ToString("N"));

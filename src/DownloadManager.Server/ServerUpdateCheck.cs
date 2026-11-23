@@ -119,7 +119,8 @@ public sealed class ServerUpdateCheck : IDisposable
                 _log($"Docker update check failed: {ex.Message}");
             }
 
-            _service.NoteServerUpdate(version, notes);
+            // A failed or unverified check says nothing new: the version found before stays known.
+            if (version is not null) _service.NoteServerUpdate(version, notes);
         }
         finally
         {

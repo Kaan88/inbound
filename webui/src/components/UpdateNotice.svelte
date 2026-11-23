@@ -24,6 +24,6 @@
   <span class="flex shrink-0 items-center gap-2 max-sm:pl-0">
     <button class="btn-primary h-8 px-3 max-sm:h-[44px] max-sm:flex-1" onclick={onopen}>What's new and how</button>
     <button class="btn h-8 px-3 max-sm:h-[44px]" onclick={onnotnow}>Not now</button>
-    <button class="btn-icon hidden size-8 shrink-0 text-muted max-sm:hidden" aria-label="Dismiss" onclick={ondismiss}><Icon name="close" size={14} /></button>
+    <button class="btn-icon size-8 shrink-0 text-muted max-sm:hidden" aria-label="Dismiss" onclick={ondismiss}><Icon name="close" size={14} /></button>
   </span>
 </section>
