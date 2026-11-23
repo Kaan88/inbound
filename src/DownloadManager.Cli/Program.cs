@@ -1732,9 +1732,22 @@ internal static partial class Program
             SettingsDto? imported;
             try
             {
-                imported = JsonSerializer.Deserialize<SettingsDto>(
-                    await File.ReadAllTextAsync(optionArgs[1]).ConfigureAwait(false),
-                    IpcJson.Options);
+                var file = System.Text.Json.Nodes.JsonNode.Parse(await File.ReadAllTextAsync(optionArgs[1]).ConfigureAwait(false));
+                // A hand-edited file may write null where the app writes a list or an object ("queues": null): that
+                // setting keeps the Host's current value, as if the line were left out, instead of stopping the Host's
+                // update (an empty list would remove every saved queue or site login).
+                if (file is System.Text.Json.Nodes.JsonObject fields && fields.Any(field => field.Value is null))
+                {
+                    var now = JsonSerializer.SerializeToNode((await client.SnapshotAsync().ConfigureAwait(false)).Settings, IpcJson.Options)!.AsObject();
+                    foreach (var name in fields.Where(field => field.Value is null).Select(field => field.Key).ToList())
+                    {
+                        var kept = now.FirstOrDefault(field => string.Equals(field.Key, name, StringComparison.OrdinalIgnoreCase)).Value;
+                        if (kept is null) fields.Remove(name);
+                        else fields[name] = kept.DeepClone();
+                    }
+                }
+
+                imported = file?.Deserialize<SettingsDto>(IpcJson.Options);
             }
             catch (Exception ex) when (ex is IOException or JsonException)
             {
@@ -1748,11 +1761,6 @@ internal static partial class Program
                 return 2;
             }
 
-            // A hand-edited file may write null where the app writes a list or object: a null is read as empty/absent,
-            // not as a reason to stop.
-            if (imported.Queues is null) imported.Queues = [];
-            if (imported.SiteLogins is null) imported.SiteLogins = [];
-            if (imported.Proxy is null) imported.Proxy = new ProxyDto();
             // A restore replaces the queues and schedules with the file's: one deleted since the export comes back and
             // one added since goes. A revision (a file exported by an older build) would merge them instead.
             imported.Revision = 0;

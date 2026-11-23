@@ -68,27 +68,35 @@ public sealed class CliSettingsRestoreTests
     }
 
     [Fact]
-    public async Task AnImportWhoseFileWritesNullForQueuesProxyAndLoginsIsReadAsEmpty()
+    public async Task AnImportWhoseFileWritesNullForAListKeepsTheHostsOwn()
     {
         await using var host = await SandboxHost.StartAsync("https://example.invalid/v1/api/");
         await using var connection = await host.ConnectAsync();
 
+        var settings = (await connection.AskAsync<SettingsResult>(MessageTypes.SettingsGet, new { })).Settings!;
+        var scheduleId = Guid.NewGuid();
+        settings.Schedules.Add(new ScheduleDto { Id = scheduleId, Name = "Kept", QueueId = 0, Enabled = false, StartTime = "03:00" });
+        settings.SiteLogins.Add(new SiteLoginDto { Id = Guid.NewGuid(), Site = "files.example.test", Username = "me", Password = "made-up-pass-1" });
+        var added = await connection.AskAsync<SettingsResult>(MessageTypes.SettingsUpdate, new SettingsUpdateRequest { Settings = settings });
+        Assert.True(added.Ok, added.Error);
+
         var file = Path.Combine(host.Root, "settings-backup.json");
         Assert.Equal(0, (await host.RunCliAsync(null, "settings", "export", file)).ExitCode);
 
-        // Hand-edited: null where the app writes a list or object. A null is read as empty/absent, not as a fault.
+        // Hand-edited: null where the app writes a list or an object.
         var node = JsonNode.Parse(await File.ReadAllTextAsync(file))!.AsObject();
-        node["queues"] = null;
-        node["proxy"] = null;
-        node["siteLogins"] = null;
+        foreach (var name in new[] { "queues", "schedules", "proxy", "siteLogins" }) node[name] = null;
         await File.WriteAllTextAsync(file, node.ToJsonString());
 
         var imported = await host.RunCliAsync(null, "settings", "import", file);
         Assert.Equal(0, imported.ExitCode);
 
-        // An empty queue list keeps the Host's queues: a restore never leaves the app without one.
+        // Each null setting keeps the Host's own: nothing was removed.
         var restored = (await connection.AskAsync<SettingsResult>(MessageTypes.SettingsGet, new { })).Settings!;
         Assert.Contains(restored.Queues, queue => queue.Id == restored.DefaultQueueId);
+        Assert.Contains(restored.Schedules, schedule => schedule.Id == scheduleId);
+        var login = Assert.Single(restored.SiteLogins, login => login.Site == "files.example.test");
+        Assert.True(login.HasPassword);
         Assert.NotNull(restored.Proxy);
     }
 }
