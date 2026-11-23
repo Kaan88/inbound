@@ -147,6 +147,12 @@ public static class MessageTypes
     /// with null fields.
     /// </summary>
     public const string UpdateNotes = "update.notes";
+    /// <summary>
+    /// UPD.D1 addendum, Host push: the newest Docker image version the desktop Host's update check found changed
+    /// (<see cref="UpdateLatestDto"/>, its <c>latestVersion</c> being the Docker image). Sent with <see cref="UpdateLatest"/>
+    /// at the same check; a client that doesn't know it ignores it.
+    /// </summary>
+    public const string UpdateDockerLatest = "update.dockerLatest";
 
     /// <summary>
     /// UPD.N1: <c>{}</c>; answered with <see cref="ChangelogResult"/>, this Host's changelog (<see cref="ChangelogDto"/>),

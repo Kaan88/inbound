@@ -217,6 +217,15 @@ public static class NativeBridgePolicy
             {
                 if (property.Name.Equals("settings", StringComparison.OrdinalIgnoreCase)) continue;
                 var value = JsonNode.Parse(property.Value.GetRawText());
+                // UPD.D1: of the update state a status carries, the extension gets only the one boolean (updateWaiting).
+                if (property.Name.Equals("status", StringComparison.OrdinalIgnoreCase) && value is JsonObject status)
+                {
+                    foreach (var key in status.Select(pair => pair.Key).ToList())
+                    {
+                        if (UpdateStatusProperties.Contains(key)) status.Remove(key);
+                    }
+                }
+
                 if (property.Name.Equals("jobs", StringComparison.OrdinalIgnoreCase) && value is JsonArray jobs)
                 {
                     foreach (var job in jobs)
@@ -277,6 +286,15 @@ public static class NativeBridgePolicy
 
         return false;
     }
+
+    /// <summary>
+    /// UPD.D1: the status fields about updates that a browser bridge never receives (which version is newest, the
+    /// notice's dismiss state): <see cref="HostStatusDto.UpdateWaiting"/> alone tells the extension to draw its dot.
+    /// </summary>
+    private static readonly HashSet<string> UpdateStatusProperties = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "latestVersion", "updateNoticeHiddenUntil", "updateNoticeSkippedVersion", "dockerLatestVersion",
+    };
 
     private const string TorrentProperty = "torrent";
 

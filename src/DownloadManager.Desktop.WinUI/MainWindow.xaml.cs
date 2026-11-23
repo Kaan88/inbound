@@ -520,6 +520,7 @@ public sealed partial class MainWindow : Window
         _settings = snapshot.Settings;
         // A server's path style, for every folder check and hint while it is shown.
         if (_connection.IsRemote) ShownServer.Describe(_connection.Hello?.HostKind, snapshot.Settings.DefaultDownloadDirectory);
+        if (_connection.IsRemote) NoteShownServerVersion(snapshot.Status.HostVersion);
         if (!_connection.IsRemote)
         {
             _localSettings = snapshot.Settings;

@@ -179,6 +179,7 @@ public sealed partial class HostCommandDispatcher
         _service.UpdateProgressChanged += OnUpdateProgressChanged;
         _service.LatestVersionChanged += OnLatestVersionChanged;
         _service.UpdateNoticeChanged += OnUpdateNoticeChanged;
+        _service.DockerLatestVersionChanged += OnDockerLatestChanged;
         _service.MeteredWaitChanged += OnMeteredWaitChanged;
         _service.SettingsChanged += OnSettingsChanged;
         if (_remote is not null) _remote.Changed += OnRemoteChanged;
@@ -191,6 +192,7 @@ public sealed partial class HostCommandDispatcher
         _service.UpdateProgressChanged -= OnUpdateProgressChanged;
         _service.LatestVersionChanged -= OnLatestVersionChanged;
         _service.UpdateNoticeChanged -= OnUpdateNoticeChanged;
+        _service.DockerLatestVersionChanged -= OnDockerLatestChanged;
         _service.MeteredWaitChanged -= OnMeteredWaitChanged;
         _service.SettingsChanged -= OnSettingsChanged;
         if (_remote is not null) _remote.Changed -= OnRemoteChanged;
@@ -1313,6 +1315,16 @@ public sealed partial class HostCommandDispatcher
     private void OnLatestVersionChanged(object? sender, string? version) => BroadcastLatestVersion(version);
 
     private void OnUpdateNoticeChanged(object? sender, UpdateNoticeState state) => BroadcastUpdateNoticeState(state);
+
+    private void OnDockerLatestChanged(object? sender, string? version) => BroadcastDockerLatest(version);
+
+    /// <summary>
+    /// UPD.D1 addendum: every session hears the newest Docker image version this Host's update check found
+    /// (<see cref="HostStatusDto.DockerLatestVersion"/>), so a window marks a saved Docker server that is behind it.
+    /// A paired browser extension never hears it (<see cref="NativeBridgePolicy"/>).
+    /// </summary>
+    public void BroadcastDockerLatest(string? version)
+        => Broadcast(IpcMessage.Create(MessageTypes.UpdateDockerLatest, new UpdateLatestDto { LatestVersion = version }));
 
     /// <summary>
     /// UPD.D1: every session, a web one and a paired desktop app too, hears the notice's dismiss state, which snapshots also

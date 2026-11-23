@@ -53,6 +53,27 @@ public sealed class VersionStatusTests
     }
 
     [Fact]
+    public void ADockerServerIsHeldOnlyToTheDockerLatestThisPcsHostRead()
+    {
+        // UPD.D1 addendum: the Docker latest stands for a Docker server with no check of its own, and for no other kind.
+        Assert.Equal("0.7.4", VersionStatus.LatestFor(null, HostKinds.Server, "0.7.3", HostKinds.Windows, "0.7.4"));
+        Assert.Null(VersionStatus.LatestFor(null, HostKinds.Server, "0.7.3", HostKinds.Windows, " "));
+        Assert.Equal("0.7.0", VersionStatus.LatestFor("0.7.0", HostKinds.Server, "0.7.3", HostKinds.Windows, "0.7.4"));
+        Assert.Equal("0.7.3", VersionStatus.LatestFor(null, HostKinds.Windows, "0.7.3", HostKinds.Windows, "0.7.4"));
+    }
+
+    [Theory]
+    [InlineData(HostKinds.Server, "0.7.2", "0.7.4", "0.7.2 (update available)")]
+    [InlineData(HostKinds.Server, "0.7.4", "0.7.4", null)]
+    [InlineData(HostKinds.Server, "0.7.2", null, null)]
+    [InlineData(HostKinds.Server, null, "0.7.4", null)]
+    [InlineData(HostKinds.Windows, "0.7.2", "0.7.4", null)]
+    [InlineData(HostKinds.Linux, "0.7.2", "0.7.4", null)]
+    [InlineData(null, "0.7.2", "0.7.4", null)]
+    public void ASavedDockerServerBehindTheDockerLatestIsMarked(string? kind, string? lastVersion, string? dockerLatest, string? expected)
+        => Assert.Equal(expected, VersionStatus.SavedServerNote(kind, lastVersion, dockerLatest));
+
+    [Fact]
     public void AServerIsNeverHeldToAnotherInstallKindsLatest()
     {
         // UI.B33: 0.7.3 was Windows only, so a Docker server on 0.7.2 is not behind it.

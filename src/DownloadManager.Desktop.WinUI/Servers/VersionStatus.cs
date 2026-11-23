@@ -47,11 +47,21 @@ internal static class VersionStatus
     /// every kind from each tag (0.7.3 had no Docker image). A Docker server (<see cref="HostKinds.Server"/>) has no
     /// check yet, and a Host of a kind this window doesn't know isn't held to anything; both show the version alone.
     /// </summary>
-    public static string? LatestFor(string? serverLatest, string? serverKind, string? thisPcLatest, string? thisPcKind)
+    public static string? LatestFor(string? serverLatest, string? serverKind, string? thisPcLatest, string? thisPcKind, string? dockerLatest = null)
     {
         if (!string.IsNullOrWhiteSpace(serverLatest)) return serverLatest;
+        // UPD.D1 addendum: a Docker server is held to the Docker latest this PC's Host read, and only to that.
+        if (serverKind == HostKinds.Server) return string.IsNullOrWhiteSpace(dockerLatest) ? null : dockerLatest;
         return SameInstallKind(serverKind, thisPcKind) ? thisPcLatest : null;
     }
+
+    /// <summary>
+    /// UPD.D1 addendum: the note after a saved server's name in the switcher menus while it is not the shown one. Its
+    /// version is the one it last reported, and only a Docker server is compared (with the Docker latest this PC's Host
+    /// read, never another install kind's latest, UI.B33). Null unless it is known to be behind.
+    /// </summary>
+    public static string? SavedServerNote(string? serverKind, string? lastVersion, string? dockerLatest)
+        => serverKind == HostKinds.Server && Compare(lastVersion, dockerLatest) < 0 ? $"{lastVersion} (update available)" : null;
 
     /// <summary>
     /// Whether two Hosts are the same install kind. A Host from before <c>hostKind</c> is a Windows one. The Docker

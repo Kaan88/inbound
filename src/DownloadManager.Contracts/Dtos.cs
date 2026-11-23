@@ -418,6 +418,21 @@ public sealed class HostStatusDto
     public string? UpdateNoticeSkippedVersion { get; set; }
 
     /// <summary>
+    /// UPD.D1: whether an update is waiting that an admin has not dismissed: this server's notice showing (not hidden nor
+    /// skipped), or, on the desktop Host, this PC's own update waiting (not the version the user skipped). The single field
+    /// a paired browser extension reads: it never sees the notice's dismiss details. Null from a Host older than this field
+    /// (it serialises as absent, which the extension reads as false).
+    /// </summary>
+    public bool UpdateWaiting { get; set; }
+
+    /// <summary>
+    /// UPD.D1 addendum: the newest Docker image version the desktop Host's own update check found from the signed
+    /// <c>manifest-docker.json</c> (fetched at the same moment it reads its own manifest, no extra timer). Null on a Host
+    /// that doesn't check it. Changes arrive as <see cref="MessageTypes.UpdateDockerLatest"/>.
+    /// </summary>
+    public string? DockerLatestVersion { get; set; }
+
+    /// <summary>
     /// UI.R41: the browsers whose extension has reached this Host through the native host (<see cref="ExtensionBrowsers"/>),
     /// each with the last day it did. Empty when none has yet; null from a Host that can't know (the headless server,
     /// whose extensions pair over the network) or one older than this field.

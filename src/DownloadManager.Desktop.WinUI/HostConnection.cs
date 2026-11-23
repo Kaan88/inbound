@@ -65,6 +65,8 @@ public sealed partial class HostConnection : IAsyncDisposable
     public event Action<UpdateProgressDto>? UpdateProgressChanged;
     /// <summary>UI.R37: the newest version the connected Host's update check found changed; this PC's or a server's.</summary>
     public event Action<string?>? LatestVersionChanged;
+    /// <summary>UPD.D1 addendum: this PC's Host found another newest Docker image version (its update check reads it). Never raised for a server.</summary>
+    public event Action<string?>? DockerLatestChanged;
     /// <summary>UPD.D1: the connected server's update-notice dismiss state changed (a web session or another window dismissed it).</summary>
     public event Action<DateTimeOffset?, string?>? UpdateNoticeStateChanged;
     /// <summary>UI.R41: this PC's Host saw a browser's extension for the first time; the whole list. Never raised for a server.</summary>
@@ -935,6 +937,11 @@ public sealed partial class HostConnection : IAsyncDisposable
         {
             // An unreadable one is skipped and said, like update.progress (audit L8).
             LatestVersionChanged?.Invoke(message.GetPayload<UpdateLatestDto>()?.LatestVersion);
+            return;
+        }
+        if (message.Type == MessageTypes.UpdateDockerLatest)
+        {
+            if (!IsRemote) DockerLatestChanged?.Invoke(message.GetPayload<UpdateLatestDto>()?.LatestVersion);
             return;
         }
         if (message.Type == MessageTypes.UpdateNoticeState)
