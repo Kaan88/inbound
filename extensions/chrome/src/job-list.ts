@@ -52,8 +52,8 @@ export const JOB_ACTION_MESSAGES: Record<JobAction, string> = {
 
 /**
  * EXT.R11: the right-click menu's commands, each on one download, as the native host's allow-list names them. Rename
- * is job.update with a new file name only; reveal goes to this PC only. EXT.R13: open is a row's double-click on a
- * finished download of this PC; the app shows a program in its folder instead of starting it.
+ * is job.update with a new file name only; reveal goes to this PC only. EXT.R13, EXT.R18: open is a row's click (or
+ * Enter) on a finished download of this PC; the app shows a program in its folder instead of starting it.
  */
 export type JobCommand = "reveal" | "rename" | "redownload" | "show" | "open";
 
@@ -103,7 +103,7 @@ export function jobCommandOutcome(command: JobCommand, result: any, options: { n
   return { ok: true, job, message: typeof result.message === "string" ? result.message : undefined };
 }
 
-/** What the row menu offers (GitHub #4). Open file is the row's double-click (EXT.R13), not a menu entry. */
+/** What the row menu offers (GitHub #4). Open file is the row's click (EXT.R13, EXT.R18), not a menu entry. */
 export type RowMenuChoice = "show" | "reveal" | "copyLink" | "redownload" | "rename" | "remove";
 
 export interface RowMenuEntry {
@@ -127,7 +127,7 @@ export function hasUsableLink(job: JobSummary): boolean {
   return /^https?:\/\//i.test(url) && job.addressHidden !== true;
 }
 
-/** EXT.R13: a double-click (or Enter) opens the file itself: a finished download of this PC whose file is still there. */
+/** EXT.R13, EXT.R18: a click (or Enter) opens the file itself: a finished download of this PC whose file is still there. */
 export function opensFile(job: JobSummary): boolean {
   return onThisPc(job) && job.state === "completed" && job.fileRemovedAfterExtraction !== true;
 }

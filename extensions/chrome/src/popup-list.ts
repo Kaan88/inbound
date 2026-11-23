@@ -7,7 +7,7 @@
 import { bytes, duration, speed, statusText, tone } from "../../../webui/src/lib/format";
 import type { Job } from "../../../webui/src/lib/types";
 import { fileIcon, icon } from "./ui/icon";
-import { actionsFor, groupLabel, latestJobs, POPUP_JOB_LIMIT, showsFolderButton, waitsInApp, type JobAction, type JobSummary, type RowAction } from "./job-list";
+import { actionsFor, groupLabel, latestJobs, opensFile, POPUP_JOB_LIMIT, showsFolderButton, waitsInApp, type JobAction, type JobSummary, type RowAction } from "./job-list";
 
 export interface PopupListView {
   /** A server is paired and this PC is used too: rows come in two groups. */
@@ -153,6 +153,8 @@ function keyOf(job: JobSummary): string {
 
 /** EXT.R11: how long after the Menu key or a pointer press the browser's own contextmenu event belongs to it. */
 const KEYBOARD_MENU_GRACE_MS = 800;
+/** EXT.R18: how long after a click's open the second click of a double-click still belongs to that open. */
+const CLICK_OPENS_MS = 800;
 let keyboardMenuUntil = 0;
 let pointerDownAt = 0;
 let swallowInstalled = false;
@@ -202,8 +204,19 @@ function createRow(handlers: PopupListHandlers): RowParts {
   actions.className = "job-actions";
   item.append(glyph, main, actions);
   const parts: RowParts = { item, glyph, name, size, status, detail, bar, fill, actions, job: {} as JobSummary, signature: "", glyphFor: "" };
+  // EXT.R18 (owner, 2026-11-23): a finished download opens with one click, as Edge's downloads panel does; a row whose
+  // file cannot be opened keeps the double-click (the app). A click on one of the row's own buttons does neither.
+  let openedAt = 0;
+  const onControl = (event: Event): boolean => !!(event.target as Element).closest?.("button");
+  item.addEventListener("click", (event) => {
+    if (onControl(event) || !opensFile(parts.job)) return;
+    openedAt = Date.now();
+    handlers.onOpen(parts.job);
+  });
   item.addEventListener("dblclick", (event) => {
-    if ((event.target as Element).closest?.("button")) return;
+    if (onControl(event)) return;
+    // The click above already opened the file: the second click of a double-click opens nothing again.
+    if (opensFile(parts.job) && Date.now() - openedAt < CLICK_OPENS_MS) return;
     handlers.onOpen(parts.job);
   });
   item.addEventListener("keydown", (event) => {

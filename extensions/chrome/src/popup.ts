@@ -525,9 +525,9 @@ function openRowMenu(job: JobSummary, row: HTMLElement, at?: { x: number; y: num
   })), { at });
 }
 
-/** EXT.R13 (owner, 2026-11-13): a finished download's file opens, not the app; the app shows a program in its folder. */
+/** EXT.R13, EXT.R18: a finished download's file opens on one click, not the app; the app shows a program in its folder. */
 async function openFile(job: JobSummary): Promise<void> {
-  // A second double-click while the first is still being answered (Windows' warning may be up) is not sent again.
+  // A second click while the first is still being answered (Windows' warning may be up) is not sent again.
   if (opening.has(job.id)) return;
   opening.add(job.id);
   try {

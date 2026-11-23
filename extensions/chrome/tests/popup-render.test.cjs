@@ -2,6 +2,8 @@
 // and the popup's notices and status bar for the states the usability test found wrong (U-EX-3, U-EX-4, U-EX-10).
 const assert = require('node:assert/strict');
 const test = require('node:test');
+const fs = require('node:fs');
+const path = require('node:path');
 const { installDom, flush } = require('./dom-harness.cjs');
 const data = require('./fixtures/screens-data.json');
 
@@ -74,6 +76,36 @@ test('the desktop list\'s words: Downloading 62%, 18.4 MB/s, 1m 45s; Retrying; b
     assert.equal(row('later.zip').querySelector('[data-action="start"]').getAttribute('aria-label'), 'Start later.zip');
     // Groups, This PC first.
     assert.deepEqual([...list.querySelectorAll('.group-row')].map((item) => item.textContent), ['This PC', 'home-server (server)']);
+  } finally { page.restore(); }
+});
+
+test('EXT.R18: a finished row opens its file on one click, a row button never does, and the row text is not selectable', () => {
+  const page = installDom('popup.html');
+  try {
+    const { renderPopupRows } = page.load('popup-list.ts');
+    const list = page.document.getElementById('jobs');
+    const opened = [];
+    renderPopupRows(list, [
+      { id: 'done', target: 'local', fileName: 'done.zip', state: 'completed', receivedBytes: 10, totalBytes: 10 },
+      { id: 'running', target: 'local', fileName: 'running.zip', state: 'downloading', receivedBytes: 1, totalBytes: 10, canPause: true },
+      { id: 'server-done', target: 'server', fileName: 'remote.zip', state: 'completed', receivedBytes: 10, totalBytes: 10 },
+    ], { paired: false, serverName: '', groupsOk: {} }, { onAction() {}, onOpen: (job) => opened.push(job.id) });
+    const row = (name) => [...list.querySelectorAll('.job')].find((item) => item.textContent.includes(name));
+    const click = (name, target) => (target ?? row(name)).dispatchEvent(new page.window.MouseEvent('click', { bubbles: true, cancelable: true }));
+
+    click('done.zip');
+    assert.deepEqual(opened, ['done'], 'one click on a finished download of this PC opens the file');
+    click('running.zip');
+    click('remote.zip');
+    assert.deepEqual(opened, ['done'], 'a row with no file to open keeps its click for nothing (the double-click opens the app)');
+    click('done.zip', row('done.zip').querySelector('[data-action="remove"]'));
+    assert.deepEqual(opened, ['done'], 'the row\'s own buttons do not open the file');
+
+    // No text selection from clicking or double-clicking the rows.
+    const css = fs.readFileSync(path.join(__dirname, '..', 'extension.css'), 'utf8');
+    const job = /\.job \{([^}]*)\}/.exec(css);
+    assert.ok(job, 'the row rule is there');
+    assert.match(job[1], /user-select:\s*none/, 'the row cannot be selected');
   } finally { page.restore(); }
 });
 

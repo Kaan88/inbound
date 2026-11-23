@@ -172,6 +172,9 @@ export interface WatchChange {
   finished: boolean;
 }
 
+/** EXT.B11: how many addresses a browser kept are remembered (the newest). */
+export const KEPT_IN_BROWSER_MAX = 20;
+
 /**
  * The downloads sent from the browser that the icon follows, kept up to date from the app's job events (and the
  * popup's list). A finished, stopped or removed download leaves; a failed or paused one stays until the popup has
@@ -179,15 +182,46 @@ export interface WatchChange {
  */
 export class DownloadWatch {
   private readonly jobs = new Map<string, JobSummary>();
+  /**
+   * EXT.B11: the addresses of downloads this browser kept after the app was asked for them (keep in browser, a
+   * refused send, the ask popup closed). A job the app still has for one of them is not the download the user
+   * watched: it is never followed, so its finish opens no popup and marks and flashes nothing.
+   */
+  private readonly keptInBrowser = new Set<string>();
 
   /** extensionId: this extension's, so only its own downloads are followed (see sentFromBrowser). */
   constructor(private readonly extensionId?: string) {}
+
+  /** EXT.B11: this download stays in the browser, so nothing the app does with its address is followed. */
+  handedBack(url: string | undefined): void {
+    const address = (url ?? "").trim();
+    if (!address) return;
+    this.keptInBrowser.delete(address);
+    this.keptInBrowser.add(address);
+    while (this.keptInBrowser.size > KEPT_IN_BROWSER_MAX) {
+      const oldest = this.keptInBrowser.values().next().value;
+      if (oldest === undefined) break;
+      this.keptInBrowser.delete(oldest);
+    }
+    for (const [id, job] of this.jobs) if (job.url === address) this.jobs.delete(id);
+  }
+
+  /** EXT.B11: the app took a download of this address again, so jobs for it are followed as before. */
+  takenByApp(url: string | undefined): void {
+    const address = (url ?? "").trim();
+    if (address) this.keptInBrowser.delete(address);
+  }
+
+  private keptByBrowser(job: JobSummary): boolean {
+    return typeof job.url === "string" && job.url.length > 0 && this.keptInBrowser.has(job.url);
+  }
 
   /** One download as an event brought it. */
   update(job: JobSummary | undefined | null, eventType?: string): WatchChange {
     if (!job || typeof job.id !== "string" || job.id.length === 0) return { finished: false };
     const known = this.jobs.get(job.id);
-    if (!sentFromBrowser(job, this.extensionId) ||eventType === "removed" || job.state === "cancelled") {
+    if (!sentFromBrowser(job, this.extensionId) || eventType === "removed" || job.state === "cancelled" ||
+      this.keptByBrowser(job)) {
       this.jobs.delete(job.id);
       return { finished: false };
     }
@@ -204,7 +238,7 @@ export class DownloadWatch {
     for (const job of jobs) {
       if (!job?.id) continue;
       if (this.jobs.has(job.id)) this.update(job);
-      else if (sentFromBrowser(job, this.extensionId) && isRunning(job)) this.jobs.set(job.id, job);
+      else if (sentFromBrowser(job, this.extensionId) && !this.keptByBrowser(job) && isRunning(job)) this.jobs.set(job.id, job);
     }
   }
 

@@ -315,36 +315,58 @@ test('EXT.R11: the background sends each command for one download with exactly i
   });
 });
 
-test('EXT.R13: a double-click on a finished download of this PC opens its file; other rows open the app', async () => {
+test('EXT.R13, EXT.R18: one click on a finished download of this PC opens its file; its buttons and rows without a file do not', async () => {
   const page = await openPopup([
     finished(),
     finished({ id: 'run-1', fileName: 'running.zip', state: 'downloading', canPause: true }),
     finished({ id: 'gone-1', fileName: 'gone.zip', fileRemovedAfterExtraction: true }),
   ], {
-    'dm.jobCommand': async () => ({ ok: true, message: 'Opened the file.' }),
+    'dm.jobCommand': async (message) => message.command === 'open'
+      ? { ok: true, message: 'Opened the file.' }
+      : { ok: true, message: 'Showing the file in its folder.' },
     'dm.openApp': async () => ({ ok: true }),
   });
   try {
     const doc = page.document;
     const row = (name) => [...doc.querySelectorAll('.job')].find((item) => item.textContent.includes(name));
+    const click = (name) => row(name).dispatchEvent(new page.window.MouseEvent('click', { bubbles: true, cancelable: true }));
     const dbl = (name) => row(name).dispatchEvent(new page.window.MouseEvent('dblclick', { bubbles: true, cancelable: true }));
-    dbl('report.pdf');
+    const opens = () => page.sent.filter((m) => m.type === 'dm.jobCommand' && m.command === 'open').length;
+
+    // One click, as in Edge's downloads panel.
+    click('report.pdf');
     await flush();
     assert.deepEqual(page.sent.filter((m) => m.type === 'dm.jobCommand').at(-1), { type: 'dm.jobCommand', command: 'open', jobId: JOB, target: 'local' });
     assert.equal(page.sent.some((m) => m.type === 'dm.openApp'), false, 'the app is not opened');
     assert.equal(doc.getElementById('live').textContent, 'Opened the file.');
 
+    // The second click of a double-click opens nothing again.
+    dbl('report.pdf');
+    await flush();
+    assert.equal(opens(), 1);
+
+    // A click on one of the row's own buttons is that button's, never the file's.
+    const before = opens();
+    row('report.pdf').querySelector('[data-action="reveal"]').click();
+    await flush();
+    assert.equal(opens(), before, 'the folder button does not open the file');
+    assert.equal(page.sent.filter((m) => m.type === 'dm.jobCommand').at(-1).command, 'reveal');
+
     // Enter on the row does the same.
     row('report.pdf').focus();
     row('report.pdf').dispatchEvent(new page.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
     await flush();
-    assert.equal(page.sent.filter((m) => m.type === 'dm.jobCommand' && m.command === 'open').length, 2);
+    assert.equal(opens(), 2);
 
+    // A row without a file to open keeps the double-click (the app); one click does nothing.
     for (const name of ['running.zip', 'gone.zip']) {
-      const before = page.sent.filter((m) => m.type === 'dm.jobCommand').length;
+      const commands = page.sent.filter((m) => m.type === 'dm.jobCommand').length;
+      click(name);
+      await flush();
+      assert.equal(page.sent.filter((m) => m.type === 'dm.jobCommand').length, commands, name);
+      assert.equal(page.sent.filter((m) => m.type === 'dm.openApp').length, name === 'running.zip' ? 0 : 1, name);
       dbl(name);
       await flush();
-      assert.equal(page.sent.filter((m) => m.type === 'dm.jobCommand').length, before, name);
     }
     assert.equal(page.sent.filter((m) => m.type === 'dm.openApp').length, 2);
   } finally { page.restore(); }
