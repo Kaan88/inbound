@@ -1,0 +1,5 @@
+When a server offers new keys besides the ones you trusted, Inbound asks about the new keys only. If a key you trusted is no longer offered, the server is shown as changed.
+After Inbound held downloads back because it kept closing unexpectedly, starting a torrent, a TorBox download or a copy between locations lets them run again, as starting a download already did.
+View transfers, tapped while your locations are still loading, opens Transfers once they have loaded.
+A location that stops answering during a copy is waited for about ten minutes before the copy fails.
+Keep both no longer makes a second copy of a file when a copy carries on after a restart.
