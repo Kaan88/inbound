@@ -196,7 +196,8 @@ body.popup {
 .status-switch:hover { background: var(--hover); }
 .status-switch:not(.hidden) + .status-counts { border-left: 1px solid var(--divider); padding-left: 8px; }
 .status-counts { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.popup-menu { z-index: 60; }
+/* EXT.R17: never wider than the popup itself; the menu is placed inside it, not the popup grown around it. */
+.popup-menu { z-index: 60; max-width: calc(100vw - 8px); }
 .menu-check { display: inline-block; width: 12px; color: var(--accent); }
 
 /* The ask view replaces the popup's own parts while a caught download waits. */

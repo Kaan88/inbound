@@ -64,6 +64,30 @@ Verification: `dotnet build DownloadManager.slnx -c Release` (0 errors; no new w
 `ChangelogTests` 35/35, the two new integration tests plus the CLI restore class, and the new Sites test with
 `INBOUND_RCLONE` set to the local rclone 1.76.0.
 
+## Extension EXT.R17 (row menu inside the popup) and EXT.B11 address matching, 2026-11-23 (branch `w/ext-r17`)
+
+- **EXT.R17** (owner, 2026-11-17): the popup no longer grows for a row's right-click menu. `ui/menu.ts` places it with
+  `placeMenu`: below the point or row when the whole menu fits there, above it when it doesn't, shifted to stay inside
+  the popup on both axes, and capped at the popup's height with `overflow-y: auto` when it is taller than the popup.
+  The document's `min-height` is no longer set at any point, so the popup's height never changes; `.popup-menu` is also
+  never wider than the popup. Keyboard move/Enter/Escape/Tab, focus return, the outside-press dismiss with the EXT.R18
+  swallow rule and the aria attributes are unchanged (the existing EXT.R11/EXT.R18 tests still pass).
+- **EXT.B11**: the kept-in-browser mark now compares addresses the way the Host writes them (`addressKey`, WHATWG
+  `URL`: scheme and host lower-cased, a default port and the fragment dropped, path and query as they are). A job keeps
+  the address as handed over, except when it is moved onto a new one: then `DownloadManagerService` stores
+  `SplitOffProviderLink(uri.AbsoluteUri, null)` (line 3739), i.e. .NET's normalised text, which the old exact
+  comparison missed. Kept addresses are now stored normalised in the session too.
+- **Tests:** extension `npm test` 388 pass (378 before): 6 new tests in `tests/ext-r17-menu-inside-popup.test.cjs`
+  (downward with room, upward without, shifted sideways, capped and scrollable, root style never changed, and the
+  popup's own row menu end to end) and 4 new tests in `tests/ext-b11-kept-in-browser.test.cjs` (the watch's marks in
+  both spellings, `addressKey` itself, a background run with the browser's `HTTPS://Site.Test:443/a.zip#part` against
+  the app's `https://site.test/a.zip`, and another path/query/host still followed). `npx tsc --noEmit` clean;
+  `npm run build` clean.
+- **Not verified:** the real popup was not opened in a browser (jsdom only). To check: load `extensions/chrome/dist`
+  unpacked, open the popup with one or two downloads, right-click a row near the bottom of the short popup (it must
+  open upward and inside), right-click the first row (downward), and check the popup keeps its size both ways; a menu
+  taller than the popup scrolls.
+
 ## 0.9.1 release (extension 0.7.1), 2026-11-23
 
 - **Owner:** "make full release with extensions" (after the owner-report fixes merged); UI.B40 part 2 (zero line

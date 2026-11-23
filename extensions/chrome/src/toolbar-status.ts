@@ -176,6 +176,32 @@ export interface WatchChange {
 export const KEPT_IN_BROWSER_MAX = 20;
 
 /**
+ * EXT.B11: an address as it is compared with another: scheme and host in lower case, a default port and the fragment
+ * dropped, path and query as they are. The Host writes a job's address the way .NET's URI does (lower case, no default
+ * port, no fragment), so both sides are read the same way instead of comparing the browser's text with the app's.
+ * Null when the text is not an absolute address; such text is then compared as it is.
+ */
+export function addressKey(url: string | undefined | null): string | null {
+  const text = (url ?? "").trim();
+  if (!text) return null;
+  try {
+    const parsed = new URL(text);
+    // The parser has already lower-cased the scheme and host and dropped a port the scheme implies; without the
+    // fragment, what is left names the download.
+    parsed.hash = "";
+    return parsed.href;
+  } catch {
+    return null;
+  }
+}
+
+/** EXT.B11: what is stored for an address: its key, or the text itself when it is not one. */
+function keptKey(url: string | undefined | null): string {
+  const text = (url ?? "").trim();
+  return addressKey(text) ?? text;
+}
+
+/**
  * The downloads sent from the browser that the icon follows, kept up to date from the app's job events (and the
  * popup's list). A finished, stopped or removed download leaves; a failed or paused one stays until the popup has
  * been opened (it was seen there) or it runs again.
@@ -194,7 +220,7 @@ export class DownloadWatch {
 
   /** EXT.B11: this download stays in the browser, so nothing the app does with its address is followed. */
   handedBack(url: string | undefined): void {
-    const address = (url ?? "").trim();
+    const address = keptKey(url);
     if (!address) return;
     this.keptInBrowser.delete(address);
     this.keptInBrowser.add(address);
@@ -203,16 +229,16 @@ export class DownloadWatch {
       if (oldest === undefined) break;
       this.keptInBrowser.delete(oldest);
     }
-    for (const [id, job] of this.jobs) if (job.url === address) this.jobs.delete(id);
+    for (const [id, job] of this.jobs) if (keptKey(job.url) === address) this.jobs.delete(id);
   }
 
   /** EXT.B11: the app took a download of this address again, so jobs for it are followed as before. */
   takenByApp(url: string | undefined): void {
-    const address = (url ?? "").trim();
+    const address = keptKey(url);
     if (address) this.keptInBrowser.delete(address);
   }
 
-  /** EXT.B11: the kept addresses, oldest first, so a new worker can take them back (the worker can stop at any time). */
+  /** EXT.B11: the kept addresses (see addressKey), oldest first, so a new worker can take them back (it can stop at any time). */
   keptAddresses(): string[] {
     return [...this.keptInBrowser];
   }
@@ -228,11 +254,13 @@ export class DownloadWatch {
 
   /** EXT.B11: true when a download of this address stayed in the browser. */
   isKept(url: string | undefined): boolean {
-    return typeof url === "string" && url.length > 0 && this.keptInBrowser.has(url);
+    const address = keptKey(url);
+    return address.length > 0 && this.keptInBrowser.has(address);
   }
 
   private keptByBrowser(job: JobSummary): boolean {
-    return typeof job.url === "string" && job.url.length > 0 && this.keptInBrowser.has(job.url);
+    const address = keptKey(job.url);
+    return address.length > 0 && this.keptInBrowser.has(address);
   }
 
   /** One download as an event brought it. */
