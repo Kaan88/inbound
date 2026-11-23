@@ -246,7 +246,7 @@ everything anyway: `pkill -f 'Inbound.app/Contents/'`. Start Inbound when I sign
 | `appimage.yml` (Linux packages) | A published release, or by hand | With a tag: builds the AppImage and the four packages from the tag, signs `manifest-linux-x64.json` and attaches everything to the release. By hand without a tag: builds the chosen branch and keeps the files as run artifacts |
 | `macos.yml` (macOS packages) | Every push to main or a `macos-*` branch, every pull request (except Markdown and docs only), a published release, or by hand (with a tag, or with `test_version`) | Builds the torrent worker and `Inbound.app` for arm64 and x64 as run artifacts (14 days), starts the Host and the CLI, has Remote files download rclone and runs it, and drives the window through `DOWNLOADMANAGER_UNO_SELFTEST` (About, Progress Details, Options, closing and reopening the main window) with screenshots and the trace in the log. On a published release, or by hand with a tag, it also signs `manifest-macos-<arch>.json` with `UPDATE_SIGNING_KEY` (after checking that it is the key the apps trust) and attaches the zip, the dmg, the manifest and `SHA256SUMS-macos-<arch>` to that release. By hand with `test_version`, it publishes the zip and manifest to the `macos-update-test` pre-release instead |
 | `docker.yml` (Docker image) | A published release, or by hand from a tag | Builds and pushes the server image |
-| `windows.yml` (Windows build) | A pushed version tag, or by hand | With a tag: builds Setup (with the signed Firefox add-on) and the zip, signs `manifest.json`, and puts the six files in a **draft** release with notes drafted from `changelog.json` (CI.2). By hand without a tag: a test Setup (no Firefox add-on) and zip of the chosen branch as run artifacts, nothing signed |
+| `windows.yml` (Windows build) | A pushed version tag, or by hand | With a tag: builds Setup (with the signed Firefox add-on) and the zip, signs `manifest.json`, and puts the eight files (the six, `hub.txt` for Hub, written and checked by `tools\write-hub-txt.ps1`, and `release-notes-<version>.md`, the drafted notes that `hub.txt` names with `notes.file` and Hub shows in full) in a **draft** release with notes drafted from `changelog.json` (CI.2). By hand without a tag: a test Setup (no Firefox add-on) and zip of the chosen branch as run artifacts, nothing signed |
 
 ### A release built by GitHub (CI.2)
 
@@ -264,13 +264,13 @@ everything anyway: `pkill -f 'Inbound.app/Contents/'`. Start Inbound when I sign
    Firefox add-on" (no entry for the extension version in `extensions/firefox-updates.json`), before anything is
    signed or released; that is expected. Then run Windows build by hand (Actions, Windows build, Run workflow) with
    the tag and `no_firefox_xpi` ticked: the Firefox add-on step is skipped, Setup is built with `-NoFirefoxXpi` (its
-   finish page then links the AMO listing), and the draft release gets five files (no XPI; `SHA256SUMS` lists only
+   finish page then links the AMO listing), and the draft release gets five files, `hub.txt` and the notes file (no XPI; `SHA256SUMS` lists only
    what is there). Skip step 3 in this case. After AMO approves the version, add its entry (for example 0.7.0) to
    `extensions/firefox-updates.json`, pointing at the AMO file with its hash, so unlisted 0.6.x installs move over to
    the listed add-on, and push `main`. A run started by a pushed tag always requires the XPI.
 3. Push the tag alone (`git push origin vX.Y.Z`). The Windows build runs: Setup, the zip, `manifest.json` signed with
    the `UPDATE_SIGNING_KEY` secret (and refused unless its `public.pem` equals the latest release's), `SHA256SUMS`, all
-   six files in a draft release. If the tag's commit did have `[skip ci]`, or to build again: Actions, Windows build,
+   six files, `hub.txt` and `release-notes-<version>.md`, in a draft release. If the tag's commit did have `[skip ci]`, or to build again: Actions, Windows build,
    Run workflow, and give the tag.
 4. Read the draft: the files, the manifest, the notes. The notes come from `changelog.json`; add the summary
    paragraph, the browser extension line and Known issues by hand, as in earlier releases.
@@ -281,7 +281,23 @@ everything anyway: `pkill -f 'Inbound.app/Contents/'`. Start Inbound when I sign
 6. Push `main`, so Firefox finds `extensions/firefox-updates.json`.
 
 The local way above (`build-installer.ps1`, `package.ps1`, `prepare-release.ps1`, then creating the release by
-hand) still works and gives the same six files. The Chrome Web Store and Edge Add-ons uploads stay local either way.
+hand) still works and gives the same six files (add `hub.txt` with `tools\write-hub-txt.ps1` and the notes file it names, as the workflow does). The Chrome Web Store and Edge Add-ons uploads stay local either way.
 
 To build for a tag whose release exists already: Actions, Linux packages, Run workflow, and give the tag; for the
 image, Actions, Docker image, Run workflow, and choose the tag under "Use workflow from".
+
+### hub.txt, and which release is "latest" (Hub)
+
+Each Windows release carries `hub.txt`, the file the Hub launcher reads to learn the newest version and how to
+install it. It is read from `https://github.com/Kaan88/inbound/releases/latest/download/hub.txt`, the same way the
+app's own updater reads `manifest.json`, so both depend on GitHub's **latest release** being the newest Windows
+release. Any other release made public (the Android `android-v*` releases, test builds) must be a pre-release or be
+created with `--latest=false` (`gh release create ... --prerelease`); otherwise it becomes "latest" and both
+`hub.txt` and `manifest.json` stop resolving until the Windows release is made latest again. `tools/write-hub-txt.ps1`
+is a copy of the one in the Hub repository (its first line names the commit); change it there, not here.
+
+`hub.txt` also has a `notes.file:` line naming `release-notes-<version>.md`, a release asset that holds the drafted
+notes as Markdown (at most 64 KiB; the workflow drops the draft's HTML comment). Hub's release-notes page fetches it
+from the same release and shows the full notes; `notes:` stays the one-line note. The file is made from `changelog.json`
+when the draft is built, so notes finished by hand on the draft afterwards do not reach it: edit the asset in the draft
+too (delete it and upload the finished file under the same name) before publishing.
