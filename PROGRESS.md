@@ -23,6 +23,12 @@
   running version; a refused web dismiss hides the notice for the session and says so; the server's manifest read is
   bounded without Content-Length; the keyboard-opened row menu flips above its row. Left: (7) the extension dot changes
   only when the popup asks for the list (the ping answer has no status).
+- **Web UI against the boards** (Opus): the notice and dialog rendered with the boards' data in a temporary page and
+  screenshotted next to Main, WebPhone and WebDialog (dark). Fixed to match: the panel's colours (new `--notice*` tokens,
+  #1f2a37 / #2c4258 as drawn), Not now outlined, the dialog's width, commands wrapping instead of cut, Skip this version on
+  the left. Left as the app's other dialogs: the title in the dialog header with ×. Fable approved the release set after
+  the second pass. **Not seen on screen:** the desktop bar and dialog (the window needs a Docker server and a published
+  `manifest-docker.json`); first chance is the owner's window against a 0.9.0 Docker server once 0.9.1 is out.
 
 ## SITES.10 (1)-(3), Android review fixes, 2026-11-23 (branches `sites10-audit-followups`, `w/android-f2`; merged into main)
 

@@ -39,7 +39,7 @@
   }
 </script>
 
-<Dialog title="Inbound {version} is out" {onclose}>
+<Dialog title="Inbound {version} is out" wide {onclose}>
   <p class="mb-3 text-[12.5px] text-muted">{subtitle}</p>
 
   {#if here.length}
@@ -58,12 +58,12 @@
     <div class="mt-2.5 flex flex-col gap-1.5">
       <div class="flex items-center gap-2 rounded border border-divider bg-chrome py-2 pl-3 pr-2">
         <span class="w-[92px] shrink-0 text-[12px] text-muted">Compose</span>
-        <code class="min-w-0 flex-1 truncate font-mono text-[12.5px]">{composeCommand}</code>
+        <code class="min-w-0 flex-1 break-words font-mono text-[12.5px]">{composeCommand}</code>
         <button class="btn h-7 px-2.5 py-0 text-[12px]" onclick={() => copy(composeCommand, 'compose')}>{copied === 'compose' ? 'Copied' : 'Copy'}</button>
       </div>
       <div class="flex items-center gap-2 rounded border border-divider bg-chrome py-2 pl-3 pr-2">
         <span class="w-[92px] shrink-0 text-[12px] text-muted">docker run</span>
-        <code class="min-w-0 flex-1 truncate font-mono text-[12.5px]">{runCommand}</code>
+        <code class="min-w-0 flex-1 break-words font-mono text-[12.5px]">{runCommand}</code>
         <button class="btn h-7 px-2.5 py-0 text-[12px]" onclick={() => copy(runCommand, 'run')}>{copied === 'run' ? 'Copied' : 'Copy'}</button>
       </div>
     </div>
@@ -71,7 +71,8 @@
   {/if}
 
   {#snippet footer()}
-    <button class="btn max-sm:h-[48px] max-sm:w-full" onclick={onskip}>Skip this version</button>
+    <!-- WebDialog board: Skip this version on the left, Close on the right. -->
+    <button class="btn sm:mr-auto max-sm:h-[48px] max-sm:w-full" onclick={onskip}>Skip this version</button>
     <button class="btn-primary max-sm:h-[48px] max-sm:w-full" data-autofocus onclick={onclose}>Close</button>
   {/snippet}
 </Dialog>

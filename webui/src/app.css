@@ -16,6 +16,9 @@
   --color-track: var(--track);
   --color-error: var(--error);
   --color-highlight: var(--highlight);
+  --color-notice: var(--notice);
+  --color-notice-border: var(--notice-border);
+  --color-notice-button-border: var(--notice-button-border);
   --color-accent: var(--accent);
   --color-accent-hover: var(--accent-hover);
   --color-accent-text: var(--accent-text);
