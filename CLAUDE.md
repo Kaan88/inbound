@@ -66,7 +66,7 @@ host, and an Android app (`src/DownloadManager.Android`, with its platform-free 
 Never commit cookies, credentials, browser profiles, or captures containing
 secrets.
 
-## Desktop status (2026-11-18, release 0.9.0, extension 0.7.0 on all three stores)
+## Desktop status (2026-11-23, release 0.9.1, extension 0.7.1 on all three stores)
 
 Phases 0–5 are substantially implemented: single-stream engine, resume/crash
 recovery, tray/host/IPC/CLI, the WinUI shell, segmented transfers, and
