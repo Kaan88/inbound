@@ -1,5 +1,25 @@
 # Progress — session handoff
 
+## 0.9.1 release (extension 0.7.1), 2026-11-23
+
+- **Owner:** "make full release with extensions" (after the owner-report fixes merged); UI.B40 part 2 (zero line
+  jumps when a download starts): "Release, don't mention" (open in ROADMAP only).
+- **Contents:** the eight owner reports of 2026-11-23 (UI.B41, SITES.B1, SITES.B2, TB.F18, T14.B1, EXT.B11, EXT.R18,
+  EXT.B12), UI.B40 part 1 (the collapsed graph's plot clipped to its panel), Runtime name fixes (a failed download
+  doesn't keep its name; two unfinished downloads never share one), PuTTY v3/passphrase keys in the Host, shared fixes
+  from the Android work, Dependabot #21/#52/#53, Hub's `hub.txt` and full notes file (#51/#54).
+- **Release review (two Fable reviewers, read-only):** owner-report fixes and the workflow: approved with findings,
+  fixed in `b23a0e30` (hub note read as UTF-8; EXT.B12 only for caught downloads, at most 3 a minute; TB.F18 keeps
+  TorBox's own reason on the submit path; a right-click closing a menu no longer eats the next pick; workflow text).
+  Shared code since v0.9.0: not approved until `dm settings import` from another install was fixed; fixed in
+  `12d4b8b2` with a resumed failed torrent no longer renamed "(1)", the PuTTY test on CRLF checkouts, and macOS CI
+  skipping Android releases. Both re-checked the fixes: **APPROVED for release**. Open review entry
+  `49f5663c..c745317f`: its shared-code fixes (S1-S3, S6, S9, P3, P4, P6, M2, M3, M5) checked correct.
+- **Recorded for after the release:** queue create/delete fails when the default download folder is unreachable (S5,
+  kept); after a cloud token renewal a later rebuild in the same browse uses the old token once (phone folder counts
+  only); EXT.B11 matches addresses exactly; a hand-edited settings file with `"queues": null` throws in `dm settings
+  import`.
+
 ## Owner reports of 2026-11-23 fixed, 2026-11-23 (branch `claude/owner-reports-1123-87174e`)
 
 Owner: fix the eight reports for the next desktop release, DeepSeek Flash implementing, Claude reviewing before the
