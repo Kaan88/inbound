@@ -8,10 +8,10 @@
   built and attached; the new `sign` job attached `manifest-docker.json` and `SHA256SUMS-docker` on its first run, and
   `releases/latest/download/manifest-docker.json` serves 0.9.1 with 25 signed note lines.
 - Chrome Web Store: 0.7.1 PENDING_REVIEW (0.7.0 published). Edge Add-ons: submitted, waits for certification.
-- **Left:** after AMO approves 0.7.1, download the signed file from the Developer Hub, run
-  `scripts\sign-extension-firefox.ps1 -ReleaseTag v0.9.1 -SignedXpi <file>`, attach the XPI to the release and push
-  `extensions/firefox-updates.json`. The desktop update bar and dialog are first seen on screen with the owner's window
-  against a 0.9.0 Docker server.
+- Firefox: AMO had approved 0.7.1 within the hour (API: file public). The signed XPI (from the AMO API) passed
+  `sign-extension-firefox.ps1 -SignedXpi` (signed, same files as the build), was attached to the release with its line in
+  `SHA256SUMS`, and `extensions/firefox-updates.json` points at it. Setup of this release links the AMO listing.
+- **Left:** the desktop update bar and dialog are first seen on screen with the owner's window against a 0.9.0 Docker server.
 
 ## UPD.D1 and the 0.9.1 release review, 2026-11-23 (branches `w/upd-d1`, `w/rr-opus`, `w/rr-sonnet`; merged into main)
 
