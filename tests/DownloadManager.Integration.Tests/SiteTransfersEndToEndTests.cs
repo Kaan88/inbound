@@ -20,6 +20,10 @@ public sealed partial class SiteTransfersEndToEndTests : IAsyncLifetime
     private const string Password = "transfer-e2e-pass-5521";
     private const long SlowRate = 1024 * 1024; // the slow server's bytes a second
 
+    // The production connection wait schedule (about ten minutes) is too slow for these tests, so a 7-step 20 ms schedule
+    // stands in: the same shape, a batch stops after 8 failed connections in a row.
+    private static readonly TimeSpan[] ShortConnectionDelays = Enumerable.Repeat(TimeSpan.FromMilliseconds(20), 7).ToArray();
+
     private readonly string _root = Path.Combine(AppContext.BaseDirectory, "test-work", "site-transfers-" + Guid.NewGuid().ToString("N"));
     private readonly List<SitesCommands> _commands = [];
     private readonly List<Process> _servers = [];
@@ -497,9 +501,9 @@ public sealed partial class SiteTransfersEndToEndTests : IAsyncLifetime
         foreach (var server in _servers) Stop(server);
         _servers.Clear();
 
-        var stopped = await WaitForAsync(commands, started.Id, t => SiteTransferStates.IsFinished(t.State), TimeSpan.FromSeconds(90));
+        var stopped = await WaitForAsync(commands, started.Id, t => SiteTransferStates.IsFinished(t.State), TimeSpan.FromSeconds(180));
         Assert.Equal(SiteTransferStates.Failed, stopped.State);
-        Assert.Contains("The transfer stopped after 5 failed connections in a row; Retry goes on.", stopped.Message);
+        Assert.Contains("The transfer stopped after 8 failed connections in a row; Retry goes on.", stopped.Message);
         Assert.Equal(0, stopped.FilesFailed);
         var detail = await Call<SiteTransferResultDto>(commands, SitesMessageTypes.TransferGet, new SiteTransferIdRequest { Id = started.Id });
         // The file cut by the server going away spent one try at most; the connection failures after it spent none.
@@ -528,7 +532,8 @@ public sealed partial class SiteTransfersEndToEndTests : IAsyncLifetime
     private SitesCommands Open(DownloadManager.Core.ISleepPrevention? sleep = null, bool uploadProbe = false)
     {
         var commands = new SitesCommands(State, line => { lock (_log) _log.Add(line); }, findRclone: _ => Rclone,
-            transferRetryDelay: TimeSpan.FromMilliseconds(100), sleepPrevention: sleep, allowWebDavUploadProbe: uploadProbe);
+            transferRetryDelay: TimeSpan.FromMilliseconds(100), sleepPrevention: sleep, allowWebDavUploadProbe: uploadProbe,
+            transferConnectionDelays: ShortConnectionDelays);
         _commands.Add(commands);
         return commands;
     }
