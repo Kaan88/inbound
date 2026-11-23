@@ -80,6 +80,11 @@ public sealed partial class DownloadSpeedGraph : UserControl
 
         DescribeToggle();
         Plot.SizeChanged += (_, _) => Draw();
+        // UI.B40: the panel's height is what animates (to 0 when closed), but the plot, its labels and the legend keep their
+        // own size. Nothing clips them to the panel by itself on every platform (the Uno build and WinUI when a parent
+        // lays out differently), so closed they drew over the status bar. Clipped to the panel's current size.
+        PlotPanel.SizeChanged += (_, e) => PlotPanel.Clip = new RectangleGeometry { Rect = new Rect(0, 0, e.NewSize.Width, e.NewSize.Height) };
+        PlotPanel.Clip = new RectangleGeometry { Rect = new Rect(0, 0, 0, 0) };
         ActualThemeChanged += (_, _) => Draw();
         Plot.PointerMoved += (_, e) => { _pointerX = e.GetCurrentPoint(Plot).Position.X; DrawHover(); };
         Plot.PointerExited += (_, _) => { _pointerX = null; DrawHover(); };
