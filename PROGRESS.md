@@ -1,5 +1,34 @@
 # Progress - session handoff
 
+## SITES.10 (1)-(3), Android review fixes, 2026-11-23 (branches `sites10-audit-followups`, `w/android-f2`; merged into main)
+
+- **(1) Trusted certificates per site** (Opus). An https site's (WebDAV, S3) certificates go in
+  `state/sites/rclone/ca/<site>-<hash>.pem` (system roots plus that site's certificates), passed as `override.ca_cert` on
+  its remote. Checked with rclone 1.76 by hand first: the option works through rc's fs object, but rclone's remote cache
+  leaves override options out of its key, so a remote made without it was reused after a trust (and one made with it
+  after a forget); a `description` naming the file fixes that. **FTPS can't use it:** rclone's FTP backend keeps the
+  first TLS settings it saw for a server (after a plain call a trusted one failed; after a trusted one a plain call
+  passed). FTPS sites keep the shared `--ca-cert` file, now FTPS-only, with the restart when idle. Tests: new
+  `ACertificateTrustedForOneSiteDoesNotVouchForAnotherServer` (a CA certificate trusted on one WebDAV site, another server
+  with a leaf it signed still refused), the https and FTPS trust tests updated; 34 certificate/sign-in/open-once tests
+  and 342 Sites tests pass with `INBOUND_RCLONE`.
+- **(2) OAuth app off the command line** (Opus). `RCLONE_<KIND>_CLIENT_ID/_SECRET` in rclone's environment, checked by
+  hand (rclone's sign-in page sent the environment's client id). Test `ASignInWithTheUsersOwnAppSendsItsIdThoughNotOnTheCommandLine`
+  reads the redirect and every rclone command line (WMI).
+- **(3) Keep both after a kill** (Opus). A free name is saved before the copy too; the DTO hides a target equal to the
+  path. Test `AKeepBothFileFinishedJustBeforeAKillIsNotKeptTwiceAfterTheRestart` (rewrites the saved batch as a kill
+  before the Done flush leaves it). 69 Sites transfer end-to-end tests pass.
+- **Android Fable review** of the open queue entries: no release blocker. F1 (medium, security): MoreKeys was offered when
+  only one trusted key was still offered; now Changed unless every trusted key is still offered, and the MoreKeys sheet
+  (x26b) shows only the new keys and keeps the compare advice (Opus, test for the partial overlap). F2 and lows L1-L6
+  (DeepSeek, reviewed): crash-guard user starts for torrents, TorBox and Remote Files transfers; release-notes bullets;
+  "View transfers" while loading; check-apk.py. 752 Mobile tests pass; Android Release build has no errors.
+  **Owner questions:** should MoreKeys also ask for the "I checked with the administrator" tick (not in x26b)? R2 (rclone
+  can outlive a killed app on Android, not tied to the app process) has no recorded decision.
+- **Review of the DeepSeek branches** (Opus): `w/followups` settings import changed so a null top-level setting keeps the
+  Host's own value (DeepSeek's version made an empty list, which would remove saved site logins); test covers queues,
+  schedules, proxy and logins.
+
 ## SITES.10 (5) and (6): linked folder kept, a stopped batch's problem code, 2026-11-23 (branch `w/sites10-56`)
 
 Two follow-ups from the 0.8.0 audit (ROADMAP SITES.10), on code that was released; nothing here was seen on screen yet.
