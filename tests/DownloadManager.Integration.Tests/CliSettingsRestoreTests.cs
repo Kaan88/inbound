@@ -46,4 +46,23 @@ public sealed class CliSettingsRestoreTests
         var restored = (await connection.AskAsync<SettingsResult>(MessageTypes.SettingsGet, new { })).Settings!;
         Assert.Contains(restored.Schedules, schedule => schedule.Id == scheduleId);
     }
+
+    [Fact]
+    public async Task AnExportFromAnotherInstallImportsThoughItsQueuesCarryOtherGenerations()
+    {
+        await using var host = await SandboxHost.StartAsync("https://example.invalid/v1/api/");
+        await using var connection = await host.ConnectAsync();
+
+        var file = Path.Combine(host.Root, "settings-backup.json");
+        var exported = await host.RunCliAsync(null, "settings", "export", file);
+        Assert.Equal(0, exported.ExitCode);
+        var backup = JsonSerializer.Deserialize<SettingsDto>(await File.ReadAllTextAsync(file), IpcJson.Options)!;
+        Assert.All(backup.Queues, queue => Assert.Null(queue.Generation));
+
+        // A file another install wrote (or an older export of this build): its queues carry generations this Host never gave.
+        foreach (var queue in backup.Queues) queue.Generation = Guid.NewGuid();
+        await File.WriteAllTextAsync(file, JsonSerializer.Serialize(backup, IpcJson.Options));
+        var imported = await host.RunCliAsync(null, "settings", "import", file);
+        Assert.Equal(0, imported.ExitCode);
+    }
 }

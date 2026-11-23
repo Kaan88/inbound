@@ -42,7 +42,7 @@ concurrency:
 
 jobs:
   app:
-    if: github.repository == 'Kaan88/inbound'
+    if: github.repository == 'Kaan88/inbound' && (github.event_name != 'release' || startsWith(github.event.release.tag_name, 'v'))
     runs-on: macos-15
     timeout-minutes: 150
     permissions:

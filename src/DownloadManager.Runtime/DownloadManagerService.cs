@@ -5924,6 +5924,9 @@ public sealed partial class DownloadManagerService
     private string? ClaimNameLocked(DownloadJob job)
     {
         if (HoldsFinalName(job) || string.IsNullOrWhiteSpace(job.FinalFilePath)) return null;
+        // A torrent's final path is its folder, there while it downloads; torrents choose their name in ChooseFinalTopName
+        // (Fable, 0.9.1 review: Resume renamed a failed multi-file torrent's row to "Name (1)").
+        if (job.Torrent is not null) return null;
         var path = job.FinalFilePath;
         var takenByDownload = FinalPathTakenLocked(path) || CompletedJobAtLocked(path, job.Id);
         var onDisk = (File.Exists(path) || Directory.Exists(path)) && !PathNames.Same(job.WrittenFinalPath, path);

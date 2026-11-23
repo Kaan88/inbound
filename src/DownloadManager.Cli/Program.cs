@@ -1706,6 +1706,8 @@ internal static partial class Program
             var current = await client.SnapshotAsync().ConfigureAwait(false);
             // A backup carries no revision: restored, it replaces the queues and schedules (see import).
             current.Settings.Revision = 0;
+            // A queue's generation is this Host's own; another install's would refuse the restore (Fable, 0.9.1 review).
+            foreach (var queue in current.Settings.Queues) queue.Generation = null;
             current.Settings.Proxy.Password = null;
             foreach (var login in current.Settings.SiteLogins)
             {
@@ -1749,6 +1751,8 @@ internal static partial class Program
             // A restore replaces the queues and schedules with the file's: one deleted since the export comes back and
             // one added since goes. A revision (a file exported by an older build) would merge them instead.
             imported.Revision = 0;
+            // A file from another install (or made before a queue id was reused) carries generations this Host never gave.
+            foreach (var queue in imported.Queues) queue.Generation = null;
             imported.Proxy.Password = null;
             foreach (var login in imported.SiteLogins)
             {

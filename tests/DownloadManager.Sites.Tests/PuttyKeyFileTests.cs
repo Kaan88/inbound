@@ -256,7 +256,8 @@ public sealed class PuttyKeyFileTests
     public void AnOversizedFileOrLineIsDamaged()
     {
         Assert.Equal(PuttyKeyFile.Damaged, PuttyKeyFile.ToOpenSsh(V3Clear + new string(' ', 70_000), null).Problem);
-        var longLine = V3Clear.Replace("Private-Lines: 1\nAAAAIGvv", "Private-Lines: 1\n" + new string('A', 200) + "AAAAIGvv");
+        // ReplaceLineEndings: a CRLF checkout (core.autocrlf) gives the raw string \r\n, and the replace would match nothing.
+        var longLine = V3Clear.ReplaceLineEndings("\n").Replace("Private-Lines: 1\nAAAAIGvv", "Private-Lines: 1\n" + new string('A', 200) + "AAAAIGvv");
         Assert.Equal(PuttyKeyFile.Damaged, PuttyKeyFile.ToOpenSsh(longLine, null).Problem);
     }
 
