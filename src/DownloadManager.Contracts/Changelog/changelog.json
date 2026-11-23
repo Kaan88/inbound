@@ -11,7 +11,9 @@
             { "text": "The torrent dialog and Options say which folder a torrent goes to, and the kind folders setting is now called \"Sort torrents into folders by kind\".", "tags": ["desktop", "webui", "torrents"] },
             { "text": "Remote files takes PuTTY .ppk keys of version 2 and 3, also with a passphrase, and keeps them as OpenSSH keys.", "tags": ["all"] },
             { "text": "One click opens a finished download in the browser extension's popup, as in the browser's own downloads list.", "tags": ["extension"] },
-            { "text": "When a site refuses Inbound a download the extension sent (HTTP 401 or 403), the browser downloads it instead.", "tags": ["extension"] }
+            { "text": "When a site refuses Inbound a download the extension sent (HTTP 401 or 403), the browser downloads it instead.", "tags": ["extension"] },
+            { "text": "A transfer stopped by an expired sign-in or an untrusted certificate offers Sign in or Check the certificate, as browsing does.", "tags": ["desktop", "webui"] },
+            { "text": "The extension's row menu fits inside the popup instead of making it taller.", "tags": ["extension"] }
           ]
         },
         {
@@ -22,7 +24,16 @@
             { "text": "In Two panes, both panes start at the same height.", "tags": ["desktop"] },
             { "text": "A collapsed speed graph no longer draws its labels over the status bar.", "tags": ["desktop"] },
             { "text": "Two unfinished downloads never get the same file name, and a failed download no longer keeps its name from a new one.", "tags": ["all"] },
-            { "text": "The extension no longer opens its popup for a download the browser kept.", "tags": ["extension"] }
+            { "text": "The extension no longer opens its popup for a download the browser kept.", "tags": ["extension"] },
+            { "text": "A certificate you trust for a WebDAV or S3 remote is trusted for that remote only, not for other servers.", "tags": ["all"] },
+            { "text": "Signing in to a cloud remote with your own app no longer puts its secret on rclone's command line.", "tags": ["all"] },
+            { "text": "Keep both no longer makes a second copy of a file when Inbound was stopped just after the file finished.", "tags": ["all"] },
+            { "text": "A remote that stops answering is waited for about ten minutes before its transfer stops, and a copy rclone never answers is tried again.", "tags": ["all"] },
+            { "text": "In the web UI, editing a remote whose linked folder is outside the server's folders works when the folder isn't changed.", "tags": ["webui"] },
+            { "text": "Creating or deleting a queue works while the default download folder can't be reached.", "tags": ["all"] },
+            { "text": "A cloud remote's renewed sign-in is used at once when its folders are counted.", "tags": ["all"] },
+            { "text": "dm settings import accepts a file with null for a setting; that setting keeps its current value.", "tags": ["all"] },
+            { "text": "The extension recognises a download the browser kept even when the app wrote its address a little differently.", "tags": ["extension"] }
           ]
         }
       ]
