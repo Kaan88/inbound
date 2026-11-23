@@ -58,7 +58,7 @@ internal sealed class TorrentOptionsPage
     /// <param name="withControls">T3: the Host has the peer, privacy, proxy and connection settings.</param>
     /// <param name="proxy">T3: Options › Proxy as the window has it now (mode and address), for the proxy note.</param>
     public TorrentOptionsPage(SettingsDto settings, string? providerName, bool offerHandler, RemoteClient client,
-        bool withControls = false, Func<(string Mode, string? Address)>? proxy = null)
+        bool withControls = false, bool useLastFolder = true, Func<(string Mode, string? Address)>? proxy = null)
     {
         _client = client;
         _withControls = withControls;
@@ -151,7 +151,7 @@ internal sealed class TorrentOptionsPage
         // T14.B1: the folder is set on Save to; say here where torrents go now.
         var where = SettingsWindow.Hint(settings.UseTorrentCategoryFolders is null
             ? string.Empty
-            : $"{TorrentFolderText.WhereTorrentsGo(settings)} Change the folder in Save to.");
+            : $"{TorrentFolderText.WhereTorrentsGo(settings, useLastFolder: useLastFolder)} Change the folder in Save to.");
         var multiFile = SettingsWindow.Hint("For a torrent with several files. A magnet asks once its file list arrives.");
         multiFile.Margin = new Thickness(28, 0, 0, 0);
         var proxyHint = SettingsWindow.Hint("Torrents connect directly: the proxy in Options › Proxy is not used for them.");

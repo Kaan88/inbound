@@ -44,6 +44,34 @@ the owner's checks are listed per item. Rows in ROADMAP.
 - **Tests:** solution build clean (no new warnings); Core 2620, TorBox 327, Integration (Remote, Scenario D, Torrent:
   531, 3 skipped) pass; Sites 321 pass, 20 skip, and `PuttyKeyFileTests.AnOversizedFileOrLineIsDamaged` fails, in code
   this branch doesn't touch (follow-up); extension `npm test` 374 pass, `tsc` clean; web UI 845 pass.
+- **Review before the merge (five read-only DeepSeek reviewers, each finding checked by Claude):** fixed:
+  - EXT.B11: the kept-in-browser addresses were in memory only, so a worker restart brought the popup back; they are
+    now saved for the session and checked again before a finish.
+  - EXT.R18: a real double-click (click, click, dblclick) opened the file twice.
+  - EXT.R18: the click that closes a row menu opened the row under it. A press outside a menu now only closes it.
+  - EXT.B12: when the browser couldn't start the download either, the app's job was still deleted and the user was
+    told the browser had it. Now the job stays.
+  - T14.B1: the window named the last folder for another server, which (as a web session) never uses it. Kind-folder
+    names are now cleaned as the Host cleans them ("A/B" → "B").
+  - TB.F18: "doesn't list" is said only for a link that was really compared with the list.
+  - Web UI and window: no repeated older-server sentence under the box, and no malformed line while the download
+    folder box is empty.
+  Re-run after the fixes: solution build clean (no new warnings); Core 2624, TorBox 327, Integration (Remote, Scenario
+  D, Torrent: 528, 6 skipped) pass; extension `npm test` 377 pass, `tsc` clean; web UI 845 pass, `svelte-check` clean.
+- **Recorded, not changed:**
+  - EXT.B11 matches by address. A second, kept download of an address the app is still downloading stops the app's
+    one being followed (rare).
+  - A few "browser keeps it" exits made before the app was asked record nothing.
+  - Possible other source of the reported popup: with "Ask where to save" on, the ask popup opens before any choice.
+  - UI.B41: torrents held for a slow start are dropped if the shown server changes meanwhile (the existing rule), or
+    lost if the window closes before the Host answers.
+  - Web UI: Save to's hint isn't tied to the box for screen readers; the Options line is re-read per keystroke;
+    several torrents of one kind show the kind slot where the window names the folder.
+  - PuTTY test: the test is wrong, not the code. It matches "\n" in a CRLF checkout; the fix is to anchor on the base64
+    text (follow-up).
+  - `dm sites add --key-file` reads a key file without a size check first.
+- **Questions for the owner:** if the EXT.B11 popup comes back: is "Ask where to save" on, and does the app's list have
+  a download of that file? EXT.B12: try a claude.ai attachment with sending on.
 
 ## Android 0.1.3 published; Android official on main, 2026-11-23
 

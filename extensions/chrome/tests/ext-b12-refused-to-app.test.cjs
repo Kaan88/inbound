@@ -104,6 +104,20 @@ test('EXT.B12: a sent job the site refuses with 403 and no bytes goes to the bro
   });
 });
 
+test("EXT.B12: when the browser cannot start it either, the app's failed job stays and nothing claims the browser has it", async () => {
+  const { harness, log } = refusedChrome();
+  harness.chrome.downloads.download = async () => { throw new Error('Download not allowed'); };
+  await withBackground(harness, async () => {
+    await openNative(harness);
+    emit(harness, job());
+    await settle(() => log.notes.length > 0);
+    await wait();
+    assert.equal(harness.nativeMessages.some((message) => message.type === 'job.remove'), false, 'the app keeps it to retry');
+    assert.equal(log.notes.length, 1);
+    assert.doesNotMatch(log.notes[0].message, /so your browser downloads it/);
+  });
+});
+
 test('EXT.B12: a 403 after some bytes, a 404, a server\'s job, another browser\'s job and a second failure do nothing', async () => {
   const cases = [
     ['403 after bytes', job({ receivedBytes: 512 })],

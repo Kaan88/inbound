@@ -94,6 +94,31 @@ let pauseUntil = 0;
 let lastJobs = new Map<string, JobSummary>();
 /** EXT.R12: the downloads sent from the browser that the toolbar icon follows, and what it last drew. */
 const watch = new DownloadWatch(chrome.runtime.id);
+/**
+ * EXT.B11: the addresses this browser kept, saved for the session, because the worker can stop while a download the app
+ * still has for one of them runs; a new worker would otherwise open the finish popup for it.
+ */
+const KEPT_IN_BROWSER_KEY = "keptInBrowser";
+let keptLoaded = false;
+const keptRestored: Promise<void> = (async () => {
+  try { watch.restoreKept((await chrome.storage.session.get(KEPT_IN_BROWSER_KEY))[KEPT_IN_BROWSER_KEY]); } catch { /* memory only */ }
+  keptLoaded = true;
+})();
+
+function saveKept(): void {
+  void keptRestored.then(() => chrome.storage.session.set({ [KEPT_IN_BROWSER_KEY]: watch.keptAddresses() })).catch(() => undefined);
+}
+
+function markKeptInBrowser(url: string | undefined): void {
+  watch.handedBack(url);
+  saveKept();
+}
+
+function markTakenByApp(url: string | undefined): void {
+  watch.takenByApp(url);
+  saveKept();
+}
+
 // Unset at start: the browser keeps an icon set by an earlier worker, so the first state is always drawn (the plain
 // icon, if nothing is going on), and a ring left behind by that worker goes.
 let drawnKey: string | null = null;
@@ -562,7 +587,7 @@ async function sendLinkStraight(pending: PendingHandoff, kind: "link" | "file"):
     });
     if (ack?.accepted) {
       // EXT.B11: a link sent by hand is the app's download, whatever the browser kept earlier for its address.
-      watch.takenByApp(pending.url);
+      markTakenByApp(pending.url);
       notify(ack.duplicate ? `Already in ${where.name}` : `Sent to ${where.name}`, shown);
       tellFolderReplaced(ack, shown);
       return;
@@ -688,7 +713,7 @@ async function onDownloadCreated(item: chrome.downloads.DownloadItem, answer?: (
     if (ack?.accepted) {
       hostAccepted = true;
       // EXT.B11: the app has it: a job of its address that finishes is this download.
-      watch.takenByApp(item.url);
+      markTakenByApp(item.url);
       const browserEntryRemoved = await removeAcceptedBrowserDownload(chrome.downloads, item.id);
       downloadRequestIds.delete(item.id);
       notify(
@@ -702,7 +727,7 @@ async function onDownloadCreated(item: chrome.downloads.DownloadItem, answer?: (
     } else {
       // EXT.B11: the browser keeps it, so the app's job of the same address (one it kept from an answer this
       // extension never got) is not this download.
-      watch.handedBack(item.url);
+      markKeptInBrowser(item.url);
       const resumed = await resumeInBrowser(item.id, fileName);
       const refusal = refusalText(ack, `The ${where.thing} refused it.`);
       notify(`${where.subject} did not accept the download`, `${refusal} ${resumed
@@ -718,7 +743,7 @@ async function onDownloadCreated(item: chrome.downloads.DownloadItem, answer?: (
       return true;
     }
     // The app may have taken it before its answer was lost: whatever job it kept for this address is not this download.
-    watch.handedBack(item.url);
+    markKeptInBrowser(item.url);
     const resumed = await resumeInBrowser(item.id, fileName);
     downloadRequestIds.delete(item.id);
     const message = error instanceof Error ? error.message : String(error);
@@ -859,18 +884,18 @@ async function onDownloadResponse(details: chrome.webRequest.OnHeadersReceivedDe
     });
     if (ack?.accepted) {
       // EXT.B11: the app has it: a job of its address that finishes is this download.
-      watch.takenByApp(url);
+      markTakenByApp(url);
       notify(ack.duplicate ? `Already in ${where.name}` : `Sent to ${where.name}`, fileName);
       tellFolderReplaced(ack, fileName);
       return { cancel: true };
     }
     const refusal = refusalText(ack, `The ${where.thing} refused it.`);
-    watch.handedBack(url);
+    markKeptInBrowser(url);
     notify(`${where.subject} did not accept the download`, `${refusal} This download stays in your browser.`);
     setLastError(transport, refusal);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    watch.handedBack(url);
+    markKeptInBrowser(url);
     setLastError(transport, message);
     notify(where.unavailable, `${errorFor(transport, message)} This download stays in your browser.`);
   }
@@ -986,7 +1011,7 @@ async function forgetHandoff(id: string): Promise<void> {
 /** Gives a held download back to the browser: its file name, then the transfer. */
 async function keepInBrowser(pending: PendingHandoff): Promise<void> {
   // EXT.B11: the browser downloads it, so nothing the app kept for its address is this download.
-  watch.handedBack(pending.url);
+  markKeptInBrowser(pending.url);
   await forgetHandoff(pending.id);
   const downloadId = pending.browserDownloadId;
   if (pending.restartInBrowser) {
@@ -1023,7 +1048,7 @@ async function keepInBrowser(pending: PendingHandoff): Promise<void> {
  * second time here, which a one-time link may refuse; the user is told when that download fails (audit 3 M4).
  */
 async function startAgainInBrowser(pending: PendingHandoff, where: Record<string, unknown>,
-  referrer: string | undefined, failedText: string): Promise<void> {
+  referrer: string | undefined, failedText: string): Promise<boolean> {
   const fileName = pending.suggestedFileName || "download";
   const base: Record<string, unknown> = { url: pending.url, ...where };
   const named = pending.suggestedFileName ? { ...base, filename: pending.suggestedFileName } : base;
@@ -1038,13 +1063,14 @@ async function startAgainInBrowser(pending: PendingHandoff, where: Record<string
     try {
       const downloadId = await chrome.downloads.download(options as unknown as chrome.downloads.DownloadOptions);
       if (typeof downloadId === "number") await watchRestart(downloadId, fileName, pending.mimeType);
-      return;
+      return true;
     } catch {
       // The next, plainer attempt.
     }
   }
   restartedInBrowser.delete(pending.url);
   await noteLeftInBrowser(fileName, failedText, false);
+  return false;
 }
 
 /**
@@ -1176,11 +1202,17 @@ async function appRefusedToBrowser(job: JobSummary | undefined, eventType: strin
   refusedUrls = [url, ...refusedUrls].slice(0, REFUSED_KEEP);
   await persistRefused();
   // The browser has it now: whatever the app keeps for this address is not the download the user watches (EXT.B11).
-  watch.handedBack(url);
+  markKeptInBrowser(url);
   showDownloadState();
-  await startAgainInBrowser(
+  const started = await startAgainInBrowser(
     { id: job.id, url, userAgent: "", suggestedFileName: job.fileName, isAutoIntercept: true, createdAt: Date.now() },
     {}, undefined, REFUSED_RESTART_FAILED);
+  if (!started) {
+    // The browser could not start it either (its note said so): the app's failed download stays, so it can be retried.
+    markTakenByApp(url);
+    showDownloadState();
+    return;
+  }
   await removeFailedJob(job);
   await noteLeftInBrowser(job.fileName || "download", refusedNote(status), false);
 }
@@ -1628,18 +1660,25 @@ function followJob(job: JobSummary | undefined, eventType?: string): void {
   if (!job) return;
   const change = watch.update(job, eventType);
   if (change.finished) {
-    if (!finishing) {
-      finishing = true;
-      void downloadFinished(job);
-    } else {
-      // A second download finishing while the first is still being handled: the mark is recorded, and a notification
-      // (which neither flashes nor opens the popup) is shown too, so it is not lost.
-      void recordFinished(job.id, job.fileName).then(() => {
-        if (settings.onFinish === "notify") showFinishedNotification(job);
-      });
-    }
+    // EXT.B11: an earlier worker may have kept this address in the browser; wait for its list only while it loads.
+    if (keptLoaded) followedFinished(job);
+    else void keptRestored.then(() => { if (!watch.isKept(job.url)) followedFinished(job); });
   }
   showDownloadState();
+}
+
+/** A followed download finished: the finish action runs (a popup, a flash or a notification), one at a time. */
+function followedFinished(job: JobSummary): void {
+  if (!finishing) {
+    finishing = true;
+    void downloadFinished(job);
+  } else {
+    // A second download finishing while the first is still being handled: the mark is recorded, and a notification
+    // (which neither flashes nor opens the popup) is shown too, so it is not lost.
+    void recordFinished(job.id, job.fileName).then(() => {
+      if (settings.onFinish === "notify") showFinishedNotification(job);
+    });
+  }
 }
 
 /** The app quit or its connection closed: no more events will say how running downloads end, so the ring goes. */
@@ -2009,7 +2048,7 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
             job: ack?.job,
           });
           // EXT.B11: a link of the batch the app took is its download, whatever the browser kept earlier.
-          if (ack?.accepted) watch.takenByApp(item.url);
+          if (ack?.accepted) markTakenByApp(item.url);
         } catch (error) {
           results.push({
             url: item.url,
@@ -2258,7 +2297,7 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
       // Keep a rejected request so the user can correct it and try again.
       if (ack?.accepted) {
         // EXT.B11: the app has it now, so a job of its address that finishes is this download.
-        watch.takenByApp(pending.url);
+        markTakenByApp(pending.url);
         await forgetHandoff(id);
         if (typeof pending.browserDownloadId === "number") {
           // The app holds it now; the browser's paused copy goes, and its file name is never answered.

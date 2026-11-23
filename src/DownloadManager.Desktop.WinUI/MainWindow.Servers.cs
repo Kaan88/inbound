@@ -1030,7 +1030,8 @@ public sealed partial class MainWindow
                     {
                         var view = CloneSettings(theirs);
                         view.UseTorrentCategoryFolders = torrentFolders.IsChecked == true;
-                        where.Text = TorrentFolderText.WhereTorrentsGo(view);
+                        // Another server treats this window as a web session, which never uses its last folder.
+                        where.Text = TorrentFolderText.WhereTorrentsGo(view, useLastFolder: false);
                     }
                     torrentFolders.Checked += (_, _) => ShowWhere();
                     torrentFolders.Unchecked += (_, _) => ShowWhere();

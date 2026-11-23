@@ -16,6 +16,8 @@ namespace DownloadManager.Desktop.WinUI;
 /// </summary>
 internal sealed class TorrentAddDialog
 {
+    /// <summary>T14.B1: false for another server, which (like any web session) never uses its last folder.</summary>
+    private readonly bool _useLastFolder;
     private const int MostAtOnce = 4;
     private const double RowTextWidth = 470;
     private static readonly TimeSpan PasteDelay = TimeSpan.FromMilliseconds(400);
@@ -58,9 +60,10 @@ internal sealed class TorrentAddDialog
     /// <param name="jobFor">T10: the Host's finished .torrent download a line's path is the file of, or null. Such a line is
     /// read by the Host from that download (FromJobId), so its path need not be on this PC.</param>
     public TorrentAddDialog(RemoteClient remote, SettingsDto settings, string? providerName, FrameworkElement themeRoot, IntPtr hwnd,
-        bool withControls = false, Func<string, Guid?>? jobFor = null)
+        bool withControls = false, Func<string, Guid?>? jobFor = null, bool useLastFolder = true)
     {
         _withControls = withControls;
+        _useLastFolder = useLastFolder;
         _jobFor = jobFor;
         _remote = remote;
         _settings = settings;
@@ -510,8 +513,8 @@ internal sealed class TorrentAddDialog
             .Select(line => FileCategories.For(line.Name)).Distinct().ToList();
         var kind = kinds.Count == 1 ? kinds[0] : null;
         var typed = _destination.Text.Trim();
-        _destination.PlaceholderText = TorrentFolderText.SaveToPlaceholder(_settings, kind);
-        _saveToHint.Text = typed.Length > 0 ? string.Empty : TorrentFolderText.WhereTorrentsGo(_settings, kind);
+        _destination.PlaceholderText = TorrentFolderText.SaveToPlaceholder(_settings, kind, _useLastFolder);
+        _saveToHint.Text = typed.Length > 0 ? string.Empty : TorrentFolderText.WhereTorrentsGo(_settings, kind, _useLastFolder);
         _saveToHint.Visibility = typed.Length > 0 ? Visibility.Collapsed : Visibility.Visible;
         AutomationProperties.SetName(_destination, typed.Length > 0 ? "Save to" : $"Save to, empty. {_saveToHint.Text}");
     }

@@ -535,12 +535,14 @@ export function torrentSaveToPlaceholder(settings: TorrentFolderSettings | null 
   if (chosen) return chosen;
   const root = settings.torrentCategoryFoldersRoot?.trim();
   if (root) return settings.useTorrentCategoryFolders ? torrentJoin(root, torrentKindSlot) : root;
-  return `${settings.defaultDownloadDirectory?.trim() ?? ''} (the download folder)`;
+  const downloads = settings.defaultDownloadDirectory?.trim();
+  return downloads ? `${downloads} (the download folder)` : torrentOlderHost;
 }
 
 /** T14.B1: where torrents go, in words, under the torrent folder box and the dialog's Save to. */
 export function torrentWhereGoes(settings: TorrentFolderSettings | null | undefined, folder?: string | null): string {
-  if (typeof settings?.useTorrentCategoryFolders !== 'boolean') return torrentOlderHost;
+  // Nothing to add to the box's own words when the server doesn't say (the placeholder says it once).
+  if (typeof settings?.useTorrentCategoryFolders !== 'boolean') return '';
   const chosen = folder?.trim();
   if (chosen) return `Torrents go to ${chosen}.`;
   const root = settings.torrentCategoryFoldersRoot?.trim();
@@ -549,7 +551,10 @@ export function torrentWhereGoes(settings: TorrentFolderSettings | null | undefi
       ? `Torrents go to ${root}, in a folder for its kind: ${torrentKinds}.`
       : `Torrents go to ${root}.`;
   }
-  const downloads = `${settings.defaultDownloadDirectory?.trim() ?? ''} (the download folder)`;
+  const folderOfDownloads = settings.defaultDownloadDirectory?.trim();
+  // The download folder box is being edited and is empty for now.
+  if (!folderOfDownloads) return '';
+  const downloads = `${folderOfDownloads} (the download folder)`;
   // With kinds on, another downloads' kind folder may take a torrent instead of the download folder.
   return settings.useTorrentCategoryFolders && settings.useCategoryFolders !== false
     ? `Torrents go to ${downloads}, unless a folder is set for their kind of download.`

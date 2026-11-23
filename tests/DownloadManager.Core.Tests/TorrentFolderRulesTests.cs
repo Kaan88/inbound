@@ -177,7 +177,8 @@ public sealed class TorrentFolderRulesTests
         var older = new SettingsDto { DefaultDownloadDirectory = Downloads, TorrentCategoryFoldersRoot = Torrents };
         Assert.Null(older.UseTorrentCategoryFolders);
         Assert.Equal("Each torrent's category folder", TorrentFolderText.SaveToPlaceholder(older));
-        Assert.Equal("Each torrent's category folder", TorrentFolderText.WhereTorrentsGo(older));
+        // Said once, by the box: nothing is added under it.
+        Assert.Equal(string.Empty, TorrentFolderText.WhereTorrentsGo(older));
     }
 
     [Theory]
@@ -199,6 +200,22 @@ public sealed class TorrentFolderRulesTests
                     Path.GetFullPath(PathOnly(TorrentFolderText.SaveToPlaceholder(dto, category))));
             }
         }
+    }
+
+    [Theory]
+    [InlineData("A/B")]
+    [InlineData(@"Old\New")]
+    [InlineData("Ev‮il")]
+    [InlineData("Notes: draft ")]
+    public void AKindFolderNameIsCleanedAsTheHostCleansIt(string name)
+    {
+        // T14.B1 review: the window named "A_B" where the Host saved to "B".
+        var app = Settings(normalOn: false, torrentOn: true, Torrents);
+        app.CustomCategories[0].Name = name;
+        var dto = Dto(normalOn: false, torrentOn: true, Torrents);
+        dto.CustomCategories[0].Name = name;
+        Assert.Equal(TorrentFolderRules.Resolve(app, "c1", useLastFolder: false),
+            PathOnly(TorrentFolderText.SaveToPlaceholder(dto, "c1", useLastFolder: false)));
     }
 
     [Fact]

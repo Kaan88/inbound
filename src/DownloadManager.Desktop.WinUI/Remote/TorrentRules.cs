@@ -460,7 +460,8 @@ internal static class TorrentFolderText
     /// </summary>
     public static string WhereTorrentsGo(SettingsDto settings, string? categoryId = null, bool useLastFolder = true)
     {
-        if (Where(settings, categoryId, useLastFolder) is not { } where) return EachCategoryFolder;
+        // An older Host doesn't say: the box's own words say it once, so nothing is added under it.
+        if (Where(settings, categoryId, useLastFolder) is not { } where) return string.Empty;
         if (where.ByKind) return $"Torrents go to {where.Root}, in a folder for its kind: {Kinds}.";
         var path = where.Note is null ? $"Torrents go to {where.Path}." : $"Torrents go to {where.Path} ({where.Note}).";
         // The kind isn't known and other downloads' kind folders count: one of them may take a torrent instead.
@@ -533,7 +534,11 @@ internal static class TorrentFolderText
         var builtIn = BuiltInKinds.FirstOrDefault(item => string.Equals(item.Id, category, StringComparison.OrdinalIgnoreCase)).Name;
         var name = builtIn ?? settings.CustomCategories.FirstOrDefault(item => item.Id == category)?.Name;
         if (string.IsNullOrWhiteSpace(name)) return null;
-        var safe = new string(name.Trim().Select(c => char.IsControl(c) || c is ':' or '*' or '?' or '"' or '<' or '>' or '|' or '/' or '\\' ? '_' : c).ToArray()).TrimEnd('.', ' ');
+        // As FileNameResolver.Sanitize: only the part after the last separator, and the marks that hide a name replaced too.
+        var trimmed = name.Trim();
+        trimmed = trimmed[(trimmed.LastIndexOfAny(['/', '\\']) + 1)..];
+        var safe = new string(trimmed.Select(c => char.IsControl(c) || c is >= '‎' and <= '‏' or >= '‪' and <= '‮'
+            or >= '⁦' and <= '⁩' or '؜' or ':' or '*' or '?' or '"' or '<' or '>' or '|' ? '_' : c).ToArray()).Trim().TrimEnd('.', ' ');
         return string.IsNullOrWhiteSpace(safe) || safe is "." or ".." ? null : safe;
     }
 

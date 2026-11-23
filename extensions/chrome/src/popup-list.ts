@@ -210,6 +210,8 @@ function createRow(handlers: PopupListHandlers): RowParts {
   const onControl = (event: Event): boolean => !!(event.target as Element).closest?.("button");
   item.addEventListener("click", (event) => {
     if (onControl(event) || !opensFile(parts.job)) return;
+    // The second click of a double-click opens nothing again.
+    if (Date.now() - openedAt < CLICK_OPENS_MS) return;
     openedAt = Date.now();
     handlers.onOpen(parts.job);
   });

@@ -4178,7 +4178,7 @@ public sealed partial class MainWindow : Window
                             DestinationDirectory = string.IsNullOrWhiteSpace(editor.Folder.Text) ? null : editor.Folder.Text.Trim(),
                         }).ToList(),
                 };
-                torrentWhere.Text = TorrentFolderText.WhereTorrentsGo(view);
+                torrentWhere.Text = TorrentFolderText.WhereTorrentsGo(view, useLastFolder: !_connection.IsRemote);
             }
 
             if (torrentFoldersKnown)
@@ -4278,7 +4278,7 @@ public sealed partial class MainWindow : Window
                 // T3: the peer, privacy and connection settings only where the Host has them; the proxy as this window has it now.
                 await _connection.ProbeTorrentControlsAsync();
                 torrentPage = new TorrentOptionsPage(settings, TorrentProviderName(), offerHandler: !_connection.IsRemote && (OperatingSystem.IsWindows() || OperatingSystem.IsLinux()), _remote,
-                    withControls: TorrentControls,
+                    withControls: TorrentControls, useLastFolder: !_connection.IsRemote,
                     proxy: () => (proxyMode.SelectedIndex switch { 1 => "system", 2 => "manual", _ => "none" },
                         proxyMode.SelectedIndex == 2 ? ProxyAddress.Compose(proxyProtocol.SelectedIndex, proxyAddress.Text) : null));
                 torrentPageIndex = nextPage;

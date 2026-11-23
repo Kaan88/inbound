@@ -212,6 +212,25 @@ export class DownloadWatch {
     if (address) this.keptInBrowser.delete(address);
   }
 
+  /** EXT.B11: the kept addresses, oldest first, so a new worker can take them back (the worker can stop at any time). */
+  keptAddresses(): string[] {
+    return [...this.keptInBrowser];
+  }
+
+  /** EXT.B11: addresses an earlier worker kept; ones this worker already marked stay newer. */
+  restoreKept(addresses: unknown): void {
+    if (!Array.isArray(addresses)) return;
+    const newer = [...this.keptInBrowser];
+    this.keptInBrowser.clear();
+    for (const address of addresses) if (typeof address === "string" && address.trim()) this.handedBack(address);
+    for (const address of newer) this.handedBack(address);
+  }
+
+  /** EXT.B11: true when a download of this address stayed in the browser. */
+  isKept(url: string | undefined): boolean {
+    return typeof url === "string" && url.length > 0 && this.keptInBrowser.has(url);
+  }
+
   private keptByBrowser(job: JobSummary): boolean {
     return typeof job.url === "string" && job.url.length > 0 && this.keptInBrowser.has(job.url);
   }

@@ -1405,7 +1405,10 @@ public sealed partial class RemoteJobCoordinator
             matched = hosters.FirstOrDefault(matcher => matcher.Hoster.Name.Equals(name, StringComparison.OrdinalIgnoreCase))?.Hoster;
         }
 
-        return (matched, matched is not null ? true : complete ? false : null);
+        // "Not listed" only for a link that was really compared with the list (review: a link that couldn't be read
+        // was called unlisted by its shown host).
+        var compared = link is not null && host is not null;
+        return (matched, matched is not null ? true : complete && compared ? false : null);
     }
 
     /// <summary>What was submitted for this job. Only for taking out of a provider's words; these go nowhere else.</summary>

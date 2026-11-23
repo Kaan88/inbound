@@ -50,6 +50,23 @@ test('EXT.B11: a download the browser kept is not followed, and the app finishin
     'an address kept long ago is forgotten');
 });
 
+test('EXT.B11: a new worker takes back the addresses an earlier one kept', () => {
+  const before = new status.DownloadWatch();
+  before.handedBack(URL);
+  before.handedBack('https://site.test/b.zip');
+  const saved = JSON.parse(JSON.stringify(before.keptAddresses()));
+  // The worker stopped while the app's job for URL ran; the new one is told about it after it marked another.
+  const after = new status.DownloadWatch();
+  after.handedBack('https://site.test/c.zip');
+  after.restoreKept(saved);
+  assert.equal(after.isKept(URL), true);
+  assert.deepEqual(after.keptAddresses().at(-1), 'https://site.test/c.zip', "this worker's own mark stays newest");
+  assert.deepEqual(after.update(job()), { finished: false });
+  assert.deepEqual(after.update(job({ state: 'completed' })), { finished: false }, 'no popup after the restart');
+  after.restoreKept('not a list');
+  assert.equal(after.isKept(URL), true);
+});
+
 // ---- The background -----------------------------------------------------------------------------------------------
 
 function withCanvas(run) {

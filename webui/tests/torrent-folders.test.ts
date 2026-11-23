@@ -102,8 +102,11 @@ describe('the torrent dialog Save to', () => {
   it('keeps the old words for a server before T14', () => {
     expect(torrentSaveToPlaceholder({})).toBe("Each torrent's category folder");
     expect(torrentSaveToPlaceholder(null)).toBe("Each torrent's category folder");
-    expect(torrentWhereGoes({})).toBe("Each torrent's category folder");
-    expect(torrentWhereGoes(null)).toBe("Each torrent's category folder");
+    expect(torrentWhereGoes({})).toBe(''); // said once, by the box
+    expect(torrentSaveToPlaceholder({ useTorrentCategoryFolders: false, torrentCategoryFoldersRoot: '', defaultDownloadDirectory: '' }))
+      .toBe("Each torrent's category folder");
+    expect(torrentWhereGoes({ useTorrentCategoryFolders: false, torrentCategoryFoldersRoot: '', defaultDownloadDirectory: ' ' })).toBe('');
+    expect(torrentWhereGoes(null)).toBe('');
   });
 
   it('says the folder per kind plainly', () => {

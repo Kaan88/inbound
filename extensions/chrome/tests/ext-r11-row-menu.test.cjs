@@ -340,7 +340,8 @@ test('EXT.R13, EXT.R18: one click on a finished download of this PC opens its fi
     assert.equal(page.sent.some((m) => m.type === 'dm.openApp'), false, 'the app is not opened');
     assert.equal(doc.getElementById('live').textContent, 'Opened the file.');
 
-    // The second click of a double-click opens nothing again.
+    // The second click of a double-click opens nothing again: a real one is click, click, dblclick.
+    click('report.pdf');
     dbl('report.pdf');
     await flush();
     assert.equal(opens(), 1);
@@ -369,6 +370,31 @@ test('EXT.R13, EXT.R18: one click on a finished download of this PC opens its fi
       await flush();
     }
     assert.equal(page.sent.filter((m) => m.type === 'dm.openApp').length, 2);
+  } finally { page.restore(); }
+});
+
+test('EXT.R18: a click that only closes a row menu does not open the row under it', async () => {
+  const page = await openPopup([finished()], {
+    'dm.jobCommand': async () => ({ ok: true, message: 'Opened the file.' }),
+  });
+  try {
+    const doc = page.document;
+    const row = doc.querySelector('.job');
+    const opens = () => page.sent.filter((m) => m.type === 'dm.jobCommand' && m.command === 'open').length;
+    row.dispatchEvent(new page.window.MouseEvent('pointerdown', { bubbles: true, button: 2 }));
+    row.dispatchEvent(new page.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 30, button: 2 }));
+    await flush();
+    assert.ok(doc.querySelector('[role="menu"]'), 'the row menu is open');
+    // Pressing outside the menu closes it; the click of that press is the menu's, not the row's.
+    row.dispatchEvent(new page.window.MouseEvent('pointerdown', { bubbles: true }));
+    row.dispatchEvent(new page.window.MouseEvent('click', { bubbles: true, cancelable: true }));
+    await flush();
+    assert.equal(doc.querySelector('[role="menu"]'), null);
+    assert.equal(opens(), 0);
+    // The next click opens it as before.
+    row.dispatchEvent(new page.window.MouseEvent('click', { bubbles: true, cancelable: true }));
+    await flush();
+    assert.equal(opens(), 1);
   } finally { page.restore(); }
 });
 

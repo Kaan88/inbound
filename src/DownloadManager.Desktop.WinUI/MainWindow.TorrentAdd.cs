@@ -324,7 +324,7 @@ public sealed partial class MainWindow
         await _connection.ProbeTorrentControlsAsync();
         if (!ReferenceEquals(connection, _connection)) return false;
         var dialog = new TorrentAddDialog(_remote, settings, TorrentProviderName(), RootGrid, WinRT.Interop.WindowNative.GetWindowHandle(this),
-            withControls: TorrentControls, jobFor: TorrentFileJobFor);
+            withControls: TorrentControls, jobFor: TorrentFileJobFor, useLastFolder: !_connection.IsRemote);
         var choice = await dialog.ShowAsync(Content.XamlRoot, RootGrid.ActualTheme, focus, inputs);
         if (choice is null)
         {
