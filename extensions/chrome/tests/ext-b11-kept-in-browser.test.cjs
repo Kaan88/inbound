@@ -50,6 +50,46 @@ test('EXT.B11: a download the browser kept is not followed, and the app finishin
     'an address kept long ago is forgotten');
 });
 
+test('EXT.B11: an address the app writes its own way still marks the same kept download', () => {
+  // The Host writes a job's address as .NET's URI does: scheme and host in lower case, no default port, no fragment.
+  const watch = new status.DownloadWatch();
+  watch.handedBack('HTTPS://Site.Test:443/a.zip#part');
+  assert.equal(watch.isKept('https://site.test/a.zip'), true);
+  assert.equal(watch.isKept('https://site.test/a.zip?x=1'), false, 'a query is another address');
+  assert.equal(watch.isKept('https://site.test/A.zip'), false, 'the path is compared as it is');
+  assert.equal(watch.isKept('http://site.test/a.zip'), false, 'another scheme');
+  assert.equal(watch.isKept('https://site.test:8443/a.zip'), false, 'another port');
+  assert.equal(watch.isKept('https://other.test/a.zip'), false, 'another host');
+  assert.deepEqual(watch.update(job({ url: 'https://site.test/a.zip' })), { finished: false });
+  assert.equal(watch.size, 0, 'not followed: the browser kept it');
+  assert.deepEqual(watch.update(job({ id: 'completed-anyway', url: 'https://site.test/a.zip', state: 'completed' })),
+    { finished: false }, 'no finish popup for the app job of that address');
+
+  // The other way round: the browser's text has the parts, the app's job is the plain address.
+  const plain = new status.DownloadWatch();
+  plain.handedBack('https://site.test/b.zip');
+  plain.update(job({ url: 'HTTPS://SITE.TEST:443/b.zip#x' }));
+  assert.equal(plain.size, 0);
+  // The kept list is stored normalised, so a worker restart compares the same way.
+  assert.deepEqual(plain.keptAddresses(), ['https://site.test/b.zip']);
+  const restarted = new status.DownloadWatch();
+  restarted.restoreKept(plain.keptAddresses());
+  assert.equal(restarted.isKept('HTTPS://Site.Test:443/b.zip'), true);
+  restarted.takenByApp('HTTPS://Site.Test:443/b.zip#again');
+  assert.equal(restarted.isKept('https://site.test/b.zip'), false, 'the app took it again, in either spelling');
+});
+
+test('EXT.B11: addressKey reads an address the way the Host does, and leaves other text alone', () => {
+  assert.equal(status.addressKey('HTTPS://Site.Test:443/a.zip#part'), 'https://site.test/a.zip');
+  assert.equal(status.addressKey('http://Site.Test:80/a.zip'), 'http://site.test/a.zip');
+  assert.equal(status.addressKey('https://site.test:8443/a.zip'), 'https://site.test:8443/a.zip');
+  assert.equal(status.addressKey('  https://site.test/a.zip?x=1&y=2  '), 'https://site.test/a.zip?x=1&y=2');
+  assert.equal(status.addressKey('https://site.test'), 'https://site.test/');
+  assert.equal(status.addressKey('not an address'), null);
+  assert.equal(status.addressKey(''), null);
+  assert.equal(status.addressKey(undefined), null);
+});
+
 test('EXT.B11: a new worker takes back the addresses an earlier one kept', () => {
   const before = new status.DownloadWatch();
   before.handedBack(URL);
@@ -242,6 +282,57 @@ test('EXT.B11: a download the app took keeps its finish popup, and a later send 
         emit(sent.harness, 'completed', job({ state: 'completed', receivedBytes: 100 }));
         await settle(() => sent.popups.length === 1);
         assert.deepEqual(sent.popups, [{ windowId: 7 }], 'a finish popup for the app\'s download');
+      });
+    });
+  } finally { delete global.__inboundFlashMs; }
+});
+
+test('EXT.B11: no finish popup when the app\'s job writes the kept address differently', async () => {
+  // The owner's report: the download stayed in the browser (a refused or lost answer), yet the app kept a job for it and
+  // its finish opened the popup. The two addresses differed only in the parts the Host normalises.
+  global.__inboundFlashMs = 1;
+  try {
+    await withCanvas(async () => {
+      const { harness, log, popups } = finishChrome({ ...catching, onFinish: 'popup' });
+      await withBackground(harness, async () => {
+        // The browser's own text for the download: upper-case scheme and host, the default port, a fragment.
+        const answered = startDownload(harness, { id: 61, url: 'HTTPS://Site.Test:443/a.zip#part', filename: 'a.zip' });
+        await answerNative(harness, 'handoff.request', { accepted: false, error: 'The app is busy.' });
+        void answered;
+        await settle(() => log.resumed.length === 1);
+        assert.deepEqual(log.resumed, [61], 'the browser keeps it');
+
+        // The app's job for the same download, in the Host's spelling, finishes.
+        emit(harness, 'progress', job({ url: 'https://site.test/a.zip' }));
+        emit(harness, 'completed', job({ url: 'https://site.test/a.zip', state: 'completed', receivedBytes: 100 }));
+        await new Promise((resolve) => setTimeout(resolve, 120));
+        assert.deepEqual(popups, [], 'no finish popup for the same address');
+        assert.equal('finishedIds' in harness.session, false, 'no finished mark');
+        assert.equal(log.notes.some((note) => /finished/.test(note.title ?? '')), false, 'no notification');
+      });
+    });
+  } finally { delete global.__inboundFlashMs; }
+});
+
+test('EXT.B11: a kept download of another address is still followed and opens its popup', async () => {
+  global.__inboundFlashMs = 1;
+  try {
+    await withCanvas(async () => {
+      const { harness, log, popups } = finishChrome({ ...catching, onFinish: 'popup' });
+      await withBackground(harness, async () => {
+        const answered = startDownload(harness, { id: 71, url: 'https://site.test/a.zip', filename: 'a.zip' });
+        await answerNative(harness, 'handoff.request', { accepted: false, error: 'The app is busy.' });
+        void answered;
+        await settle(() => log.resumed.length === 1);
+
+        // Another path, query or host is another download: the app finishing that one is a finish to show.
+        for (const other of ['https://site.test/b.zip', 'https://site.test/a.zip?x=1', 'https://other.test/a.zip']) {
+          const before = popups.length;
+          emit(harness, 'progress', job({ id: `job-${other}`, url: other }));
+          emit(harness, 'completed', job({ id: `job-${other}`, url: other, state: 'completed', receivedBytes: 100 }));
+          await settle(() => popups.length === before + 1);
+          assert.equal(popups.length, before + 1, other);
+        }
       });
     });
   } finally { delete global.__inboundFlashMs; }

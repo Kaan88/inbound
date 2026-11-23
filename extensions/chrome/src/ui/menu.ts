@@ -1,5 +1,7 @@
 // A small menu from a button (EXT.R8): the kit's .menu, opening upward from the popup's status bar like the desktop's
 // server switcher. Arrow keys move, Enter or Space chooses, Esc closes, and focus goes back to the button either way.
+// EXT.R17: the popup is not grown to hold the menu. It goes below its point or row when the whole menu fits there,
+// above it otherwise, is shifted to stay inside the popup on both axes, and scrolls when it is taller than the popup.
 
 export interface MenuItem {
   label: string;
@@ -12,6 +14,55 @@ export interface MenuItem {
 
 /** How long a click that closed a menu by pressing outside it is waited for, so it can be swallowed. */
 const DISMISS_CLICK_MS = 1000;
+
+/** The room kept between a menu and the popup's edges. */
+export const MENU_EDGE = 4;
+/** The room kept between a menu and the row or button it came from. */
+export const MENU_GAP = 2;
+
+export interface MenuPlacement {
+  left: number;
+  top: number;
+  /** The tallest the menu may be; it scrolls when it wants more. */
+  maxHeight: number;
+}
+
+export interface MenuPlacementInput {
+  /** The size the menu wants. */
+  width: number;
+  height: number;
+  /** The popup's visible size. */
+  viewport: { width: number; height: number };
+  /** A right-click's point, or the row's own start: the menu goes under it when there is room, above it otherwise. */
+  at?: { x: number; y: number };
+  /** The element the menu came from: under it, or above it with `upward` (the status bar's switcher). */
+  anchor?: { left: number; top: number; bottom: number };
+  upward?: boolean;
+}
+
+/**
+ * EXT.R17: where a menu goes in a popup that does not grow for it. Downwards from its point or anchor when the whole
+ * menu fits below, upwards otherwise, then kept inside on both axes. A menu taller than the popup is capped there and
+ * scrolls.
+ */
+export function placeMenu({ width, height, viewport, at, anchor, upward = false }: MenuPlacementInput): MenuPlacement {
+  // The popup's own height is all the menu may use: it is never made taller for the menu.
+  const room = Math.max(0, viewport.height - MENU_EDGE * 2);
+  const tall = Math.min(Math.max(height, 0), room);
+  const lowest = Math.max(MENU_EDGE, viewport.height - MENU_EDGE - tall);
+  const down = at ? at.y : anchor ? anchor.bottom + MENU_GAP : MENU_EDGE;
+  const up = at ? at.y - tall : anchor ? anchor.top - MENU_GAP - tall : MENU_EDGE;
+  // Below when the whole menu fits there, above when it doesn't; a menu that fits nowhere is put at the top and scrolls.
+  const top = upward || down + tall > viewport.height - MENU_EDGE ? up : down;
+  const wanted = at ? at.x : anchor ? anchor.left : MENU_EDGE;
+  const mostLeft = Math.max(MENU_EDGE, viewport.width - MENU_EDGE - width);
+  return {
+    left: Math.min(Math.max(wanted, MENU_EDGE), mostLeft),
+    top: Math.min(Math.max(top, MENU_EDGE), lowest),
+    maxHeight: room,
+  };
+}
+
 let closeOpen: (() => void) | null = null;
 
 /** Closes the open menu, if any. */
@@ -25,7 +76,7 @@ export function menuOpen(): boolean {
 }
 
 /**
- * Opens a menu under (or above) the anchor, or at a point: a right-click's position (EXT.R11), kept inside the window.
+ * Opens a menu under (or above) the anchor, or at a point: a right-click's position (EXT.R11), kept inside the popup.
  */
 export function openMenu(anchor: HTMLElement, items: MenuItem[], options: { upward?: boolean; at?: { x: number; y: number } } = {}): void {
   closeMenu();
@@ -53,37 +104,30 @@ export function openMenu(anchor: HTMLElement, items: MenuItem[], options: { upwa
     return button;
   });
 
-  const rect = anchor.getBoundingClientRect();
   menu.style.position = "fixed";
-  if (options.at) {
-    menu.style.left = `${Math.max(4, options.at.x)}px`;
-    menu.style.top = `${Math.max(4, options.at.y)}px`;
-  } else {
-    menu.style.left = `${Math.max(4, rect.left)}px`;
-    if (options.upward) menu.style.bottom = `${Math.max(4, window.innerHeight - rect.top + 2)}px`;
-    else menu.style.top = `${rect.bottom + 2}px`;
-  }
-  // Never taller than the window: a menu that still doesn't fit scrolls rather than being cut off.
-  menu.style.maxHeight = "calc(100vh - 8px)";
-  menu.style.overflowY = "auto";
+  // Hidden until it is placed: measured where it was made, never seen there.
+  menu.style.visibility = "hidden";
   document.body.append(menu);
 
-  // A fixed menu doesn't count towards the page's height, so a short popup (one download in the list) cut it off.
-  // While it is open the page is made at least as tall as the menu, and the browser grows the popup to fit
-  // (up to its own limit); the height the page had is given back on close.
-  const root = document.documentElement;
-  const heightBefore = root.style.minHeight;
-  const needed = menu.scrollHeight + 8;
-  if (needed > window.innerHeight) root.style.minHeight = `${needed}px`;
-
-  // Inside the popup: moved left or up by what would stick out. Again when the popup has grown.
+  // EXT.R17: measured once, then kept inside the popup as it is now; the page's height is never asked to change.
+  const wanted = menu.getBoundingClientRect();
   const place = () => {
-    if (!options.at) return;
-    const box = menu.getBoundingClientRect();
-    if (box.right > window.innerWidth - 4) menu.style.left = `${Math.max(4, window.innerWidth - 4 - box.width)}px`;
-    if (box.bottom > window.innerHeight - 4) menu.style.top = `${Math.max(4, window.innerHeight - 4 - box.height)}px`;
+    const rect = anchor.getBoundingClientRect();
+    const spot = placeMenu({
+      width: wanted.width,
+      height: wanted.height,
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+      at: options.at,
+      anchor: { left: rect.left, top: rect.top, bottom: rect.bottom },
+      upward: options.upward,
+    });
+    menu.style.left = `${spot.left}px`;
+    menu.style.top = `${spot.top}px`;
+    menu.style.maxHeight = `${spot.maxHeight}px`;
   };
   place();
+  menu.style.overflowY = "auto";
+  menu.style.visibility = "";
   window.addEventListener("resize", place);
   anchor.setAttribute("aria-expanded", "true");
 
@@ -116,7 +160,6 @@ export function openMenu(anchor: HTMLElement, items: MenuItem[], options: { upwa
     if (closeOpen !== close) return;
     closeOpen = null;
     menu.remove();
-    root.style.minHeight = heightBefore;
     window.removeEventListener("resize", place);
     anchor.setAttribute("aria-expanded", "false");
     document.removeEventListener("keydown", onKey, true);
