@@ -10,7 +10,7 @@
   import { askNotifyPermission, notifyEnabled, notifySupported, storeNotify } from '../lib/notify';
   import {
     mergeEditedSettings, archiveChanges, captureLabel, archiveConflictLabels, archiveDestinationLabels, archiveValues, categoryLabel, categoryNames, formFrom, friendlyRefusal, heldLeave,
-    connectionsPerDownloadHint, connectionsPerServerHint, perSiteLimitsHint, isUnsupportedReply, nextRowKey, problemsText, proxyTypes, torrentEncryptions, torrentFoldersHint, torrentSameFolders, validateAll, type ArchiveValues, type OptionsForm, type OptionsPage, type Problem,
+    connectionsPerDownloadHint, connectionsPerServerHint, perSiteLimitsHint, isUnsupportedReply, nextRowKey, problemsText, proxyTypes, torrentEncryptions, torrentFoldersHint, torrentSameFolders, torrentSortByKind, torrentWhereGoes, validateAll, type ArchiveValues, type OptionsForm, type OptionsPage, type Problem,
   } from '../lib/settingsRules';
   import { hostKindOf } from '../lib/hostKind';
   import { tickUntil } from '../lib/ticker';
@@ -408,6 +408,18 @@
     }
   }
 
+  // T14.B1: where torrents go now, as the boxes below are changed. A browser session never counts the last folder used.
+  const torrentWhere = $derived(
+    form
+      ? torrentWhereGoes({
+          useTorrentCategoryFolders: form.useTorrentCategoryFolders,
+          torrentCategoryFoldersRoot: form.torrentFolder,
+          useCategoryFolders: form.useCategoryFolders,
+          defaultDownloadDirectory: form.defaultDownloadDirectory,
+        })
+      : '',
+  );
+
   const pairLeft = $derived(pairing ? Math.max(0, Math.round((Date.parse(pairing.expiresAt) - now) / 1000)) : 0);
   $effect(() => {
     if (pairing && pairLeft === 0) {
@@ -475,8 +487,9 @@
 
         {#if form.useTorrentCategoryFolders !== null}
           {@render section('Torrent folders')}
-          <label class="flex items-center gap-2 text-[13px]"><input type="checkbox" bind:checked={form.useTorrentCategoryFolders} /> Save torrents to a folder for their category</label>
+          <label class="flex items-center gap-2 text-[13px]"><input type="checkbox" bind:checked={form.useTorrentCategoryFolders} /> {torrentSortByKind}</label>
           <FolderField id="set-torrent-folder" label="Torrent folder" bind:value={form.torrentFolder} placeholder={torrentSameFolders} disabled={pcOnly} />
+          <p class="hint" aria-live="polite">{torrentWhere}</p>
           <p class="hint">{torrentFoldersHint}</p>
         {/if}
 

@@ -50,6 +50,7 @@ internal sealed class TorrentAddDialog
     private string? _spaceFolder;
     private DispatcherOneShot? _spaceTimer;
     private TextBox? _destination;
+    private TextBlock? _saveToHint;
 
     /// <param name="providerName">The account's display name when an account that takes torrents exists, else null: then
     /// there is no route choice and every line is This PC.</param>
@@ -133,11 +134,12 @@ internal sealed class TorrentAddDialog
 
         var (destinationRow, destination, destinationError) = AddLinksDialog.DestinationRow(string.Empty, _windowHandle);
         destination.Header = "Save to";
-        // T14: what an empty Save to means follows the torrent folder settings.
-        var emptySaveTo = TorrentFolderText.SaveToPlaceholder(_settings);
-        destination.PlaceholderText = emptySaveTo;
-        AutomationProperties.SetName(destination, $"Save to, empty for {char.ToLowerInvariant(emptySaveTo[0])}{emptySaveTo[1..]}");
+        // T14.B1: an empty Save to says the folder a torrent goes to, under the box as well as in the words they hear.
+        _saveToHint = InboundUi.Secondary(string.Empty);
+        _saveToHint.TextWrapping = TextWrapping.Wrap;
+        destination.TextChanged += (_, _) => ShowSaveTo();
         panel.Children.Add(destinationRow);
+        panel.Children.Add(_saveToHint);
         panel.Children.Add(destinationError.Text);
         _destination = destination;
         if (_withControls)
@@ -494,6 +496,24 @@ internal sealed class TorrentAddDialog
         _selectAll.IsEnabled = lines.Any(line => line.CanSelect);
         _selectAll.IsChecked = _lines.SelectAllState();
         _magnetNote.Visibility = _lines.MagnetNoteApplies ? Visibility.Visible : Visibility.Collapsed;
+        ShowSaveTo();
+    }
+
+    /// <summary>
+    /// T14.B1: what the Save to box means now, updated as the lines are read and as the box is typed in: the folder a
+    /// torrent goes to, and the kind's folder under the torrent folder when the listed torrents share a kind.
+    /// </summary>
+    private void ShowSaveTo()
+    {
+        if (_closed || _destination is null || _saveToHint is null) return;
+        var kinds = _lines.Lines.Where(line => line.State == TorrentLineState.Ready)
+            .Select(line => FileCategories.For(line.Name)).Distinct().ToList();
+        var kind = kinds.Count == 1 ? kinds[0] : null;
+        var typed = _destination.Text.Trim();
+        _destination.PlaceholderText = TorrentFolderText.SaveToPlaceholder(_settings, kind);
+        _saveToHint.Text = typed.Length > 0 ? string.Empty : TorrentFolderText.WhereTorrentsGo(_settings, kind);
+        _saveToHint.Visibility = typed.Length > 0 ? Visibility.Collapsed : Visibility.Visible;
+        AutomationProperties.SetName(_destination, typed.Length > 0 ? "Save to" : $"Save to, empty. {_saveToHint.Text}");
     }
 
     /// <summary>

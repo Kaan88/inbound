@@ -493,23 +493,67 @@ export function problemsText(problems: readonly Problem[], pageLabel: (page: Opt
 /** T14: the torrent folder box when empty (the desktop's TorrentFolderText says the same). */
 export const torrentSameFolders = 'Same folders as other downloads';
 
+/** T14.B1 (owner, 2026-11-23): what a folder per kind of file is, said plainly here, in Options and in the torrent dialog. */
+export const torrentSortByKind = 'Sort torrents into folders by kind (Video, Music, …)';
+
 export const torrentFoldersHint =
-  'Torrents go to the torrent folder, in a folder for their category (Torrents\\Video). Turned off, every torrent goes straight to the torrent folder. Leave the torrent folder empty to use the same folders as other downloads.';
+  'Each torrent goes in a folder for its kind (Video, Music, Programs, Documents or Compressed) under the torrent folder; ' +
+  'turned off, every torrent goes straight to the torrent folder. Leave the torrent folder empty to use the same folders ' +
+  'as other downloads.';
+
+/** The folder names, for a sentence that can't name the torrent's own kind yet. */
+const torrentKinds = 'Video, Music, Programs, Documents or Compressed';
+
+/** Where the folder for the torrent's kind would be, while the kind isn't known yet. */
+const torrentKindSlot = '<kind: Video, Music, …>';
+
+/** A server from before T14 doesn't say where torrents go: what the box said before T14.B1. */
+const torrentOlderHost = "Each torrent's category folder";
+
+/** The settings the torrent folder words are worked out from: a SettingsDto, or the web UI's form (null until its switch is known). */
+export interface TorrentFolderSettings {
+  useTorrentCategoryFolders?: boolean | null;
+  torrentCategoryFoldersRoot?: string | null;
+  useCategoryFolders?: boolean;
+  defaultDownloadDirectory?: string;
+}
+
+/** As the server joins a kind's folder under the torrent folder, with the separator its own paths use. */
+function torrentJoin(folder: string, name: string): string {
+  const separator = folder.includes('/') && !folder.includes('\\') ? '/' : '\\';
+  return folder.replace(/[\\/]+$/, '') + separator + name;
+}
 
 /**
- * T14: what an empty Save to in the torrent dialog means, as the server's TorrentFolderRules decides (the desktop's
- * TorrentFolderText says the same): each torrent's category folder while torrent category folders are on (with no
- * torrent folder, only while other downloads' are on too), else the torrent folder, or with none the folder other
- * downloads go to. A server that predates them doesn't say: as before.
+ * T14.B1: the empty Save to box's own words, as the server's TorrentFolderRules decides it (the desktop's TorrentFolderText
+ * says the same). `folder` is the folder the server gave for the torrent when asked with Save to empty, when one was given.
+ * A web session never counts the last folder used: with none of the torrents' own, they go to the download folder.
  */
-export function torrentSaveToPlaceholder(
-  settings: Partial<Pick<Settings, 'useTorrentCategoryFolders' | 'torrentCategoryFoldersRoot' | 'useCategoryFolders'>> | null | undefined,
-): string {
-  const each = "Each torrent's category folder";
-  if (typeof settings?.useTorrentCategoryFolders !== 'boolean') return each;
-  const torrentOn = settings.useTorrentCategoryFolders;
-  if (settings.torrentCategoryFoldersRoot?.trim()) return torrentOn ? each : 'The torrent folder';
-  return torrentOn && settings.useCategoryFolders !== false ? each : 'Same folder as other downloads';
+export function torrentSaveToPlaceholder(settings: TorrentFolderSettings | null | undefined, folder?: string | null): string {
+  if (typeof settings?.useTorrentCategoryFolders !== 'boolean') return torrentOlderHost;
+  const chosen = folder?.trim();
+  if (chosen) return chosen;
+  const root = settings.torrentCategoryFoldersRoot?.trim();
+  if (root) return settings.useTorrentCategoryFolders ? torrentJoin(root, torrentKindSlot) : root;
+  return `${settings.defaultDownloadDirectory?.trim() ?? ''} (the download folder)`;
+}
+
+/** T14.B1: where torrents go, in words, under the torrent folder box and the dialog's Save to. */
+export function torrentWhereGoes(settings: TorrentFolderSettings | null | undefined, folder?: string | null): string {
+  if (typeof settings?.useTorrentCategoryFolders !== 'boolean') return torrentOlderHost;
+  const chosen = folder?.trim();
+  if (chosen) return `Torrents go to ${chosen}.`;
+  const root = settings.torrentCategoryFoldersRoot?.trim();
+  if (root) {
+    return settings.useTorrentCategoryFolders
+      ? `Torrents go to ${root}, in a folder for its kind: ${torrentKinds}.`
+      : `Torrents go to ${root}.`;
+  }
+  const downloads = `${settings.defaultDownloadDirectory?.trim() ?? ''} (the download folder)`;
+  // With kinds on, another downloads' kind folder may take a torrent instead of the download folder.
+  return settings.useTorrentCategoryFolders && settings.useCategoryFolders !== false
+    ? `Torrents go to ${downloads}, unless a folder is set for their kind of download.`
+    : `Torrents go to ${downloads}.`;
 }
 
 /**

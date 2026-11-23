@@ -148,6 +148,10 @@ internal sealed class TorrentOptionsPage
             _removeFirewall.Click += async (_, _) => await ChangeFirewallAsync(allow: false);
         }
         var help = SettingsWindow.Hint("Adds Add Magnet and Import Torrent File, and a Torrents view. The torrent engine runs only while a torrent is downloading; with nothing to do it is closed and nothing listens on the network.");
+        // T14.B1: the folder is set on Save to; say here where torrents go now.
+        var where = SettingsWindow.Hint(settings.UseTorrentCategoryFolders is null
+            ? string.Empty
+            : $"{TorrentFolderText.WhereTorrentsGo(settings)} Change the folder in Save to.");
         var multiFile = SettingsWindow.Hint("For a torrent with several files. A magnet asks once its file list arrives.");
         multiFile.Margin = new Thickness(28, 0, 0, 0);
         var proxyHint = SettingsWindow.Hint("Torrents connect directly: the proxy in Options › Proxy is not used for them.");
@@ -214,7 +218,9 @@ internal sealed class TorrentOptionsPage
         _seed.Unchecked += (_, _) => Follow();
         Follow();
 
-        var controls = new List<UIElement> { _enabled, help };
+        var controls = new List<UIElement> { _enabled };
+        if (settings.UseTorrentCategoryFolders is not null) controls.Add(where);
+        controls.Add(help);
         if (_route is not null) controls.Add(_route);
         controls.Add(_chooseFiles);
         controls.Add(multiFile);

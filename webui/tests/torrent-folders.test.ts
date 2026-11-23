@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyForm, formFrom, friendlyRefusal, mergeEditedSettings, torrentSaveToPlaceholder } from '../src/lib/settingsRules';
+import { applyForm, formFrom, friendlyRefusal, mergeEditedSettings, torrentSaveToPlaceholder, torrentSortByKind, torrentWhereGoes } from '../src/lib/settingsRules';
 import type { Settings } from '../src/lib/types';
 
 // T14 (owner, 2026-11-12): torrent category folders apart from other downloads', both able to be turned off.
@@ -68,16 +68,45 @@ describe('torrent folders in Options', () => {
 });
 
 describe('the torrent dialog Save to', () => {
-  it('says what an empty Save to means', () => {
-    expect(torrentSaveToPlaceholder({ useTorrentCategoryFolders: true, torrentCategoryFoldersRoot: '/t' })).toBe("Each torrent's category folder");
+  const downloads = '/data/downloads';
+
+  it('names the folder the server gave for the torrent', () => {
+    const settings = { useTorrentCategoryFolders: true, torrentCategoryFoldersRoot: '/data/downloads/Torrents' };
+    expect(torrentSaveToPlaceholder(settings, '/data/downloads/Torrents/Video')).toBe('/data/downloads/Torrents/Video');
+    expect(torrentWhereGoes(settings, '/data/downloads/Torrents/Video')).toBe('Torrents go to /data/downloads/Torrents/Video.');
+  });
+
+  it('names the kind folder under the torrent folder', () => {
+    expect(torrentSaveToPlaceholder({ useTorrentCategoryFolders: true, torrentCategoryFoldersRoot: '/t' })).toBe('/t/<kind: Video, Music, …>');
+    expect(torrentWhereGoes({ useTorrentCategoryFolders: true, torrentCategoryFoldersRoot: '/t' }))
+      .toBe('Torrents go to /t, in a folder for its kind: Video, Music, Programs, Documents or Compressed.');
+    // Kinds off: the torrent folder itself.
+    expect(torrentSaveToPlaceholder({ useTorrentCategoryFolders: false, torrentCategoryFoldersRoot: '/t' })).toBe('/t');
+    expect(torrentWhereGoes({ useTorrentCategoryFolders: false, torrentCategoryFoldersRoot: '/t' })).toBe('Torrents go to /t.');
+    // With a torrent folder the other downloads' switch doesn't count.
+    expect(torrentWhereGoes({ useTorrentCategoryFolders: true, torrentCategoryFoldersRoot: '/t', useCategoryFolders: false }))
+      .toBe('Torrents go to /t, in a folder for its kind: Video, Music, Programs, Documents or Compressed.');
+  });
+
+  it('says the download folder when the torrents have none of their own', () => {
+    // A browser session never counts the last folder used.
+    expect(torrentSaveToPlaceholder({ useTorrentCategoryFolders: false, torrentCategoryFoldersRoot: '', defaultDownloadDirectory: downloads }))
+      .toBe('/data/downloads (the download folder)');
+    expect(torrentWhereGoes({ useTorrentCategoryFolders: false, torrentCategoryFoldersRoot: '', defaultDownloadDirectory: downloads }))
+      .toBe('Torrents go to /data/downloads (the download folder).');
+    // Kinds on: another downloads' kind folder may take a torrent instead.
+    expect(torrentWhereGoes({ useTorrentCategoryFolders: true, torrentCategoryFoldersRoot: '', useCategoryFolders: true, defaultDownloadDirectory: downloads }))
+      .toBe('Torrents go to /data/downloads (the download folder), unless a folder is set for their kind of download.');
+  });
+
+  it('keeps the old words for a server before T14', () => {
     expect(torrentSaveToPlaceholder({})).toBe("Each torrent's category folder");
     expect(torrentSaveToPlaceholder(null)).toBe("Each torrent's category folder");
-    expect(torrentSaveToPlaceholder({ useTorrentCategoryFolders: false, torrentCategoryFoldersRoot: '/t' })).toBe('The torrent folder');
-    expect(torrentSaveToPlaceholder({ useTorrentCategoryFolders: false, torrentCategoryFoldersRoot: '' })).toBe('Same folder as other downloads');
-    // No torrent folder: the other downloads' switch counts too, as on the server.
-    expect(torrentSaveToPlaceholder({ useTorrentCategoryFolders: true, torrentCategoryFoldersRoot: '', useCategoryFolders: false })).toBe('Same folder as other downloads');
-    expect(torrentSaveToPlaceholder({ useTorrentCategoryFolders: true, torrentCategoryFoldersRoot: '', useCategoryFolders: true })).toBe("Each torrent's category folder");
-    // With a torrent folder it doesn't.
-    expect(torrentSaveToPlaceholder({ useTorrentCategoryFolders: true, torrentCategoryFoldersRoot: '/t', useCategoryFolders: false })).toBe("Each torrent's category folder");
+    expect(torrentWhereGoes({})).toBe("Each torrent's category folder");
+    expect(torrentWhereGoes(null)).toBe("Each torrent's category folder");
+  });
+
+  it('says the folder per kind plainly', () => {
+    expect(torrentSortByKind).toBe('Sort torrents into folders by kind (Video, Music, …)');
   });
 });

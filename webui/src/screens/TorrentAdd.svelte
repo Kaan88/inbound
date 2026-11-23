@@ -13,7 +13,7 @@
     lineSpaceProblem, lineState, lineTip, magnetNoteApplies, newLines, picks, primaryText, removeLine, selectAllState, selectLine, setLinePriorities, setRoute,
     providerAddRequest, statusLine, syncPaste, toggleAll, torrentProvider, treeFiles, type TorrentLine, type TorrentLines,
   } from '../lib/torrents';
-  import { torrentSaveToPlaceholder } from '../lib/settingsRules';
+  import { torrentSaveToPlaceholder, torrentWhereGoes } from '../lib/settingsRules';
   import { addReport, addedWords as providerAddedWords, alreadyListed, refused } from '../lib/addview';
   import { freeText, normalMap, prioritiesKnown, prioritySummary } from '../lib/torrentControls';
   import { cacheBadge, cacheChecked, cacheReason, cacheText, startCacheChecks, uploadTorrent, type CacheStates } from '../lib/torrentIntake';
@@ -52,6 +52,13 @@
   let openFiles = $state<string | null>(null);
 
   const title = $derived(mode === 'magnet' ? 'Add magnet' : mode === 'torrent' ? 'Import torrent file' : 'Add torrents');
+  // T14.B1: what an empty Save to means here, for the torrents listed: the server's own folder for a lone torrent (it says
+  // it when asked with Save to empty), else the folder the settings give.
+  const saveToKindFolder = $derived.by(() => {
+    const ready = lines.lines.filter((line) => lineState(line) === 'ready');
+    return ready.length === 1 ? ready[0].categoryFolder ?? null : null;
+  });
+  const saveToWhere = $derived(torrentWhereGoes(settings, saveToKindFolder));
   const showPaste = $derived(mode !== 'torrent');
   const showUpload = $derived(mode !== 'magnet' && canUpload);
   const status = $derived(statusLine(lines));
@@ -371,7 +378,7 @@
 
     <div class="mt-4 grid gap-3 sm:grid-cols-2">
       <div class="sm:col-span-2">
-        <FolderField id="torrent-destination" label="Save to" placeholder={torrentSaveToPlaceholder(settings)} bind:value={destination} />
+        <FolderField id="torrent-destination" label="Save to" placeholder={torrentSaveToPlaceholder(settings, saveToKindFolder)} hint={destination.trim() ? '' : saveToWhere} bind:value={destination} />
         {#if free}<p class="hint mt-1" aria-label="Free space">{free}</p>{/if}
       </div>
       <div>

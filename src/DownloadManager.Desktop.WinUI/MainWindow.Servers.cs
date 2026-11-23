@@ -1021,8 +1021,21 @@ public sealed partial class MainWindow
                 // T14: a server from before the torrent folders sends no switch; the torrent folder stays in its web UI.
                 if (theirs.UseTorrentCategoryFolders is { } torrentOn)
                 {
-                    useTorrentCategoryFolders = new CheckBox { Content = "Save torrents to a folder for their category", IsChecked = torrentOn };
-                    serverControls.Add(useTorrentCategoryFolders);
+                    var torrentFolders = new CheckBox { Content = TorrentFolderText.SortByKind, IsChecked = torrentOn };
+                    useTorrentCategoryFolders = torrentFolders;
+                    serverControls.Add(torrentFolders);
+                    // T14.B1: where its torrents go, as the box here changes it.
+                    var where = SettingsWindow.Hint(string.Empty);
+                    void ShowWhere()
+                    {
+                        var view = CloneSettings(theirs);
+                        view.UseTorrentCategoryFolders = torrentFolders.IsChecked == true;
+                        where.Text = TorrentFolderText.WhereTorrentsGo(view);
+                    }
+                    torrentFolders.Checked += (_, _) => ShowWhere();
+                    torrentFolders.Unchecked += (_, _) => ShowWhere();
+                    ShowWhere();
+                    serverControls.Add(where);
                 }
             }
 

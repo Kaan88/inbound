@@ -411,28 +411,136 @@ internal static class TorrentRules
         => (job.State, job.Torrent?.FileCount ?? 0, job.Torrent?.HasMetadata == true, job.Torrent?.WantedCount ?? 0, job.Torrent?.WantedBytes ?? 0);
 }
 
-/// <summary>T14: the words for the torrent folders, in Options and the torrent dialog's Save to (the web UI says the same).</summary>
+/// <summary>
+/// T14: the words for the torrent folders, in Options, the torrent dialog's Save to and the web UI's Settings (the web
+/// UI says the same). T14.B1 (owner, 2026-11-23): they name the folder a torrent actually goes to, not only what kind of
+/// folder it is: a torrent was saved to E: with no setting pointing there, because the last folder used was E:.
+/// </summary>
 internal static class TorrentFolderText
 {
     /// <summary>The torrent folder box when empty.</summary>
     public const string SameFolders = "Same folders as other downloads";
 
+    /// <summary>T14.B1: what the folder per kind is, said plainly in all three places.</summary>
+    public const string SortByKind = "Sort torrents into folders by kind (Video, Music, …)";
+
     public const string OptionsHint =
-        "Torrents go to the torrent folder, in a folder for their category (Torrents\\Video). Turned off, every torrent " +
-        "goes straight to the torrent folder. Leave the torrent folder empty to use the same folders as other downloads.";
+        "Each torrent goes in a folder for its kind (Video, Music, Programs, Documents or Compressed) under the torrent " +
+        "folder; turned off, every torrent goes straight to the torrent folder. Leave the torrent folder empty to use the " +
+        "same folders as other downloads.";
+
+    /// <summary>An older Host doesn't say where torrents go (it has no torrent folder setting): what the box said before T14.B1.</summary>
+    private const string EachCategoryFolder = "Each torrent's category folder";
+
+    private const string Kinds = "Video, Music, Programs, Documents or Compressed";
+
+    /// <summary>Where the folder for the torrent's kind would be, while the kind isn't known yet.</summary>
+    private const string KindSlot = "<kind: Video, Music, …>";
+
+    private const string LastFolderNote = "the last folder used";
+
+    private const string DownloadFolderNote = "the download folder";
 
     /// <summary>
-    /// What an empty Save to in the torrent dialog means, as <c>TorrentFolderRules.Resolve</c> decides: each torrent's
-    /// category folder while torrent category folders are on (with no torrent folder, only while other downloads' are
-    /// on too), else the torrent folder, or with none the folder other downloads go to (the last or default folder).
-    /// An older Host doesn't say: as before.
+    /// The empty Save to box's own words: the folder a torrent goes to. <paramref name="categoryId"/> is the torrent's kind
+    /// when it is known (<see cref="FileCategories.For(string?)"/>); null while it isn't, which shows where the kind's folder
+    /// would be. An older Host doesn't say.
     /// </summary>
-    public static string SaveToPlaceholder(SettingsDto settings)
+    /// <param name="useLastFolder">As TorrentFolderRules.Resolve: the last folder used counts when this PC's app adds it,
+    /// not when a browser session does.</param>
+    public static string SaveToPlaceholder(SettingsDto settings, string? categoryId = null, bool useLastFolder = true)
     {
-        if (settings.UseTorrentCategoryFolders is not { } torrentOn) return EachCategoryFolder;
-        if (!string.IsNullOrWhiteSpace(settings.TorrentCategoryFoldersRoot)) return torrentOn ? EachCategoryFolder : "The torrent folder";
-        return torrentOn && settings.UseCategoryFolders ? EachCategoryFolder : "Same folder as other downloads";
+        if (Where(settings, categoryId, useLastFolder) is not { } where) return EachCategoryFolder;
+        return where.Note is null ? where.Path : $"{where.Path} ({where.Note})";
     }
 
-    private const string EachCategoryFolder = "Each torrent's category folder";
+    /// <summary>
+    /// T14.B1: where torrents go, in words, under Options' and the web UI's torrent folder box. With the kind unknown it
+    /// says that the folder is the kind's under the torrent folder.
+    /// </summary>
+    public static string WhereTorrentsGo(SettingsDto settings, string? categoryId = null, bool useLastFolder = true)
+    {
+        if (Where(settings, categoryId, useLastFolder) is not { } where) return EachCategoryFolder;
+        if (where.ByKind) return $"Torrents go to {where.Root}, in a folder for its kind: {Kinds}.";
+        var path = where.Note is null ? $"Torrents go to {where.Path}." : $"Torrents go to {where.Path} ({where.Note}).";
+        // The kind isn't known and other downloads' kind folders count: one of them may take a torrent instead.
+        return where.MaybeKindFolder ? path[..^1] + ", unless a folder is set for their kind of download." : path;
+    }
+
+    /// <summary>A folder and why it is that one. <see cref="ByKind"/>: the kind's folder under <see cref="Root"/>, not known yet.
+    /// <see cref="MaybeKindFolder"/>: the kind isn't known and one may have a folder of other downloads' instead.</summary>
+    private readonly record struct TorrentFolder(string Path, string? Note, bool ByKind, string Root, bool MaybeKindFolder);
+
+    /// <summary>
+    /// The folder as <c>TorrentFolderRules.Resolve</c> decides it, in the Host's own path words (not normalized here: the
+    /// folder may be another server's, on another platform). Null for an older Host.
+    /// </summary>
+    private static TorrentFolder? Where(SettingsDto settings, string? categoryId, bool useLastFolder)
+    {
+        if (settings.UseTorrentCategoryFolders is not { } torrentOn) return null;
+        var root = settings.TorrentCategoryFoldersRoot?.Trim();
+        if (string.IsNullOrWhiteSpace(root))
+        {
+            // No torrent folder: the same folders as other downloads, whose kind folder only counts while both are on.
+            if (torrentOn && settings.UseCategoryFolders)
+            {
+                if (CategoryFolder(settings, categoryId ?? "other") is { } shared) return new(shared, null, false, shared, false);
+                // Which kind folder counts, when the kind isn't known yet, can't be said here: the sentence says it may.
+                if (categoryId is null) return Fallback(settings, useLastFolder, maybeKindFolder: true);
+            }
+
+            return Fallback(settings, useLastFolder, maybeKindFolder: false);
+        }
+
+        if (!torrentOn) return new(root, null, false, root, false);
+        // The kind's folder, which follows the file's name (a magnet's too, once it says one).
+        if (categoryId is null) return new(Join(root, KindSlot), null, true, root, false);
+        return SubfolderName(settings, categoryId) is { } kind
+            ? new(Join(root, kind), null, false, root, false)
+            : new(root, null, false, root, false);
+    }
+
+    /// <summary>Where other downloads go: the last folder used on this PC, else the download folder.</summary>
+    private static TorrentFolder? Fallback(SettingsDto settings, bool useLastFolder, bool maybeKindFolder)
+    {
+        if (useLastFolder && settings.LastDestinationDirectory?.Trim() is { Length: > 0 } last)
+            return new(last, LastFolderNote, false, last, maybeKindFolder);
+        return settings.DefaultDownloadDirectory?.Trim() is { Length: > 0 } downloads
+            ? new(downloads, DownloadFolderNote, false, downloads, maybeKindFolder)
+            : null;
+    }
+
+    /// <summary>
+    /// The folder other downloads of <paramref name="category"/> go to, as <c>TorrentFolderRules.CategoryFolder</c> says
+    /// (the window doesn't build with Core): a custom category's own, else the built-in one's; null when it has none.
+    /// </summary>
+    private static string? CategoryFolder(SettingsDto settings, string category)
+    {
+        var custom = settings.CustomCategories.FirstOrDefault(item => item.Id == category)?.DestinationDirectory;
+        if (!string.IsNullOrWhiteSpace(custom)) return custom.Trim();
+        return settings.CategoryFolders.TryGetValue(category, out var folder) && !string.IsNullOrWhiteSpace(folder) ? folder.Trim() : null;
+    }
+
+    private static readonly (string Id, string Name)[] BuiltInKinds =
+        [("compressed", "Compressed"), ("documents", "Documents"), ("music", "Music"), ("programs", "Programs"), ("video", "Video")];
+
+    /// <summary>
+    /// The kind's folder name under the torrent folder, as <c>TorrentFolderRules.SubfolderName</c> says: a built-in kind's,
+    /// else a custom category's name with the characters a file name can't hold replaced; null for "other".
+    /// </summary>
+    private static string? SubfolderName(SettingsDto settings, string category)
+    {
+        var builtIn = BuiltInKinds.FirstOrDefault(item => string.Equals(item.Id, category, StringComparison.OrdinalIgnoreCase)).Name;
+        var name = builtIn ?? settings.CustomCategories.FirstOrDefault(item => item.Id == category)?.Name;
+        if (string.IsNullOrWhiteSpace(name)) return null;
+        var safe = new string(name.Trim().Select(c => char.IsControl(c) || c is ':' or '*' or '?' or '"' or '<' or '>' or '|' or '/' or '\\' ? '_' : c).ToArray()).TrimEnd('.', ' ');
+        return string.IsNullOrWhiteSpace(safe) || safe is "." or ".." ? null : safe;
+    }
+
+    /// <summary>As the Host joins the kind's folder under the torrent folder, with the separator its own paths use.</summary>
+    private static string Join(string folder, string name)
+    {
+        var separator = folder.Contains('/') && !folder.Contains('\\') ? "/" : "\\";
+        return folder.TrimEnd('/', '\\') + separator + name;
+    }
 }

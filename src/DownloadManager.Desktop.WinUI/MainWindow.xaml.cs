@@ -4067,8 +4067,10 @@ public sealed partial class MainWindow : Window
 
             // T14: a Host from before the torrent folders sends neither, and the group isn't shown for it.
             var torrentFoldersKnown = settings.UseTorrentCategoryFolders is not null;
-            var useTorrentCategoryFolders = new CheckBox { Content = "Save torrents to a folder for their category", IsChecked = settings.UseTorrentCategoryFolders != false };
+            var useTorrentCategoryFolders = new CheckBox { Content = TorrentFolderText.SortByKind, IsChecked = settings.UseTorrentCategoryFolders != false };
             var (torrentFolderRow, torrentFolderBox) = window.FolderField("Torrent folder", settings.TorrentCategoryFoldersRoot, TorrentFolderText.SameFolders);
+            // T14.B1: where torrents go now, under the box, as the boxes above it are changed.
+            var torrentWhere = SettingsWindow.Hint(string.Empty);
 
             // Favorite folders: name and folder per row, in order. The star beside a folder box saves at once, so OK
             // keeps any saved meanwhile and drops only the rows removed here.
@@ -4154,6 +4156,44 @@ public sealed partial class MainWindow : Window
                 customCategoryControls.Add(expander);
             }
 
+            // T14.B1: the folder torrents go to, worked out from the boxes as they are now (typing a torrent folder or a kind
+            // folder changes it). The kind isn't known here, so a torrent folder with kinds on shows where the kind's folder is.
+            void ShowTorrentWhere()
+            {
+                var view = new SettingsDto
+                {
+                    UseTorrentCategoryFolders = useTorrentCategoryFolders.IsChecked == true,
+                    TorrentCategoryFoldersRoot = torrentFolderBox.Text.Trim(),
+                    UseCategoryFolders = useCategoryFolders.IsChecked == true,
+                    DefaultDownloadDirectory = string.IsNullOrWhiteSpace(directory.Text) ? settings.DefaultDownloadDirectory : directory.Text.Trim(),
+                    LastDestinationDirectory = settings.LastDestinationDirectory,
+                    CategoryFolders = categoryBoxes.Where(pair => !string.IsNullOrWhiteSpace(pair.Value.Text))
+                        .ToDictionary(pair => pair.Key, pair => pair.Value.Text.Trim(), StringComparer.OrdinalIgnoreCase),
+                    CustomCategories = customCategoryEditors
+                        .Where(editor => !stagedCategoryRemovals.Contains(editor.Category.Id))
+                        .Select(editor => new CategoryDefinitionDto
+                        {
+                            Id = editor.Category.Id,
+                            Name = editor.Name.Text.Trim(),
+                            DestinationDirectory = string.IsNullOrWhiteSpace(editor.Folder.Text) ? null : editor.Folder.Text.Trim(),
+                        }).ToList(),
+                };
+                torrentWhere.Text = TorrentFolderText.WhereTorrentsGo(view);
+            }
+
+            if (torrentFoldersKnown)
+            {
+                torrentFolderBox.TextChanged += (_, _) => ShowTorrentWhere();
+                useTorrentCategoryFolders.Checked += (_, _) => ShowTorrentWhere();
+                useTorrentCategoryFolders.Unchecked += (_, _) => ShowTorrentWhere();
+                useCategoryFolders.Checked += (_, _) => ShowTorrentWhere();
+                useCategoryFolders.Unchecked += (_, _) => ShowTorrentWhere();
+                directory.TextChanged += (_, _) => ShowTorrentWhere();
+                foreach (var box in categoryBoxes.Values) box.TextChanged += (_, _) => ShowTorrentWhere();
+                foreach (var editor in customCategoryEditors) editor.Folder.TextChanged += (_, _) => ShowTorrentWhere();
+                ShowTorrentWhere();
+            }
+
             const int ConnectionPage = 3, ProxyPage = 4, SiteLoginsPage = 5, UpdatesPage = 6, SoundsPage = 7;
             window.AddPage("General", "\uE80F",
                 SettingsWindow.Section("Startup"), launch, autoResume,
@@ -4179,6 +4219,7 @@ public sealed partial class MainWindow : Window
                 saveTo.Add(SettingsWindow.Section("Torrent folders"));
                 saveTo.Add(useTorrentCategoryFolders);
                 saveTo.Add(torrentFolderRow);
+                saveTo.Add(torrentWhere);
                 saveTo.Add(SettingsWindow.Hint(TorrentFolderText.OptionsHint));
             }
             if (customCategoryControls.Count > 0)
