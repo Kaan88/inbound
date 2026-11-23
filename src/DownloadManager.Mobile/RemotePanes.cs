@@ -243,7 +243,8 @@ public static class RemoteTransfers
 /// <summary>
 /// The SFTP host key question (review R1 and M1). First: nothing trusted yet. MoreKeys: every key we trusted is still offered and the
 /// server offers more (the phone used to save only the first, so rclone could negotiate one it did not know). Changed: a trusted
-/// key's type is now offered with another fingerprint, or none of the trusted keys is offered; that is shown as a warning.
+/// key's type is now offered with another fingerprint, or a trusted key is no longer offered while new ones are (Fable F1: someone
+/// in the path could pass one trusted type through and answer the others with their own keys); that is shown as a warning.
 /// Unchanged: every offered key is already trusted.
 /// </summary>
 public enum SftpKeyCase { First, MoreKeys, Changed, Unchanged }
@@ -257,8 +258,14 @@ public sealed record SftpKeyReview(SftpKeyCase Case, IReadOnlyList<SiteHostKeyDt
         bool conflict = offered.Any(key => !Known(key) && trusted.Any(old => string.Equals(old.Type, key.Type, StringComparison.OrdinalIgnoreCase)));
         bool matches = offered.Any(Known);
         if (conflict || !matches) return new(SftpKeyCase.Changed, offered, trusted);
-        return new(offered.All(Known) ? SftpKeyCase.Unchanged : SftpKeyCase.MoreKeys, offered, trusted);
+        if (offered.All(Known)) return new(SftpKeyCase.Unchanged, offered, trusted);
+        bool allStillOffered = trusted.All(old => offered.Any(key => key.Fingerprint == old.Fingerprint));
+        return new(allStillOffered ? SftpKeyCase.MoreKeys : SftpKeyCase.Changed, offered, trusted);
     }
+
+    /// <summary>The offered keys not trusted yet: what MoreKeys asks about (x26b shows the new key).</summary>
+    public IReadOnlyList<SiteHostKeyDto> NewKeys =>
+        [.. Offered.Where(key => !Trusted.Any(old => old.Fingerprint == key.Fingerprint))];
 
     /// <summary>The <c>host_keys</c> entries to save: every key the server offers, once each (the Host accepts up to 16).</summary>
     public IReadOnlyList<string> Entries =>
