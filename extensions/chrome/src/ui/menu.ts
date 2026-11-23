@@ -104,6 +104,8 @@ export function openMenu(anchor: HTMLElement, items: MenuItem[], options: { upwa
     // A button that opened the menu closes it with its own click; a row that opened it is outside like the rest.
     if (menu.contains(target) || (anchor.contains(target) && anchor.closest("button"))) return;
     close();
+    // A right-click (or any non-primary press) brings no click to swallow; arming then would eat a pick in the next menu.
+    if ((event as PointerEvent).button !== undefined && (event as PointerEvent).button !== 0) return;
     // A click outside only closes the menu, as Windows menus do: it does not also open the row under it (EXT.R18).
     const swallow = (click: Event) => { click.stopPropagation(); click.preventDefault(); };
     const page = document;

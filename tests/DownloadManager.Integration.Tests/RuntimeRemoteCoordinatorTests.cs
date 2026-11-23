@@ -1264,6 +1264,26 @@ public sealed partial class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task ScenarioD_ARefusalWithItsOwnReasonKeepsTheProvidersWordsEvenOnADownSite()
+    {
+        await using var rig = await RemoteRig.CreateAsync(_server);
+        var link = rig.Mock.HosterUrl("w").Replace("/hoster/", "/hoster-down/", StringComparison.Ordinal);
+        var hash = RemoteRig.Md5Of(link);
+        rig.Mock.AddCached(hash);
+        rig.Mock.ScriptSubmission(hash, [MockTorBoxFile.Of(rig.Mock.NextFileId(), "w/w.bin", 32 * Kb, 8)], [MockTorBoxState.CachedReady]);
+        rig.Mock.RefuseLink(link, MockFault.NotALink);
+
+        var job = await rig.AddAsync(new RemoteAddRequest { Input = link, Selection = RemoteSelectionMode.All });
+        await rig.RunAsync();
+
+        // INVALID_OPTION names its own reason, so the list's "down" doesn't replace it (TB.F18, Fable).
+        var failed = rig.View(job.Id);
+        Assert.Equal(RemoteJobState.Failed, failed.State);
+        Assert.DoesNotContain("as down right now", failed.FailureMessage);
+        Assert.Contains("invalid", failed.FailureMessage, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task ScenarioD_AnItemThatFailsWithNoReasonOnADownSiteSaysTheSiteIsDown()
     {
         await using var rig = await RemoteRig.CreateAsync(_server);

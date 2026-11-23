@@ -33,7 +33,7 @@ on:
         required: false
         default: ""
       no_firefox_xpi:
-        description: "Release build without the signed Firefox add-on (the listed version is not approved by addons.mozilla.org yet). Setup then only links the AMO listing, and the release gets five files."
+        description: "Release build without the signed Firefox add-on (the listed version is not approved by addons.mozilla.org yet). Setup then only links the AMO listing, and the release gets seven files (no add-on)."
         type: boolean
         required: false
         default: false
@@ -214,7 +214,7 @@ jobs:
           # one of the release files, so the draft gets it with the others.
           $notesFile = Join-Path $env:RUNNER_TEMP "hub-notes.md"
           .\scripts\release-notes.ps1 -Version $env:VERSION -OutFile $notesFile
-          $line = @(Get-Content -LiteralPath $notesFile | Where-Object { $_ -match '^- ' } | Select-Object -First 1)
+          $line = @(Get-Content -LiteralPath $notesFile -Encoding UTF8 | Where-Object { $_ -match '^- ' } | Select-Object -First 1)
           $note = if ($line.Count -eq 1) { $line[0].Substring(2).Trim() } else { '' }
           $setup = "InboundSetup-$env:VERSION.exe"
           # A plain name (letters, digits . _ - only), at most 64 KiB, without the draft's HTML comment (Hub shows

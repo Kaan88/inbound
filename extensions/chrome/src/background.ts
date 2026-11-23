@@ -1143,6 +1143,10 @@ const REFUSED_KEY = "refusedInBrowser";
 const REFUSED_KEEP = 50;
 let refusedJobIds: string[] = [];
 let refusedUrls: string[] = [];
+/** When the last few go-backs happened: at most REFUSED_PER_WINDOW a minute, so a burst of refusals stays in the app. */
+let refusedRecent: number[] = [];
+const REFUSED_PER_WINDOW = 3;
+const REFUSED_WINDOW_MS = 60_000;
 let refusedLoad: Promise<void> | null = null;
 
 function refusedStrings(value: unknown): string[] {
@@ -1191,15 +1195,22 @@ async function appRefusedToBrowser(job: JobSummary | undefined, eventType: strin
   if (!job || job.state !== "failed" || !freshFailure(job, eventType, Date.now())) return;
   // Not a server's, not another browser's, not one the app added or the user started again by hand.
   if ((job.target ?? "local") !== "local" || !sentFromBrowser(job, chrome.runtime.id)) return;
+  // Only a download the browser started and the extension caught: a link sent by hand or with Download All stays in
+  // the app's list to retry, so a site refusing a hundred links never opens a hundred browser downloads (Fable).
+  if (job.source !== "chromeAuto") return;
   const url = (job.url ?? "").trim();
   if (!isHttpUrl(url) || job.addressHidden === true) return;
   await ensureRefusedLoaded();
   if (refusedJobIds.includes(job.id)) return;
+  const now = Date.now();
+  refusedRecent = refusedRecent.filter(at => now - at < REFUSED_WINDOW_MS);
+  if (refusedRecent.length >= REFUSED_PER_WINDOW) return;
   refusedJobIds = [job.id, ...refusedJobIds].slice(0, REFUSED_KEEP);
   await persistRefused();
   const status = refusedBySite(job);
   if (status === null || refusedUrls.includes(url)) return;
   refusedUrls = [url, ...refusedUrls].slice(0, REFUSED_KEEP);
+  refusedRecent.push(now);
   await persistRefused();
   // The browser has it now: whatever the app keeps for this address is not the download the user watches (EXT.B11).
   markKeptInBrowser(url);

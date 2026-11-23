@@ -1354,6 +1354,11 @@ public sealed partial class RemoteJobCoordinator
     {
         if (record.Kind != RemoteItemKind.WebDownload) return null;
         if (failure.Kind is not (RemoteFailureKind.Rejected or RemoteFailureKind.ServiceError)) return null;
+        // A code that names another reason (LINK_OFFLINE, INVALID_OPTION…) is the provider's own answer: it keeps its
+        // words, and the list's facts about the site don't replace them (Fable, TB.F18). No code, the site codes and
+        // the generic "error scanning this link" (DOWNLOAD_SERVER_ERROR) say nothing more, so the list may.
+        if (failure.ProviderCode?.Trim().ToUpperInvariant() is { Length: > 0 } code &&
+            code is not ("UNSUPPORTED_SITE" or "TEMPORARILY_DISABLED" or "DOWNLOAD_SERVER_ERROR")) return null;
         var said = Words(work.Entry, failure.Message, 500, [password, link]);
         return HosterWords(work, record, link, failure.ProviderCode, said);
     }

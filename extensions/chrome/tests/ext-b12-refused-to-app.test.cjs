@@ -125,6 +125,7 @@ test('EXT.B12: a 403 after some bytes, a 404, a server\'s job, another browser\'
     ['a server\'s job', job({ target: 'server' })],
     ['another browser\'s job', job({ ownerExtensionId: 'another-extension' })],
     ['not from a browser', job({ source: 'cli' })],
+    ['a link sent by hand or with Download All', job({ source: 'chromeContextMenu' })],
     ['no address', job({ url: undefined })],
     ['not a web address', job({ url: 'remote://torbox/torrents/1/2' })],
     ['a masked address', job({ addressHidden: true })],
@@ -162,6 +163,21 @@ test('EXT.B12: a 403 after some bytes, a 404, a server\'s job, another browser\'
     emit(second.harness, job({ id: SECOND }));
     await wait();
     assert.equal(second.log.downloaded.length, 1, 'only once per address');
+  });
+});
+
+test('EXT.B12: at most three refused downloads a minute go to the browser; the rest stay in the app', async () => {
+  const { harness, log } = refusedChrome();
+  await withBackground(harness, async () => {
+    await openNative(harness);
+    for (let i = 0; i < 5; i++) {
+      const id = `1a2b3c4d-0000-4000-8000-00000000001${i}`;
+      emit(harness, job({ id, url: `${URL}?n=${i}`, fileName: `f${i}.pdf` }));
+      if (i < 3) await answerRemoval(harness, log);
+      await wait();
+    }
+    assert.equal(log.downloaded.length, 3, 'a burst of refusals opens no more than three browser downloads');
+    assert.equal(harness.nativeMessages.filter((message) => message.type === 'job.remove').length, 3);
   });
 });
 
