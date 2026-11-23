@@ -109,6 +109,31 @@ public sealed class UpdateNoticeTests
         }
     }
 
+    [Fact]
+    public void ASkipWithTheClientsVersionWorksWhenTheServerFoundNone()
+    {
+        var dir = Path.Combine(AppContext.BaseDirectory, "test-work", "upd-skip-" + Guid.NewGuid().ToString("N"));
+        var paths = new StoragePaths(Path.Combine(dir, "state"));
+        var engine = new HttpDownloadEngine(new EngineOptions { AllowLocalNetwork = true, MaxAttempts = 1 }, checkpoints: new JsonCheckpointStore(paths));
+        var service = new DownloadManagerService(paths, new JsonJobStore(paths), new JsonCheckpointStore(paths), new JsonSettingsStore(paths), engine,
+            enableSchedulerTimer: false, timeProvider: new ManualTime(Noon));
+        try
+        {
+            // No version known (check off or not yet): a version no newer than this one, or junk, is still refused.
+            Assert.False(service.DismissUpdateNotice(UpdateDismissActions.Skip).Ok);
+            Assert.False(service.DismissUpdateNotice(UpdateDismissActions.Skip, Protocol.HostVersion).Ok);
+            Assert.False(service.DismissUpdateNotice(UpdateDismissActions.Skip, "not a version").Ok);
+
+            Assert.True(service.DismissUpdateNotice(UpdateDismissActions.Skip, "999.0.0").Ok);
+            Assert.Equal("999.0.0", service.UpdateNotice().SkippedVersion);
+        }
+        finally
+        {
+            engine.Dispose();
+            try { Directory.Delete(dir, recursive: true); } catch (IOException) { }
+        }
+    }
+
     private sealed class ManualTime(DateTimeOffset now) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => now;

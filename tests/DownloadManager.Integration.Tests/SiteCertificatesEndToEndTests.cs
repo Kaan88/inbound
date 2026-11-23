@@ -68,13 +68,13 @@ public sealed partial class SiteTransfersEndToEndTests
         var forgotten = await Call<SiteResultDto>(commands, SitesMessageTypes.Trust, new SiteTrustRequest { Id = id, ForgetCertificates = true });
         Assert.True(forgotten.Ok, forgotten.Message);
         Assert.Empty(forgotten.Site!.TrustedCertificates);
-        Assert.Empty(Files());
+        // The unused file stays until rclone's next start: it is never taken from under a running rclone.
         Assert.Equal(SiteProblems.CertificateNotTrusted,
             (await Call<SiteResultDto>(commands, SitesMessageTypes.Test, new SiteIdRequest { Id = id })).Problem);
         Assert.True((await Call<SiteResultDto>(commands, SitesMessageTypes.Trust, new SiteTrustRequest { Id = id, CertificateFingerprint = seen.Fingerprint })).Ok);
         Assert.True((await Call<SiteResultDto>(commands, SitesMessageTypes.Test, new SiteIdRequest { Id = id })).Ok);
 
-        // Another address is another server: its certificate is not carried over, and the file goes when none is left.
+        // Another address is another server: its certificate is not carried over.
         // Its password is typed again (audit 2026-11-15: a saved password is only sent to the server it was saved for).
         var moved = await Call<SiteResultDto>(commands, SitesMessageTypes.Save, new SiteSaveRequest
         {
@@ -83,7 +83,6 @@ public sealed partial class SiteTransfersEndToEndTests
         });
         Assert.True(moved.Ok, moved.Message);
         Assert.Empty(moved.Site!.TrustedCertificates);
-        Assert.Empty(Files());
         var otherName = await Call<SiteCertificateResultDto>(commands, SitesMessageTypes.Certificate, new SiteIdRequest { Id = id });
         Assert.True(otherName.Ok, otherName.Message);
         // The certificate is for 127.0.0.1, so trusting it under the name localhost would not help.
@@ -126,6 +125,41 @@ public sealed partial class SiteTransfersEndToEndTests
         Assert.True(works.Ok, works.Message);
 
         var other = await Call<SiteResultDto>(commands, SitesMessageTypes.Test, new SiteIdRequest { Id = b });
+        Assert.False(other.Ok);
+        Assert.Equal(SiteProblems.CertificateNotTrusted, other.Problem);
+    }
+
+    [SiteTransfersFact]
+    public async Task ACertificateTrustedForAnFtpsSiteDoesNotVouchForAnHttpsRemote()
+    {
+        var (authority, authorityFile, authorityKeyFile, authorityKey) = MakeAuthority("127.0.0.1");
+        using var _ = authorityKey;
+        var (leafFile, leafKeyFile) = MakeLeaf("127.0.0.1", authority, authorityKey);
+        var ftps = StartServer(slow: false, "ftp", ["--user", User, "--pass", Password, "--cert", authorityFile, "--key", authorityKeyFile]);
+        var dav = StartServer(slow: false, "webdav", ["--user", User, "--pass", Password, "--cert", leafFile, "--key", leafKeyFile]);
+        var commands = Open(null);
+        await Call<SitesStatusDto>(commands, SitesMessageTypes.SetEnabled, new SitesSetEnabledRequest { Enabled = true, OwnRclonePath = Rclone });
+        var ftpsSite = await Call<SiteResultDto>(commands, SitesMessageTypes.Save, new SiteSaveRequest
+        {
+            Name = "FTPS", Kind = SiteKinds.Ftp, Host = "127.0.0.1", Port = ftps, Tls = SiteTlsModes.Implicit, User = User, Password = Password,
+        });
+        Assert.True(ftpsSite.Ok, ftpsSite.Message);
+        var davSite = await Call<SiteResultDto>(commands, SitesMessageTypes.Save, new SiteSaveRequest
+        {
+            Name = "DAV", Kind = SiteKinds.WebDav, Url = $"https://127.0.0.1:{dav}/", Vendor = "other", User = User, Password = Password,
+        });
+        Assert.True(davSite.Ok, davSite.Message);
+
+        var read = await Call<SiteCertificateResultDto>(commands, SitesMessageTypes.Certificate, new SiteIdRequest { Id = ftpsSite.Site!.Id });
+        Assert.True(read.Ok, read.Message);
+        var trusted = await Call<SiteResultDto>(commands, SitesMessageTypes.Trust,
+            new SiteTrustRequest { Id = ftpsSite.Site.Id, CertificateFingerprint = read.Certificate!.Fingerprint });
+        Assert.True(trusted.Ok, trusted.Message);
+        // The FTPS site's certificate is now in the shared --ca-cert file; it can sign others, and signed the WebDAV
+        // server's. The WebDAV remote trusts nothing of its own, so it gets the system's roots alone and is refused.
+        Assert.NotEqual(SiteProblems.CertificateNotTrusted,
+            (await Call<SiteResultDto>(commands, SitesMessageTypes.Test, new SiteIdRequest { Id = ftpsSite.Site.Id })).Problem);
+        var other = await Call<SiteResultDto>(commands, SitesMessageTypes.Test, new SiteIdRequest { Id = davSite.Site!.Id });
         Assert.False(other.Ok);
         Assert.Equal(SiteProblems.CertificateNotTrusted, other.Problem);
     }

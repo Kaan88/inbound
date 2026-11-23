@@ -659,8 +659,9 @@ public sealed partial class HostConnection : IAsyncDisposable
         => RequestAsync(MessageTypes.HostShutdown, new EmptyPayload(), TimeSpan.FromSeconds(5), cancellationToken);
 
     // UPD.D1: dismissing the shown server's update notice ("notNow" or "skip"), and reading its available version and notes.
-    public Task<IpcMessage> DismissUpdateNoticeAsync(string action, CancellationToken cancellationToken = default)
-        => RequestAsync(MessageTypes.UpdateDismiss, new UpdateDismissRequest { Action = action }, TimeSpan.FromSeconds(10), cancellationToken);
+    /// <param name="version">The version the notice was shown for; a server that found none itself skips this one.</param>
+    public Task<IpcMessage> DismissUpdateNoticeAsync(string action, string? version = null, CancellationToken cancellationToken = default)
+        => RequestAsync(MessageTypes.UpdateDismiss, new UpdateDismissRequest { Action = action, Version = version }, TimeSpan.FromSeconds(10), cancellationToken);
 
     public Task<IpcMessage> ServerUpdateNotesAsync(CancellationToken cancellationToken = default)
         => RequestAsync(MessageTypes.UpdateNotes, new EmptyPayload(), TimeSpan.FromSeconds(10), cancellationToken);

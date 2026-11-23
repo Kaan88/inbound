@@ -86,6 +86,60 @@ public sealed class SiteTransfersAuditTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task AFileStoppedWithAnotherFilesHungCopyKeepsItsTries()
+    {
+        // Two files at once: b.txt's copy is never answered, a.txt's job runs until the group is stopped for b.txt's hang.
+        // Like rclone, a group stop cancels only the jobs running then; a job started after it runs on.
+        var stopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var nextJob = 0;
+        var cancelled = new System.Collections.Concurrent.ConcurrentDictionary<long, bool>();
+        var running = new System.Collections.Concurrent.ConcurrentDictionary<long, bool>();
+        var handler = new FakeHandler(async (command, input, ct) =>
+        {
+            if (command == "operations/copyfile")
+            {
+                if (input.ToJsonString().Contains("b.txt", StringComparison.Ordinal)) await Task.Delay(Timeout.Infinite, ct);
+                var job = Interlocked.Increment(ref nextJob);
+                running[job] = true;
+                return new JsonObject { ["jobid"] = job };
+            }
+
+            if (command == "job/stopgroup")
+            {
+                foreach (var job in running.Keys) cancelled[job] = true;
+                stopped.TrySetResult();
+            }
+
+            if (command == "job/status")
+            {
+                var job = input["jobid"]!.GetValue<long>();
+                return cancelled.ContainsKey(job)
+                    ? new JsonObject { ["finished"] = true, ["success"] = false, ["error"] = "context canceled" }
+                    : new JsonObject { ["finished"] = false };
+            }
+
+            return new JsonObject();
+        });
+
+        await using var harness = OpenHarness(handler, copyAnswerTimeout: TimeSpan.FromMilliseconds(200), limit: 2);
+        var started = await harness.Transfers.StartSyncAsync(Site, SiteTransferDirections.Download, "/pub", Local,
+            [new SiteTransferItem { Path = "a.txt", Size = 3 }, new SiteTransferItem { Path = "b.txt", Size = 3 }]);
+        var id = started.Transfer!.Id;
+        await stopped.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Neither file spends a try: both are connection failures of the batch, not of the file, through the retries that
+        // follow (the batch keeps waiting and trying while b.txt hangs again).
+        var until = DateTime.UtcNow + TimeSpan.FromSeconds(1.5);
+        while (DateTime.UtcNow < until)
+        {
+            var items = harness.Transfers.Get(id).Items!;
+            Assert.All(items, item => Assert.Equal(0, item.Tries));
+            Assert.DoesNotContain(items, item => item.State == SiteTransferItemStates.Failed);
+            await Task.Delay(10);
+        }
+    }
+
+    [Fact]
     public async Task AServerBackWithinTheWaitContinuesTheBatch()
     {
         var statuses = 0;
@@ -116,13 +170,13 @@ public sealed class SiteTransfersAuditTests : IAsyncLifetime
         await transfers.StartSyncAsync(Site, SiteTransferDirections.Download, "/pub", Local,
             [new SiteTransferItem { Path = "a.txt", Size = 3 }]);
 
-    private Harness OpenHarness(FakeHandler handler, TimeSpan? copyAnswerTimeout = null)
+    private Harness OpenHarness(FakeHandler handler, TimeSpan? copyAnswerTimeout = null, int limit = 1)
     {
         var supervisor = new RcloneSupervisor(
             _ => Task.FromResult<IRcloneInstance>(new FakeInstance(handler, Interlocked.Increment(ref _nextPid))),
             null, null, TimeProvider.System);
         var transfers = new SiteTransfers(State, (_, _) => Task.FromResult<SiteRecord?>(Site), ct => supervisor.AcquireAsync(ct),
-            () => true, () => 1, _ => { }, connectionDelays: ShortDelays, copyAnswerTimeout: copyAnswerTimeout);
+            () => true, () => limit, _ => { }, connectionDelays: ShortDelays, copyAnswerTimeout: copyAnswerTimeout);
         return new Harness(transfers, supervisor);
     }
 

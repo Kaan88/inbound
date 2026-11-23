@@ -220,34 +220,46 @@ public sealed partial class DownloadManagerService
     /// UPD.D1: dismisses the server update notice: "Not now" (and ×) for a day, "Skip this version" until a newer one. The
     /// state is kept on the server per server and announced to every admin session.
     /// </summary>
-    public HostActionResult DismissUpdateNotice(string action)
+    public HostActionResult DismissUpdateNotice(string action, string? version = null)
     {
-        var now = _timeProvider.GetUtcNow();
-        string? latest;
-        UpdateNoticeState current;
-        lock (_sync)
+        // One gate around read, compute and save, so a Not now in one session and a Skip in another can't lose one.
+        lock (_noticeGate)
         {
-            latest = CurrentLatestVersionLocked();
-            current = new UpdateNoticeState(_noticeHiddenUntil, _noticeSkippedVersion);
+            var now = _timeProvider.GetUtcNow();
+            string? latest;
+            UpdateNoticeState current;
+            lock (_sync)
+            {
+                latest = CurrentLatestVersionLocked();
+                current = new UpdateNoticeState(_noticeHiddenUntil, _noticeSkippedVersion);
+            }
+
+            // A server whose own check has found nothing (turned off, or not yet) skips the version the client saw, when
+            // that is a real version newer than this one.
+            if (string.IsNullOrWhiteSpace(latest) && version is { Length: > 0 and <= 32 } &&
+                Changelog.Compare(version, Protocol.HostVersion) is > 0)
+                latest = version;
+
+            if (action == UpdateDismissActions.Skip && string.IsNullOrWhiteSpace(latest))
+                return new HostActionResult { Ok = false, Message = "No update is known to skip." };
+
+            var next = UpdateNoticeState.Dismiss(action, latest, current, now);
+            if (next is null)
+                return new HostActionResult { Ok = false, Message = "Unknown dismiss action." };
+
+            lock (_sync)
+            {
+                _noticeHiddenUntil = next.HiddenUntil;
+                _noticeSkippedVersion = next.SkippedVersion;
+            }
+
+            _updateNoticeStore.Save(next);
+            UpdateNoticeChanged?.Invoke(this, next);
+            return new HostActionResult { Ok = true };
         }
-
-        if (action == UpdateDismissActions.Skip && string.IsNullOrWhiteSpace(latest))
-            return new HostActionResult { Ok = false, Message = "No update is known to skip." };
-
-        var next = UpdateNoticeState.Dismiss(action, latest, current, now);
-        if (next is null)
-            return new HostActionResult { Ok = false, Message = "Unknown dismiss action." };
-
-        lock (_sync)
-        {
-            _noticeHiddenUntil = next.HiddenUntil;
-            _noticeSkippedVersion = next.SkippedVersion;
-        }
-
-        _updateNoticeStore.Save(next);
-        UpdateNoticeChanged?.Invoke(this, next);
-        return new HostActionResult { Ok = true };
     }
+
+    private readonly object _noticeGate = new();
     private readonly object _sync = new();
     private readonly List<string> _orphanPartFiles = new();
     private bool _sleepPreventionActive;

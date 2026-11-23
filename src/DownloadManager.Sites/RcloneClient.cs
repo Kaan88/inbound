@@ -61,6 +61,13 @@ public sealed class RcloneClient : IDisposable
     public string? CertificatesDirectory { get; set; }
 
     /// <summary>
+    /// Whether this rclone was started with the FTPS sites' shared <c>--ca-cert</c> file, which then is the root pool of
+    /// every remote without a CA file of its own. Such https remotes are given a roots-only file instead
+    /// (<see cref="SiteCertificateFiles.RootsPath"/>), so an FTPS server's certificate never vouches for them.
+    /// </summary>
+    public bool SharedCaCertInUse { get; set; }
+
+    /// <summary>
     /// SITES.6c: the named in-memory remotes of sign-in sites this rclone holds (<c>config/create</c>), each with the token
     /// it was last given or seen with, so a token rclone renewed can be told apart and written back.
     /// </summary>

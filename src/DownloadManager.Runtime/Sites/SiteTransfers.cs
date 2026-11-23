@@ -1702,6 +1702,7 @@ public sealed class SiteTransfers : IAsyncDisposable
     private async Task CopyFileAsync(RcloneClient client, JsonObject copy, string group, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
+        var stopsBefore = _groupStops.GetValueOrDefault(group);
         // Not on the stop token: a stop that cut this call after rclone had made the job would leave the job running with
         // no id to stop it by. The answer is read in full, and a stop that came meanwhile stops the job in WaitForJobAsync.
         JsonObject job;
@@ -1714,14 +1715,27 @@ public sealed class SiteTransfers : IAsyncDisposable
         {
             // rclone accepted the copy but never answered, so no job id is known: the job it may have started is stopped by
             // its group, and the file is a connection failure (retryable), not a permanent one.
+            _groupStops.AddOrUpdate(group, 1, (_, stops) => stops + 1);
             await StopGroupJobsAsync(client, group).ConfigureAwait(false);
             throw new CopyHang("rclone did not answer the copy; it was stopped, so the file can be tried again.");
         }
 
         var jobId = job["jobid"] is JsonValue id && id.TryGetValue<long>(out var value) ? value
             : throw new RcloneCallException("operations/copyfile", 200, "rclone gave no job id.");
-        await WaitForJobAsync(client, jobId, token).ConfigureAwait(false);
+        try
+        {
+            await WaitForJobAsync(client, jobId, token).ConfigureAwait(false);
+        }
+        catch (RcloneCallException) when (!token.IsCancellationRequested && _groupStops.GetValueOrDefault(group) != stopsBefore)
+        {
+            // Review of 0.9.1: another file of this batch hung, and stopping its group stopped this one too. Not this
+            // file's fault: it waits with the batch and keeps its tries.
+            throw new CopyHang("Another file's copy hung and was stopped with this one; it is tried again.");
+        }
     }
+
+    /// <summary>How many times each batch's rclone job group was stopped for a hung copy (see <see cref="CopyFileAsync"/>).</summary>
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> _groupStops = new(StringComparer.Ordinal);
 
     /// <summary>Waits for an rclone job; a stop asks rclone to stop it (which removes its partial file) and waits for that.</summary>
     private async Task WaitForJobAsync(RcloneClient client, long jobId, CancellationToken token)
