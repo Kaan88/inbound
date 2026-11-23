@@ -130,11 +130,10 @@ public sealed class ChangelogTests
     [Fact]
     public void TheMacManifestKeepsDesktopSoTheMacWindowShowsThoseLines()
     {
-        var spelt = UpdateNotes.From(Sample());
-        Assert.Equal(["windows", "linux"], spelt.Single(line => line.Text == "Both windows").Tags);
-        var mac = UpdateNotes.From(Sample(), spellOutDesktop: false);
-        Assert.Equal(["desktop"], mac.Single(line => line.Text == "Both windows").Tags);
-        var shown = WhatsNewRules.UpdateNotes(mac, "9.1.0", new ChangelogFeatures(false, []), ChangelogSurface.MacOS);
+        // UPD.N3: the manifest carries a desktop tag as written, and the macOS window shows such a line.
+        var notes = UpdateNotes.From(Sample());
+        Assert.Equal(["desktop"], notes.Single(line => line.Text == "Both windows").Tags);
+        var shown = WhatsNewRules.UpdateNotes(notes, "9.1.0", new ChangelogFeatures(false, []), ChangelogSurface.MacOS);
         Assert.Contains("Both windows", shown.Lines);
         Assert.Contains("macOS only", shown.Lines);
     }
@@ -224,9 +223,6 @@ public sealed class ChangelogTests
         var linux = WhatsNewRules.UpdateNotes(notes, "9.1.0", new ChangelogFeatures(false, []), ChangelogSurface.Linux);
         Assert.Equal("What 9.1.0 changes in this app", linux.Header);
         Assert.Equal(["Everywhere", "Both windows", "Linux only"], linux.Lines);
-        // A manifest carries no desktop tag: an app from before it would take it for a provider and hide the line.
-        Assert.DoesNotContain(notes, line => line.Tags.Contains("desktop"));
-        Assert.Equal(["windows", "linux"], notes.Single(line => line.Text == "Both windows").Tags);
         Assert.Equal("Also 5 changes in the Windows app, the web UI, the server and the browser extension.", linux.Also);
     }
 

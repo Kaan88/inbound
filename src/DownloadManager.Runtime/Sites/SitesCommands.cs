@@ -1094,6 +1094,8 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
         var timing = new BrowseTiming();
 
         Listing listing;
+        // The record this browse's later builds use: the site as asked, or the stored one when the list renewed its sign-in.
+        var later = site;
         if (offset == 0 && !request.Refresh && request.Listing is not null
             && CachedListing(site.Id, path, request.Listing, fresherThan: ListingLifetime) is { } held
             && held.ChronologicalFiles == request.ChronologicalFiles && held.SiteRevision == site.Revision)
@@ -1139,10 +1141,13 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
             timing.SpaceMs = timing.Now - spaceStarted;
             // A token renewed during the list saved the site and changed its revision: stamp the listing with the revision
             // it has now, or the counts request and "load more" never find it (Fable F4). An edit meanwhile changed the
-            // generation, so StoreListing drops this listing then.
-            var revision = SiteKindCatalog.SignsIn(site.Kind) && await _sites.GetAsync(site.Id, cancellationToken).ConfigureAwait(false) is { } now
-                ? now.Revision : site.Revision;
-            listing = new Listing(Guid.NewGuid().ToString("N"), path, listed!, _time.GetUtcNow(), revision,
+            // generation, so StoreListing drops this listing then. The renewed record is what this browse's later builds
+            // use: with the old one, the next build would make rclone's remote again from the old token and undo the
+            // renewal (Fable F5).
+            var current = SiteKindCatalog.SignsIn(site.Kind)
+                ? await _sites.GetAsync(site.Id, cancellationToken).ConfigureAwait(false) : null;
+            if (current is not null && current.Kind == site.Kind) later = current;
+            listing = new Listing(Guid.NewGuid().ToString("N"), path, listed!, _time.GetUtcNow(), later.Revision,
                 request.ChronologicalFiles, space);
             StoreListing(site.Id, generation, listing);
             // SITES.11: a user's first page; a later page and Refresh are not a new use.
@@ -1153,7 +1158,7 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
         if (request.IncludeFolderCounts)
         {
             var countsStarted = timing.Now;
-            await AddFolderCountsAsync(site, path, page, listing.Uncountable, cancellationToken).ConfigureAwait(false);
+            await AddFolderCountsAsync(later, path, page, listing.Uncountable, cancellationToken).ConfigureAwait(false);
             timing.CountsMs = timing.Now - countsStarted;
             // Kept with the listing, so the folder shown again has its counts at once. By position: a cloud folder can hold
             // two folders of the same name.

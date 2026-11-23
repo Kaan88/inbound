@@ -25,7 +25,7 @@ public sealed partial class DownloadManagerService
             SpeedLimitBytesPerSecond = request.SpeedLimitBytesPerSecond ?? 0,
             NotifyWhenFinished = request.NotifyWhenFinished ?? false,
         });
-        return UpdateSettingsCoreAsync(settings, cancellationToken);
+        return UpdateSettingsCoreAsync(settings, cancellationToken, folderChecks: false);
     }
 
     // Settings gate held throughout: admissions, destination removal and policy edits cannot interleave.
@@ -74,7 +74,7 @@ public sealed partial class DownloadManagerService
         if (request.RemoveSchedules) settings.Schedules.RemoveAll(s => s.QueueId == request.QueueId);
         else if (request.MoveContentsToQueueId is { } target)
             foreach (var schedule in settings.Schedules.Where(s => s.QueueId == request.QueueId)) schedule.QueueId = target;
-        try { return await UpdateSettingsCoreAsync(settings, ct).ConfigureAwait(false); }
+        try { return await UpdateSettingsCoreAsync(settings, ct, folderChecks: false).ConfigureAwait(false); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             return new SettingsResult { Error = "Queue retained because deletion could not be saved. Some downloads may already have moved. " + ex.Message, Settings = GetSettings() };

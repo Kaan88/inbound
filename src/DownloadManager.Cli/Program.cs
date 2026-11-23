@@ -1748,6 +1748,11 @@ internal static partial class Program
                 return 2;
             }
 
+            // A hand-edited file may write null where the app writes a list or object: a null is read as empty/absent,
+            // not as a reason to stop.
+            if (imported.Queues is null) imported.Queues = [];
+            if (imported.SiteLogins is null) imported.SiteLogins = [];
+            if (imported.Proxy is null) imported.Proxy = new ProxyDto();
             // A restore replaces the queues and schedules with the file's: one deleted since the export comes back and
             // one added since goes. A revision (a file exported by an older build) would merge them instead.
             imported.Revision = 0;

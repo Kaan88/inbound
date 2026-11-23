@@ -1592,7 +1592,13 @@ public sealed partial class DownloadManagerService
         finally { _settingsUpdateGate.Release(); }
     }
 
-    private async Task<SettingsResult> UpdateSettingsCoreAsync(SettingsDto settings, CancellationToken cancellationToken, CallerScope? caller = null)
+    /// <param name="folderChecks">
+    /// False for the Host's own queue create and delete: the default folder may be an unplugged drive or offline share, or
+    /// no longer inside a server's allowed roots, and neither is what the queue change is about. A user's settings save
+    /// keeps both, so changing the folder itself still reports a folder that can't be made.
+    /// </param>
+    private async Task<SettingsResult> UpdateSettingsCoreAsync(SettingsDto settings, CancellationToken cancellationToken,
+        CallerScope? caller = null, bool folderChecks = true)
     {
         lock (_sync)
             if ((settings.Queues ?? []).Any(q => q.Generation is { } generation &&
@@ -1679,20 +1685,28 @@ public sealed partial class DownloadManagerService
             return new SettingsResult { Ok = false, Error = "Default download directory is required.", Settings = MapLiveSettings(_settings) };
         }
 
-        if (Roots is { } roots && DescribeFolderOutsideRoots(settings, categories, roots) is { } outside)
+        if (folderChecks && Roots is { } roots && DescribeFolderOutsideRoots(settings, categories, roots) is { } outside)
         {
             return new SettingsResult { Ok = false, Error = outside, Settings = MapLiveSettings(_settings) };
         }
 
         string directory;
-        try
+        if (!folderChecks)
         {
-            directory = Path.GetFullPath(settings.DefaultDownloadDirectory);
-            Directory.CreateDirectory(directory);
+            // Everything but the queue list is unchanged live settings, already a full path: no look at the disk.
+            directory = settings.DefaultDownloadDirectory;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        else
         {
-            return new SettingsResult { Ok = false, Error = ErrorText(ex, caller), Settings = MapLiveSettings(_settings) };
+            try
+            {
+                directory = Path.GetFullPath(settings.DefaultDownloadDirectory);
+                Directory.CreateDirectory(directory);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+            {
+                return new SettingsResult { Ok = false, Error = ErrorText(ex, caller), Settings = MapLiveSettings(_settings) };
+            }
         }
 
         settings.DefaultDownloadDirectory = directory;
