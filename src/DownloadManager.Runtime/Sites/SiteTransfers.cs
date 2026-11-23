@@ -83,8 +83,29 @@ public sealed class SiteTransfers : IAsyncDisposable
     /// <summary>A file that can't be moved however often it is tried.</summary>
     private sealed class ItemFailure(string message) : Exception(message);
 
+    /// <summary>
+    /// rclone accepted a copy but never answered (or the rc call to it hung), so its job had to be stopped and the file can
+    /// be tried again: a connection failure, not the file's own.
+    /// </summary>
+    private sealed class CopyHang(string message) : Exception(message);
+
+    /// <summary>
+    /// The waits between the files' tries after a connection failure, one per failed connection in a row; the seven waits
+    /// together last about ten minutes before the batch stops.
+    /// </summary>
+    internal static readonly TimeSpan[] DefaultConnectionDelays =
+    [
+        TimeSpan.FromSeconds(5),
+        TimeSpan.FromSeconds(15),
+        TimeSpan.FromSeconds(30),
+        TimeSpan.FromSeconds(60),
+        TimeSpan.FromSeconds(120),
+        TimeSpan.FromSeconds(180),
+        TimeSpan.FromSeconds(180),
+    ];
+
     /// <summary>Connection failures in a row after which a batch stops instead of waiting again.</summary>
-    public const int MaxConnectionFailures = 5;
+    private int MaxConnectionFailures => _connectionDelays.Count + 1;
 
     private readonly SiteTransferStore _store;
     private readonly string _stateDirectory;
@@ -95,6 +116,8 @@ public sealed class SiteTransfers : IAsyncDisposable
     private readonly Action<string> _log;
     private readonly TimeProvider _time;
     private readonly TimeSpan _firstRetryDelay;
+    private readonly IReadOnlyList<TimeSpan> _connectionDelays;
+    private readonly TimeSpan _copyAnswerTimeout;
     private readonly ISleepPrevention _sleep;
     private readonly Func<bool> _preventSleep;
     // Taken before _sync, never inside it: decided and applied in one go, so two callers can't apply answers out of order.
@@ -150,10 +173,13 @@ public sealed class SiteTransfers : IAsyncDisposable
     /// <param name="firstRetryDelay">The wait before a failed file's second try; it doubles after each (2 s by default).</param>
     /// <param name="sleep">Keeps the PC awake while a batch runs (a share of the Host's power request).</param>
     /// <param name="preventSleep">Options › "Prevent sleep while downloading", which covers site transfers too.</param>
+    /// <param name="connectionDelays">The waits after a connection failure, one per failed connection in a row (about ten minutes by default).</param>
+    /// <param name="copyAnswerTimeout">How long rclone gets to answer <c>operations/copyfile</c> before its job is stopped and the file retried (30 s by default).</param>
     public SiteTransfers(string stateDirectory, Func<string, CancellationToken, Task<SiteRecord?>> getSite,
         Func<CancellationToken, Task<RcloneLease>> acquire, Func<bool> enabled, Func<int> limit, Action<string> log,
         TimeProvider? time = null, TimeSpan? firstRetryDelay = null, ISleepPrevention? sleep = null, Func<bool>? preventSleep = null,
-        bool executionAllowed = true, Func<CancellationToken, Task>? afterExclusiveOpen = null)
+        bool executionAllowed = true, Func<CancellationToken, Task>? afterExclusiveOpen = null,
+        IReadOnlyList<TimeSpan>? connectionDelays = null, TimeSpan? copyAnswerTimeout = null)
     {
         _sleep = sleep ?? NullSleepPrevention.Instance;
         _executionAllowed = executionAllowed;
@@ -168,6 +194,8 @@ public sealed class SiteTransfers : IAsyncDisposable
         _log = log;
         _time = time ?? TimeProvider.System;
         _firstRetryDelay = firstRetryDelay ?? TimeSpan.FromSeconds(2);
+        _connectionDelays = connectionDelays ?? DefaultConnectionDelays;
+        _copyAnswerTimeout = copyAnswerTimeout ?? TimeSpan.FromSeconds(30);
 
         foreach (var record in _store.LoadAll())
         {
@@ -821,6 +849,23 @@ public sealed class SiteTransfers : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Stops every rclone job of a transfer's group on a client already held. A hung copy has no job id to stop it by, so
+    /// its group is stopped instead before the file is tried again.
+    /// </summary>
+    private static async Task StopGroupJobsAsync(RcloneClient client, string group)
+    {
+        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        try
+        {
+            await client.CallAsync("job/stopgroup", new JsonObject { ["group"] = group }, limit.Token).ConfigureAwait(false);
+        }
+        catch (Exception e) when (e is OperationCanceledException or RcloneCallException or RcloneUnavailableException)
+        {
+            // Nothing of the group is running, or rclone is gone, which stopped it too.
+        }
+    }
+
     private async Task WaitQuietlyAsync(Task[] tasks)
     {
         if (tasks.Length == 0) return;
@@ -1292,7 +1337,7 @@ public sealed class SiteTransfers : IAsyncDisposable
             // SITES.10 (6): the clients offer the fix browsing offers for the same refusal.
             stopProblem = BatchProblem(e.Message);
         }
-        catch (Exception e) when (e is RcloneUnavailableException || (e is RcloneCallException && CantReach(e.Message)))
+        catch (Exception e) when (e is CopyHang or RcloneUnavailableException || (e is RcloneCallException && CantReach(e.Message)))
         {
             // Not this file's fault: the batch waits, and the file keeps its tries.
             state = SiteTransferItemStates.Waiting;
@@ -1344,7 +1389,7 @@ public sealed class SiteTransfers : IAsyncDisposable
                     }
                     else
                     {
-                        var delay = TimeSpan.FromTicks(Math.Min(TimeSpan.FromMinutes(1).Ticks, _firstRetryDelay.Ticks << (batch.ConnectionFailures - 1)));
+                        var delay = _connectionDelays[batch.ConnectionFailures - 1];
                         batch.RetryAt = now + delay;
                         batch.RetryReason = error;
                     }
@@ -1583,7 +1628,7 @@ public sealed class SiteTransfers : IAsyncDisposable
                 lock (_sync) staged = record.StagedComplete;
                 if (!staged || !File.Exists(temporary))
                 {
-                    await CopyFileAsync(client, CopyTo(temporaryName), token).ConfigureAwait(false);
+                    await CopyFileAsync(client, CopyTo(temporaryName), batch.Group, token).ConfigureAwait(false);
                     lock (_sync) record.StagedComplete = true;
                     await SaveAsync(batch, token).ConfigureAwait(false);
                 }
@@ -1597,7 +1642,7 @@ public sealed class SiteTransfers : IAsyncDisposable
             }
         }
 
-        await CopyFileAsync(client, CopyTo(to), token).ConfigureAwait(false);
+        await CopyFileAsync(client, CopyTo(to), batch.Group, token).ConfigureAwait(false);
         return SiteTransferItemStates.Done;
     }
 
@@ -1654,15 +1699,23 @@ public sealed class SiteTransfers : IAsyncDisposable
         }
     }
 
-    private async Task CopyFileAsync(RcloneClient client, JsonObject copy, CancellationToken token)
+    private async Task CopyFileAsync(RcloneClient client, JsonObject copy, string group, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
         // Not on the stop token: a stop that cut this call after rclone had made the job would leave the job running with
         // no id to stop it by. The answer is read in full, and a stop that came meanwhile stops the job in WaitForJobAsync.
         JsonObject job;
-        using (var answer = new CancellationTokenSource(TimeSpan.FromSeconds(30)))
+        try
         {
+            using var answer = new CancellationTokenSource(_copyAnswerTimeout);
             job = await client.CallAsync("operations/copyfile", copy, answer.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!token.IsCancellationRequested)
+        {
+            // rclone accepted the copy but never answered, so no job id is known: the job it may have started is stopped by
+            // its group, and the file is a connection failure (retryable), not a permanent one.
+            await StopGroupJobsAsync(client, group).ConfigureAwait(false);
+            throw new CopyHang("rclone did not answer the copy; it was stopped, so the file can be tried again.");
         }
 
         var jobId = job["jobid"] is JsonValue id && id.TryGetValue<long>(out var value) ? value

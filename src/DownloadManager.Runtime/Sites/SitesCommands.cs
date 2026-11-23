@@ -101,13 +101,15 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
     /// <param name="sleepPrevention">Keeps the PC awake while a transfer runs: a share of the Host's power request.</param>
     /// <param name="preventSleep">Options › "Prevent sleep while downloading".</param>
     /// <param name="allowWebDavUploadProbe">Test-only WebDAV experiment. Production has no proven atomic create backend.</param>
+    /// <param name="transferConnectionDelays">The waits after a connection failure, one per failed connection in a row (about ten minutes by default).</param>
+    /// <param name="copyAnswerTimeout">How long rclone gets to answer <c>operations/copyfile</c> before its job is stopped and the file retried (30 s by default).</param>
     public SitesCommands(string stateDirectory, Action<string> log, Func<string?, string?>? findRclone = null,
         Func<string, string, RcloneSupervisor>? createSupervisor = null,
         Func<string, int, CancellationToken, Task<IReadOnlyList<SshHostKey>>>? probe = null,
         RcloneUpdater? updater = null, TimeProvider? time = null, TimeSpan? firstCheckDelay = null, TimeSpan? updateTick = null,
         TimeSpan? transferRetryDelay = null, DownloadManager.Core.ISleepPrevention? sleepPrevention = null, Func<bool>? preventSleep = null,
         bool transferExecutionAllowed = true, Func<CancellationToken, Task>? afterTransferExclusiveOpen = null,
-        bool allowWebDavUploadProbe = false)
+        bool allowWebDavUploadProbe = false, IReadOnlyList<TimeSpan>? transferConnectionDelays = null, TimeSpan? copyAnswerTimeout = null)
     {
         _stateDirectory = stateDirectory;
         _allowWebDavUploadProbe = allowWebDavUploadProbe;
@@ -125,7 +127,7 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
         if (_configProblem is not null) log(_configProblem);
         _transfers = new SiteTransfers(stateDirectory, (id, ct) => _sites.GetAsync(id, ct), ct => AcquireAsync(ct),
             () => _config.Enabled, () => _config.TransfersAtOnce, log, _time, transferRetryDelay, sleepPrevention,
-            preventSleep, transferExecutionAllowed, afterTransferExclusiveOpen);
+            preventSleep, transferExecutionAllowed, afterTransferExclusiveOpen, transferConnectionDelays, copyAnswerTimeout);
         _transfers.Changed += change =>
         {
             ForgetListingsAfterUploads(change);

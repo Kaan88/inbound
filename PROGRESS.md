@@ -117,6 +117,28 @@ Verification: `dotnet build DownloadManager.slnx -c Release` (0 errors; no new w
   open upward and inside), right-click the first row (downward), and check the popup keeps its size both ways; a menu
   taller than the popup scrolls.
 
+## SITES.10 (4) and (7) — a hung copy is retryable and the connection wait is about ten minutes, 2026-11-23 (branch `w/sites10-47`)
+
+Two follow-ups from the 0.8.0 audit (PROGRESS AP), in the Remote files transfer engine (`SiteTransfers`,
+`SitesCommands`). Not seen in the running window yet; covered by tests.
+
+- **(4) A hung `operations/copyfile` answer** failed the file for good and could leave the rclone job running. Copies are
+  started async (`_async: true`) and polled with `job/status`; the copyfile answer's own 30 s timeout raised an
+  `OperationCanceledException` that fell into `RunItemAsync`'s catch-all as a permanent file failure, and no job id was
+  known to stop the orphan job by. Now the timeout stops the batch's job group (`job/stopgroup` — the only handle there
+  is, since no job id is known when the answer never came) and raises a `CopyHang`, which `RunItemAsync` treats like a
+  connection failure: the file keeps its tries and the batch waits and retries. A user stop is unchanged (a user cancel
+  is not read as a hang). `SiteTransfersAuditTests.AHungCopyIsRetriedAndItsJobIsStopped`.
+- **(7) Five connection waits came to about 30 s.** The waits are now a fixed schedule — 5 s, 15 s, 30 s, 60 s, 120 s,
+  180 s, 180 s (about ten minutes in all, 590 s) — then the batch stops after the next failed connection. The schedule
+  is `SiteTransfers.DefaultConnectionDelays`; the row still shows the wait and its next-try time, and one outage still
+  counts once (`CantReach`/`RefusesTheSite` unchanged). `SiteTransfersAuditTests.TheDefaultConnectionScheduleTotalsAboutTenMinutes`
+  and `AServerBackWithinTheWaitContinuesTheBatch`; the existing `AServerThatGoesAway…` end-to-end test now expects eight
+  failed connections (its timeout grew for the real-rclone retries).
+- Tests: three new `SiteTransfersAuditTests` against a stand-in rclone (a scripted `RcloneClient` handler) with no real
+  ten-minute waits — the schedule and copy-answer timeout are injectable for tests. Release build clean (0 errors, no
+  new warnings in the changed files); the new tests, the copy/reach/progress suites and the away test pass.
+
 ## 0.9.1 release (extension 0.7.1), 2026-11-23
 
 - **Owner:** "make full release with extensions" (after the owner-report fixes merged); UI.B40 part 2 (zero line
