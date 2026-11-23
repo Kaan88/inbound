@@ -174,8 +174,28 @@ public sealed partial class MainWindow
     public void RequestQueuedTorrents()
     {
         ShowFromTray();
-        if (_settings is null) _pendingTorrentOpen = true;
-        else _ = OpenQueuedTorrentsAsync();
+        // UI.B41: taken from the queue folder at once and held here, so a slow start can't let them expire there.
+        TorrentOpenRequests.Hold(_heldTorrentInputs, TorrentOpenRequests.Drain(App.TorrentQueueDirectory(), DateTimeOffset.UtcNow, _heldFromDownloads));
+        _pendingTorrentOpen = true;
+        OpenPendingTorrents();
+    }
+
+    /// <summary>
+    /// UI.B41: opens what <see cref="RequestQueuedTorrents"/> holds once the Host's list is in and the second connection
+    /// has said whether torrents are on. On a cold start the list came first, the torrents looked turned off, and the
+    /// magnet or .torrent file Windows handed in was dropped.
+    /// </summary>
+    private void OpenPendingTorrents()
+    {
+        if (!_pendingTorrentOpen) return;
+        if (!TorrentOpenRequests.ReadyToOpen(_settings is not null, _remote.State.IsReady))
+        {
+            UiTrace.Write("Torrents from Windows held until the Host has answered");
+            return;
+        }
+
+        _pendingTorrentOpen = false;
+        _ = OpenQueuedTorrentsAsync();
     }
 
     // Torrents Windows opened while another dialog was showing: held here (not in the queue folder, where they would

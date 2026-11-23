@@ -562,11 +562,7 @@ public sealed partial class MainWindow : Window
 
         OpenPendingUpdatesDialog();
 
-        if (_pendingTorrentOpen)
-        {
-            _pendingTorrentOpen = false;
-            _ = OpenQueuedTorrentsAsync();
-        }
+        OpenPendingTorrents();
 
         ShowPendingJob();
     }

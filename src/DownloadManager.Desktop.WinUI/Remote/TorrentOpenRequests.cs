@@ -154,6 +154,12 @@ internal static class TorrentOpenRequests
         return age <= MaxAge && age >= -MaxAge;
     }
 
+    /// <summary>
+    /// UI.B41: held torrents open only when the Host's list is in (<paramref name="listIn"/>) and the connection that
+    /// says whether torrents are on has been read (<paramref name="torrentsKnown"/>). Either may come first.
+    /// </summary>
+    public static bool ReadyToOpen(bool listIn, bool torrentsKnown) => listIn && torrentsKnown;
+
     /// <summary>The dialog's starting focus for these inputs.</summary>
     public static string Focus(IReadOnlyList<string> inputs)
     {

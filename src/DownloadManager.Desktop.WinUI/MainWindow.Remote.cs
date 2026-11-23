@@ -63,6 +63,7 @@ public sealed partial class MainWindow
         }
 
         if (e.PropertyName is nameof(RemoteState.TorrentsOffered)) SyncTorrentEntryPoints();
+        if (e.PropertyName is nameof(RemoteState.IsReady)) OpenPendingTorrents();
     }
 
     private string ProviderDisplayName(string? provider)

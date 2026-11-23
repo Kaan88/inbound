@@ -102,4 +102,13 @@ public sealed class TorrentOpenRequestsTests : IDisposable
         Assert.Equal("torrentFiles", TorrentOpenRequests.Focus([@"C:\a.torrent"]));
         Assert.Equal("mixed", TorrentOpenRequests.Focus([Magnet, @"C:\a.torrent"]));
     }
+
+    [Fact]
+    public void Held_torrents_wait_for_the_list_and_for_whether_torrents_are_on()
+    {
+        // UI.B41: on a cold start the list came before the hello that says torrents are on, and the hand-in was dropped.
+        Assert.False(TorrentOpenRequests.ReadyToOpen(listIn: true, torrentsKnown: false));
+        Assert.False(TorrentOpenRequests.ReadyToOpen(listIn: false, torrentsKnown: true));
+        Assert.True(TorrentOpenRequests.ReadyToOpen(listIn: true, torrentsKnown: true));
+    }
 }
