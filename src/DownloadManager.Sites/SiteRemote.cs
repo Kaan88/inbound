@@ -16,7 +16,24 @@ public static class SiteRemote
     /// The <c>fs</c> object. Throws <see cref="SiteStoreException"/> when the site can't be used as it is: no accepted host key
     /// (the first-use prompt has not been answered), or a secret that does not open on this PC.
     /// </summary>
-    public static async Task<JsonObject> BuildAsync(SiteRecord site, RcloneClient client, CancellationToken cancellationToken = default) => site.Kind switch
+    public static async Task<JsonObject> BuildAsync(SiteRecord site, RcloneClient client, CancellationToken cancellationToken = default)
+    {
+        var fs = await BuildKindAsync(site, client, cancellationToken).ConfigureAwait(false);
+        // SITES.10: the certificates this site trusts are its own (override.ca_cert), never the whole rclone's. rclone's
+        // cache of remotes leaves override options out of its key (seen with 1.76): without a description that names
+        // the file, a remote made before the trust would be reused without it, and one made with it after a forget.
+        // FTPS is left to the Host's one --ca-cert file: rclone's FTP backend keeps the first TLS settings it saw for a
+        // server, so an override there would be ignored or carried to the next remote.
+        if (site.Kind != SiteKinds.Ftp && site.TrustedCertificates.Count > 0 && client?.CertificatesDirectory is { } directory &&
+            SiteCertificateFiles.PathFor(site, directory) is { } caFile)
+        {
+            fs["override.ca_cert"] = caFile;
+            fs["description"] = "Inbound trusted certificates " + Path.GetFileNameWithoutExtension(caFile);
+        }
+        return fs;
+    }
+
+    private static async Task<JsonObject> BuildKindAsync(SiteRecord site, RcloneClient client, CancellationToken cancellationToken) => site.Kind switch
     {
         SiteKinds.Sftp => await SftpAsync(site, client, cancellationToken).ConfigureAwait(false),
         SiteKinds.Ftp => await FtpAsync(site, client, cancellationToken).ConfigureAwait(false),

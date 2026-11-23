@@ -275,7 +275,8 @@ public sealed class SiteTransfers : IAsyncDisposable
                 Items = [.. batch.Record.Items.Select(i => new SiteTransferItemDto
                 {
                     Path = i.Path,
-                    Target = i.Target,
+                    // A name kept only so a restart reuses it (SITES.10) is no new name.
+                    Target = i.Target == i.Path ? null : i.Target,
                     Size = i.Size,
                     State = i.State,
                     Tries = i.Tries,
@@ -1522,6 +1523,14 @@ public sealed class SiteTransfers : IAsyncDisposable
                         await SaveAsync(batch, token).ConfigureAwait(false);
                         break;
                 }
+            }
+            else if (record.Conflict == SiteTransferConflicts.KeepBoth)
+            {
+                // SITES.10 (3): the free name is kept too. Otherwise a Host killed before this file's Done is saved (the
+                // flush waits FlushDelay) would find its own copy after the restart and keep both: a "(1)" duplicate.
+                name = item.Path;
+                lock (_sync) item.Target = name;
+                await SaveAsync(batch, token).ConfigureAwait(false);
             }
         }
 

@@ -55,6 +55,12 @@ public sealed class RcloneClient : IDisposable
     public Uri BaseAddress => _http.BaseAddress!;
 
     /// <summary>
+    /// SITES.10: where this rclone's per-site CA files live (<see cref="SiteCertificateFiles"/>); null leaves every site on the
+    /// system's own check.
+    /// </summary>
+    public string? CertificatesDirectory { get; set; }
+
+    /// <summary>
     /// SITES.6c: the named in-memory remotes of sign-in sites this rclone holds (<c>config/create</c>), each with the token
     /// it was last given or seen with, so a token rclone renewed can be told apart and written back.
     /// </summary>

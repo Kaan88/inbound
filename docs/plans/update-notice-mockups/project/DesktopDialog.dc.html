@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Desktop: update a Docker server</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+a{color:#84bdf3}a:hover{color:#b5d6f7}
+button{font:inherit}
+</style>
+</helmet>
+<div style="width: 1280px; height: 760px; box-sizing: border-box; background: #121212; color: #ececec; font-family: 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif; font-size: 14px; display: flex; align-items: center; justify-content: center">
+  <div role="dialog" aria-labelledby="t" style="width: 600px; background: #2b2b2b; border: 1px solid #3a3a3a; border-radius: 8px; box-shadow: 0 16px 48px rgba(0,0,0,0.5); display: flex; flex-direction: column">
+    <div style="padding: 24px 24px 0; display: flex; flex-direction: column; gap: 14px">
+      <div style="display: flex; flex-direction: column; gap: 4px">
+        <h2 id="t" style="margin: 0; font-size: 20px; font-weight: 600">Update NAS (Docker)</h2>
+        <span style="color: #a3a3a3; font-size: 13px">0.7.2 → 0.7.4 · released 20 Nov 2026</span>
+      </div>
+      <span style="line-height: 1.45; color: #cfcfcf">Inbound can't update a Docker server from here. On the machine that runs it, pull the new image and start the container again. Its downloads and settings stay in its data volume, and this window reconnects by itself.</span>
+      <div style="display: flex; flex-direction: column; gap: 6px">
+        <div style="display: flex; align-items: center; gap: 8px; background: #1c1c1c; border: 1px solid #343434; border-radius: 4px; padding: 8px 8px 8px 12px">
+          <span style="color: #a3a3a3; font-size: 12px; width: 92px">Compose</span>
+          <code style="flex-grow: 1; font-family: 'Cascadia Mono', Consolas, monospace; font-size: 12.5px">docker compose pull inbound &amp;&amp; docker compose up -d inbound</code>
+          <button style="background: rgba(255,255,255,0.06); color: #ececec; border: 1px solid #3a3a3a; border-radius: 4px; padding: 4px 10px; font-size: 12px">Copy</button>
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px; background: #1c1c1c; border: 1px solid #343434; border-radius: 4px; padding: 8px 8px 8px 12px">
+          <span style="color: #a3a3a3; font-size: 12px; width: 92px">docker run</span>
+          <code style="flex-grow: 1; font-family: 'Cascadia Mono', Consolas, monospace; font-size: 12.5px">docker pull ghcr.io/kaan88/inbound:latest</code>
+          <button style="background: rgba(255,255,255,0.06); color: #ececec; border: 1px solid #3a3a3a; border-radius: 4px; padding: 4px 10px; font-size: 12px">Copy</button>
+        </div>
+      </div>
+      <details style="color: #cfcfcf">
+        <summary style="cursor: pointer">What changes for the server (3)</summary>
+        <ul style="margin: 8px 0 0; padding-left: 18px; line-height: 1.4">
+          <li>[Server, Docker and web UI lines of 0.7.3 and 0.7.4]</li>
+        </ul>
+      </details>
+    </div>
+    <div style="margin-top: 22px; padding: 16px 24px; background: #252525; border-top: 1px solid #343434; border-radius: 0 0 8px 8px; display: flex; gap: 8px; align-items: center">
+      <button style="background: rgba(255,255,255,0.06); color: #ececec; border: 1px solid #3a3a3a; border-radius: 4px; padding: 6px 14px">Skip this version</button>
+      <div style="flex-grow: 1"></div>
+      <a href="Desktop.dc.html" style="background: #4aa3f0; color: #0b1a2a; border-radius: 4px; padding: 6px 18px; text-decoration: none; font-weight: 600">Close</a>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":760}}'>
+class Component extends DCLogic {
+renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

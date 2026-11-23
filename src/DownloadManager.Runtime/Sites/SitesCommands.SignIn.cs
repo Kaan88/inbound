@@ -81,15 +81,17 @@ public sealed partial class SitesCommands
                 UseShellExecute = false,
                 CreateNoWindow = true,
             };
-            foreach (var argument in new[] { "authorize", site.Kind }) info.ArgumentList.Add(argument);
+            foreach (var argument in new[] { "authorize", site.Kind, "--auth-no-open-browser", "--config", "" }) info.ArgumentList.Add(argument);
+            RcloneEnvironment.Clean(info.Environment);
             if (site.ClientId is { } clientId)
             {
-                info.ArgumentList.Add(clientId);
-                info.ArgumentList.Add(site.SealedClientSecret is null ? "" : SecretProtector.UnprotectSiteSecret(site.SealedClientSecret) ?? "");
+                // SITES.10: the user's own app goes in rclone's environment (RCLONE_<BACKEND>_CLIENT_ID/_SECRET, read by
+                // authorize as by any backend option; checked with 1.76), not on its command line, which any program on
+                // this PC can read.
+                var prefix = "RCLONE_" + site.Kind.ToUpperInvariant() + "_";
+                info.Environment[prefix + "CLIENT_ID"] = clientId;
+                info.Environment[prefix + "CLIENT_SECRET"] = site.SealedClientSecret is null ? "" : SecretProtector.UnprotectSiteSecret(site.SealedClientSecret) ?? "";
             }
-
-            foreach (var argument in new[] { "--auth-no-open-browser", "--config", "" }) info.ArgumentList.Add(argument);
-            RcloneEnvironment.Clean(info.Environment);
 
             Process process;
             try

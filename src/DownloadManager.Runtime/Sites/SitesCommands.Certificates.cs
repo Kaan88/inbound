@@ -1,4 +1,3 @@
-using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using DownloadManager.Contracts;
 using DownloadManager.Sites;
@@ -6,10 +5,11 @@ using DownloadManager.Sites;
 namespace DownloadManager.Runtime.Sites;
 
 /// <summary>
-/// SITES.6b: trusting an FTPS or https server's own certificate (remote-sites.md, "FTPS certificates"). rclone has no
-/// per-site CA and reads its CA file only at start, so the Host keeps one file of every certificate the user trusted, with
-/// the system's roots (the file replaces them for rclone), and starts rclone again once it is idle when the file changes.
-/// rclone's own check is never switched off.
+/// SITES.6b: trusting an FTPS or https server's own certificate (remote-sites.md, "FTPS certificates"). An https site's
+/// certificates go in a CA file of its own, given to rclone for that remote only (<c>override.ca_cert</c>, SITES.10;
+/// <see cref="SiteCertificateFiles"/>), so one never vouches for another server. FTPS sites' can't (rclone's FTP backend
+/// keeps the first TLS settings it saw): the Host keeps one file of those, with the system's roots (the file replaces them
+/// for rclone), and starts rclone again once it is idle when the file changes. rclone's own check is never switched off.
 /// </summary>
 public sealed partial class SitesCommands
 {
@@ -140,12 +140,13 @@ public sealed partial class SitesCommands
     }
 
     /// <summary>
-    /// Writes the trusted-certificates file again and lets rclone go so the next one reads it. True when the next call uses
-    /// the new file; false when rclone waits for its running work first.
+    /// Removes the https sites' CA files no site uses now (a new trust is a new file, used at the next call), writes the FTPS
+    /// file again and, when it changed, lets rclone go so the next one reads it. True when the next call uses the new
+    /// certificates; false when rclone waits for its running work first.
     /// </summary>
     private async Task<bool> TrustedCertificatesChangedAsync(CancellationToken cancellationToken)
     {
-        await WriteTrustedCertificatesAsync(cancellationToken).ConfigureAwait(false);
+        if (!await WriteTrustedCertificatesAsync(cancellationToken).ConfigureAwait(false)) return true;
         RcloneSupervisor? supervisor;
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -163,20 +164,27 @@ public sealed partial class SitesCommands
     private string TrustedCertificatesPath => Path.Combine(_stateDirectory, "sites", "rclone", RcloneProcess.TrustedCertificatesFileName);
 
     /// <summary>
-    /// The file rclone gets as <c>--ca-cert</c>: the system's roots and every certificate a site trusts. With none trusted
-    /// there is no file, and rclone uses the system's own check as it always did.
+    /// The file rclone gets as <c>--ca-cert</c>: the system's roots and every certificate an FTPS site trusts. With none
+    /// trusted there is no file, and rclone uses the system's own check as it always did. Also removes the https sites' CA
+    /// files no site uses (with <paramref name="fresh"/>, at rclone's start, all of them, so each is written again with
+    /// today's roots). True when the FTPS file changed.
     /// </summary>
-    private async Task WriteTrustedCertificatesAsync(CancellationToken cancellationToken)
+    private async Task<bool> WriteTrustedCertificatesAsync(CancellationToken cancellationToken, bool fresh = false)
     {
         await _certificateFileGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            await WriteTrustedCertificatesLockedAsync(cancellationToken).ConfigureAwait(false);
+            // SITES.11: an unsaved site's trusted certificates count while it is open.
+            var sites = await _sites.ListAsync(cancellationToken, includeUnsaved: true).ConfigureAwait(false);
+            SiteCertificateFiles.Prune(Path.Combine(_stateDirectory, "sites", "rclone", RcloneProcess.CertificatesFolderName),
+                sites, all: fresh, _log);
+            return await WriteTrustedCertificatesLockedAsync(sites, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
             // A starting rclone may hold the file a moment; the next change or start writes it again.
             _log($"The trusted-certificates file could not be written: {e.Message}");
+            return true;
         }
         finally
         {
@@ -184,14 +192,14 @@ public sealed partial class SitesCommands
         }
     }
 
-    private async Task WriteTrustedCertificatesLockedAsync(CancellationToken cancellationToken)
+    private async Task<bool> WriteTrustedCertificatesLockedAsync(IReadOnlyList<SiteRecord> sites, CancellationToken cancellationToken)
     {
-        // SITES.11: an unsaved site's trusted certificates count while it is open.
-        var trusted = (await _sites.ListAsync(cancellationToken, includeUnsaved: true).ConfigureAwait(false))
+        var trusted = sites.Where(s => s.Kind == SiteKinds.Ftp)
             .SelectMany(s => s.TrustedCertificates).Where(c => c.Matches()).DistinctBy(c => c.Fingerprint).ToList();
         var path = TrustedCertificatesPath;
         if (trusted.Count == 0)
         {
+            if (!File.Exists(path)) return false;
             try
             {
                 File.Delete(path);
@@ -201,13 +209,14 @@ public sealed partial class SitesCommands
                 _log($"The trusted-certificates file could not be removed: {e.Message}");
             }
 
-            return;
+            return true;
         }
 
         var text = new StringBuilder();
-        text.Append("# Written by Inbound: the system's root certificates and the server certificates trusted in Remote files.\n");
-        foreach (var pem in SystemRoots()) text.Append(pem).Append('\n');
+        text.Append("# Written by Inbound: the system's root certificates and the FTPS server certificates trusted in Remote files.\n");
+        foreach (var pem in SiteCertificateFiles.SystemRoots()) text.Append(pem).Append('\n');
         foreach (var certificate in trusted) text.Append(certificate.Pem.Trim()).Append('\n');
+        if (File.Exists(path) && await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false) == text.ToString()) return false;
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         // A new file put in place whole: an rclone starting meanwhile reads the old file or the new one, never half of one.
         var temp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
@@ -220,40 +229,7 @@ public sealed partial class SitesCommands
         {
             try { File.Delete(temp); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
         }
-    }
 
-    /// <summary>
-    /// The roots this PC trusts, as PEM: the file replaces them for rclone, so they go in with the user's certificates. On
-    /// Windows that is the Root and third-party root stores; a root Windows would fetch only when first needed is not in
-    /// them, which the docs note.
-    /// </summary>
-    private static IEnumerable<string> SystemRoots()
-    {
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-        var stores = new List<(StoreName, StoreLocation)> { (StoreName.Root, StoreLocation.CurrentUser), (StoreName.Root, StoreLocation.LocalMachine) };
-        if (OperatingSystem.IsWindows()) stores.Add((StoreName.AuthRoot, StoreLocation.LocalMachine));
-        foreach (var (name, location) in stores)
-        {
-            List<string> pems = [];
-            try
-            {
-                using var store = new X509Store(name, location);
-                store.Open(OpenFlags.ReadOnly | OpenFlags.OpenExistingOnly);
-                foreach (var certificate in store.Certificates)
-                {
-                    using (certificate)
-                    {
-                        if (certificate.NotAfter.ToUniversalTime() < DateTime.UtcNow || !seen.Add(certificate.Thumbprint)) continue;
-                        pems.Add(certificate.ExportCertificatePem());
-                    }
-                }
-            }
-            catch (Exception e) when (e is System.Security.Cryptography.CryptographicException or PlatformNotSupportedException)
-            {
-                // A store that is not there on this system adds nothing.
-            }
-
-            foreach (var pem in pems) yield return pem;
-        }
+        return true;
     }
 }
