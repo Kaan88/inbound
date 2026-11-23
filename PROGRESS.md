@@ -13,7 +13,7 @@
   running after 8 s, empty crash buffer). Not unlocked, so nothing seen on screen. Display baseline (auto brightness,
   7, timeout 2147483647) restored and read back.
 - **Owner decisions:** FTPS certificates keep the warning (SITES.10 (1)); MoreKeys stays as x26b, no administrator
-  tick; Skip this version stays (UPD.D1). R2 (rclone outliving a killed app on Android): no answer yet.
+  tick; Skip this version stays (UPD.D1). R2 (rclone outliving a killed app on Android): left as it is, noted as a known limitation (owner).
 - **Left:** the desktop update bar seen on screen against a Docker server older than 0.9.1 (owner's window).
 
 ## Release 0.9.1 and extension 0.7.1, 2026-11-23

@@ -84,8 +84,8 @@ A1, A2, A8 and S6 were approved in the same pass.
 ## Open: Android work from 49f5663c to c745317f (2026-11-21)
 
 **Fable, 2026-11-23:** the fixes for this range's findings are right; one new medium (F1, SFTP MoreKeys offered when
-a trusted key was gone) fixed in `d86960f1`. Still open only on two owner decisions: R2 (rclone can outlive a killed app
-on Android) and whether the MoreKeys sheet also asks for the "I checked with the administrator" tick.
+a trusted key was gone) fixed in `d86960f1`. Owner decisions, 2026-11-23: R2 (rclone can outlive a killed app on Android) is left as it is,
+noted as a known limitation; the MoreKeys sheet stays as x26b, without the administrator tick. Closed.
 
 **Reviewed 2026-11-21:** four Opus agents and then Fable reviewed this range; findings, verdicts and the fix order are in [android-review-49f5663c-c745317f.md](android-review-49f5663c-c745317f.md). It stays open until the findings are fixed and Fable checks the fixes.
 
