@@ -15,6 +15,7 @@ public sealed class RemoteHosterCache(IRemoteHosterDirectory directory, TimeProv
 
     private readonly Lock _sync = new();
     private IReadOnlyList<RemoteHosterMatcher>? _hosters;
+    private bool _complete;
     private DateTimeOffset _freshUntil;
     private DateTimeOffset? _fetchedAt;
     private DateTimeOffset _retryAfter;
@@ -48,6 +49,16 @@ public sealed class RemoteHosterCache(IRemoteHosterDirectory directory, TimeProv
 
     /// <summary>When the list in hand was fetched. Null before the first fetch worked.</summary>
     public DateTimeOffset? FetchedAt { get { lock (_sync) return _fetchedAt; } }
+
+    /// <summary>
+    /// The list as it stands, without asking the provider for one: what a failure may be explained
+    /// with, where a wait on the network would be out of place. Null until a fetch has worked.
+    /// Complete is false while a site in the list couldn't be read, so nothing is called unlisted then.
+    /// </summary>
+    public (IReadOnlyList<RemoteHosterMatcher> Hosters, bool Complete)? Snapshot()
+    {
+        lock (_sync) return _hosters is null ? null : (_hosters, _complete);
+    }
 
     /// <summary>Whether the provider currently offers this hoster. Null when the list can't say.</summary>
     public async Task<RemoteHoster?> FindAsync(string name, CancellationToken cancellationToken = default)
@@ -93,6 +104,7 @@ public sealed class RemoteHosterCache(IRemoteHosterDirectory directory, TimeProv
             lock (_sync)
             {
                 _hosters = matchers;
+                _complete = skipped == 0;
                 _fetchedAt = time.GetUtcNow();
                 _freshUntil = _fetchedAt.Value + Lifetime;
                 _retryAfter = DateTimeOffset.MinValue;

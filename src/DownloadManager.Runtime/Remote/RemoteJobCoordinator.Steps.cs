@@ -527,7 +527,7 @@ public sealed partial class RemoteJobCoordinator
         // A retry can give a password or an approval while the looks above were waiting on the
         // network. What is sent is what the record holds now, so the newer answer counts.
         var password = SecretProtector.UnprotectRemoteLinkPassword(submitting.ProtectedLinkPassword);
-        await SendAsync(work, record.Id, submitter, new RemoteSubmission
+        await SendAsync(work, record, submitter, new RemoteSubmission
         {
             Kind = record.Kind,
             Link = link,
@@ -539,13 +539,14 @@ public sealed partial class RemoteJobCoordinator
 
     private async Task SendAsync(
         AccountWork work,
-        Guid id,
+        RemoteJobRecord record,
         IRemoteSubmitter submitter,
         RemoteSubmission submission,
         string hash,
         PassScope pass,
         CancellationToken cancellationToken)
     {
+        var id = record.Id;
         RemoteSubmissionResult? result = null;
         RemoteProviderException? failure = null;
         try
@@ -583,7 +584,7 @@ public sealed partial class RemoteJobCoordinator
 
             if (failure is not null)
             {
-                await SubmissionFailedAsync(work, id, submission, failure, pass).ConfigureAwait(false);
+                await SubmissionFailedAsync(work, record, submission, failure, pass).ConfigureAwait(false);
             }
             else
             {
@@ -655,11 +656,13 @@ public sealed partial class RemoteJobCoordinator
         });
     }
 
-    private async Task SubmissionFailedAsync(AccountWork work, Guid id, RemoteSubmission submission, RemoteProviderException failure, PassScope pass)
+    private async Task SubmissionFailedAsync(AccountWork work, RemoteJobRecord submitted, RemoteSubmission submission, RemoteProviderException failure, PassScope pass)
     {
         var entry = work.Entry;
         var now = _time.GetUtcNow();
-        var message = Describe(entry, failure, submission.LinkPassword, submission.Link);
+        var id = submitted.Id;
+        // The link is here only until this method ends; the words about the site are made from it.
+        var message = HosterFailureMessage(work, submitted, submission.Link, submission.LinkPassword, failure) ?? Describe(entry, failure, submission.LinkPassword, submission.Link);
         var outcome = RemoteJobRules.AfterSubmitFailure(failure.Kind);
         var said = failure.Kind == RemoteFailureKind.ServiceError ? Words(entry, failure.Message, 500, [submission.LinkPassword, submission.Link]) : null;
         var rateLimited = failure.Kind == RemoteFailureKind.RateLimited;
@@ -860,7 +863,7 @@ public sealed partial class RemoteJobCoordinator
                         }).ConfigureAwait(false);
                 if (adopted is { State: RemoteJobState.Waiting })
                 {
-                    await ApplyItemAsync(work, record.Id, item, cancellationToken).ConfigureAwait(false);
+                    await ApplyItemAsync(work, record, item, cancellationToken).ConfigureAwait(false);
                 }
 
                 return true;
@@ -986,7 +989,7 @@ public sealed partial class RemoteJobCoordinator
                 throw new RemoteProviderException(RemoteFailureKind.BadResponse, null, $"{entry.DisplayName} answered about a different item.");
             }
 
-            await ApplyItemAsync(work, record.Id, item, cancellationToken).ConfigureAwait(false);
+            await ApplyItemAsync(work, record, item, cancellationToken).ConfigureAwait(false);
             return;
         }
 
@@ -1031,14 +1034,25 @@ public sealed partial class RemoteJobCoordinator
     }
 
     /// <summary>Saves what the provider says about an item, and starts local jobs if it says they can start.</summary>
-    private async Task ApplyItemAsync(AccountWork work, Guid id, RemoteItem item, CancellationToken cancellationToken)
+    private async Task ApplyItemAsync(AccountWork work, RemoteJobRecord job, RemoteItem item, CancellationToken cancellationToken)
     {
         var entry = work.Entry;
         var now = _time.GetUtcNow();
         var outcome = RemoteJobRules.AfterItemRead(item.Stage);
         var rawState = Words(entry, item.RawState, 100);
         var name = Words(entry, item.Name, 300);
-        var updated = await UpdateAsync(id, record =>
+        // TB.F18: only for an item that failed (this runs on every poll). The site is only worth asking about when
+        // TorBox said nothing of its own, or only a code.
+        string? reason = null;
+        var errorWords = outcome == RemoteItemOutcome.Failed ? Words(entry, item.Error, 500, SecretsOf(job)) : null;
+        var errorCode = outcome == RemoteItemOutcome.Failed ? CodeWord(item.Error) : null;
+        if (outcome == RemoteItemOutcome.Failed && job.Kind == RemoteItemKind.WebDownload && (errorWords is null || errorCode is not null))
+        {
+            var link = SecretProtector.UnprotectRemoteInput(job.ProtectedInput);
+            reason = HosterWords(work, job, link, errorCode, errorWords);
+        }
+
+        var updated = await UpdateAsync(job.Id, record =>
         {
             if (record.State != RemoteJobState.Waiting || record.ItemId != item.Ref.ItemId)
             {
@@ -1066,7 +1080,7 @@ public sealed partial class RemoteJobCoordinator
                 {
                     State = RemoteJobState.Failed,
                     FailureKind = RemoteFailureKind.Rejected,
-                    FailureMessage = $"{entry.DisplayName} reports that this item failed: {Words(entry, item.Error ?? item.RawState, 500, SecretsOf(record)) ?? "no reason given"}.",
+                    FailureMessage = reason ?? $"{entry.DisplayName} reports that this item failed: {Words(entry, item.Error ?? item.RawState, 500, SecretsOf(record)) ?? "no reason given"}.",
                     NextCheckAt = null,
                 },
                 RemoteItemOutcome.Ready => WhenReady(record, next, item, entry.DisplayName, now),
@@ -1330,6 +1344,69 @@ public sealed partial class RemoteJobCoordinator
     /// <summary>A provider's words, with the key and these secrets out of them, whatever form they come back in.</summary>
     private static string? Words(RemoteProviderEntry entry, string? words, int longest, IEnumerable<string?>? hide = null)
         => RemoteText.Clean(words, longest, entry.Account is { } account ? account.Mask : null, hide);
+
+    /// <summary>
+    /// The likely reason a web link was refused, in plain words, or null when the provider's own answer
+    /// and its list of sites can't name one. Only a refusal of that link can be about its site: an
+    /// account, rate or network failure is about something else, and keeps its own words.
+    /// </summary>
+    private static string? HosterFailureMessage(AccountWork work, RemoteJobRecord record, string? link, string? password, RemoteProviderException failure)
+    {
+        if (record.Kind != RemoteItemKind.WebDownload) return null;
+        if (failure.Kind is not (RemoteFailureKind.Rejected or RemoteFailureKind.ServiceError)) return null;
+        var said = Words(work.Entry, failure.Message, 500, [password, link]);
+        return HosterWords(work, record, link, failure.ProviderCode, said);
+    }
+
+    /// <summary>The list's word on the site, then the provider's words, kept in one place for every failure path.</summary>
+    private static string? HosterWords(AccountWork work, RemoteJobRecord record, string? link, string? code, string? detail)
+    {
+        var host = record.DisplayHost ?? RemoteHosterFailure.HostOf(link);
+        var (hoster, listed) = HosterFacts(work, record, link, host);
+        return RemoteHosterFailure.Text(work.Entry.DisplayName, host, record.HosterName, hoster, listed, code, detail);
+    }
+
+    /// <summary>The provider's error code, when the text is one such as <c>UNSUPPORTED_SITE</c> rather than a sentence.</summary>
+    private static string? CodeWord(string? text)
+    {
+        var trimmed = text?.Trim();
+        return trimmed is { Length: >= 3 and <= 60 } &&
+               trimmed.All(character => char.IsAsciiLetterUpper(character) || char.IsAsciiDigit(character) || character == '_')
+            ? trimmed
+            : null;
+    }
+
+    /// <summary>
+    /// What the list in hand says about this link's site, and never a fetch: a failure is no place to
+    /// wait on the network for it. Both facts are unknown (null) while the list has never been read,
+    /// or while a site in it couldn't be read and this link is on none of the others.
+    /// </summary>
+    private static (RemoteHoster? Hoster, bool? Listed) HosterFacts(AccountWork work, RemoteJobRecord record, string? link, string? host)
+    {
+        if (work.Hosters?.Snapshot() is not { } snapshot)
+        {
+            return (null, null);
+        }
+
+        var (hosters, complete) = snapshot;
+        RemoteHoster? matched = null;
+        if (link is not null && host is not null)
+        {
+            foreach (var matcher in hosters)
+            {
+                if (!matcher.Matches(link, host)) continue;
+                matched = matcher.Hoster;
+                break;
+            }
+        }
+
+        if (matched is null && record.HosterName is { } name)
+        {
+            matched = hosters.FirstOrDefault(matcher => matcher.Hoster.Name.Equals(name, StringComparison.OrdinalIgnoreCase))?.Hoster;
+        }
+
+        return (matched, matched is not null ? true : complete ? false : null);
+    }
 
     /// <summary>What was submitted for this job. Only for taking out of a provider's words; these go nowhere else.</summary>
     private static string?[] SecretsOf(RemoteJobRecord record) =>

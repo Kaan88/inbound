@@ -1242,6 +1242,49 @@ public sealed partial class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task ScenarioD_ACachedLinkTheListsSiteIsDownForIsRefusedAndSaysTheSiteIsDown()
+    {
+        await using var rig = await RemoteRig.CreateAsync(_server);
+        var link = rig.Mock.HosterUrl("y").Replace("/hoster/", "/hoster-down/", StringComparison.Ordinal);
+        var hash = RemoteRig.Md5Of(link);
+        // Cached, so the app asks anyway rather than stopping at the list, and the refusal is the real answer.
+        rig.Mock.AddCached(hash);
+        rig.Mock.ScriptSubmission(hash, [MockTorBoxFile.Of(rig.Mock.NextFileId(), "y/y.bin", 32 * Kb, 6)], [MockTorBoxState.CachedReady]);
+        rig.Mock.RefuseLink(link, MockFault.DeadWebLink);
+
+        var job = await rig.AddAsync(new RemoteAddRequest { Input = link, Selection = RemoteSelectionMode.All });
+        await rig.RunAsync();
+
+        var failed = rig.View(job.Id);
+        Assert.Equal(RemoteJobState.Failed, failed.State);
+        Assert.Equal("TorBox lists Pretend Down as down right now: Down for maintenance. Try again later.", failed.FailureMessage);
+        Assert.Equal(1, rig.Mock.Calls(CreateWeb));
+        Assert.Empty(rig.Children());
+        await rig.AssertNothingLeakedAsync(link, "invented-fragment");
+    }
+
+    [Fact]
+    public async Task ScenarioD_AnItemThatFailsWithNoReasonOnADownSiteSaysTheSiteIsDown()
+    {
+        await using var rig = await RemoteRig.CreateAsync(_server);
+        var link = rig.Mock.HosterUrl("z").Replace("/hoster/", "/hoster-down/", StringComparison.Ordinal);
+        var hash = RemoteRig.Md5Of(link);
+        rig.Mock.AddCached(hash);
+        rig.Mock.ScriptSubmission(hash, [MockTorBoxFile.Of(rig.Mock.NextFileId(), "z/z.bin", 32 * Kb, 7)],
+            [MockTorBoxState.Queued, MockTorBoxState.Failed()]);
+
+        var job = await rig.AddAsync(new RemoteAddRequest { Input = link, Selection = RemoteSelectionMode.All });
+        await rig.RunAsync();
+        await rig.AdvanceAsync(30);
+
+        // TorBox gave no reason of its own, so the list is the only word on why.
+        var failed = rig.View(job.Id);
+        Assert.Equal(RemoteJobState.Failed, failed.State);
+        Assert.Equal("TorBox lists Pretend Down as down right now: Down for maintenance. Try again later.", failed.FailureMessage);
+        Assert.Null(failed.NextCheckAt);
+    }
+
+    [Fact]
     public async Task ScenarioD_AnItemThatFailsOnTheProviderShowsItsReasonAndIsNeverSentAgain()
     {
         await using var rig = await RemoteRig.CreateAsync(_server);
