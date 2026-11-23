@@ -53,6 +53,56 @@ public sealed partial class SiteTransfersEndToEndTests
         await Call<SiteResultDto>(commands, SitesMessageTypes.SignInCancel, new SiteIdRequest { Id = box.Site.Id });
     }
 
+    /// <summary>
+    /// SITES.10: the user's own app reaches rclone through its environment, not its command line (which any program on the
+    /// PC can read): rclone's sign-in page still sends the provider that app's id.
+    /// </summary>
+    [SiteTransfersFact]
+    public async Task ASignInWithTheUsersOwnAppSendsItsIdThoughNotOnTheCommandLine()
+    {
+        var commands = Open(null);
+        await Call<SitesStatusDto>(commands, SitesMessageTypes.SetEnabled, new SitesSetEnabledRequest { Enabled = true, OwnRclonePath = Rclone });
+        var box = await Call<SiteResultDto>(commands, SitesMessageTypes.Save,
+            new SiteSaveRequest { Name = "Box", Kind = SiteKinds.Dropbox, ClientId = "own-app-id-4471", ClientSecret = "own-secret-9912" });
+        Assert.True(box.Ok, box.Message);
+        var started = await Call<SiteSignInResultDto>(commands, SitesMessageTypes.SignIn, new SiteSignInRequest { Id = box.Site!.Id });
+        try
+        {
+            Assert.True(started.Ok, started.Message);
+            using var http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false });
+            using var reply = await http.GetAsync(started.Url);
+            Assert.Contains("client_id=own-app-id-4471", reply.Headers.Location?.ToString());
+            if (OperatingSystem.IsWindows())
+            {
+                // No running rclone carries the secret in its command line.
+                foreach (var line in CommandLines("rclone.exe")) Assert.DoesNotContain("own-secret-9912", line);
+            }
+        }
+        finally
+        {
+            await Call<SiteResultDto>(commands, SitesMessageTypes.SignInCancel, new SiteIdRequest { Id = box.Site.Id });
+        }
+    }
+
+    /// <summary>The command lines of the running processes with that image name, read with WMI's command-line tool.</summary>
+    private static List<string> CommandLines(string image)
+    {
+        var info = new System.Diagnostics.ProcessStartInfo("powershell.exe")
+        {
+            RedirectStandardOutput = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        foreach (var argument in new[] { "-NoProfile", "-NonInteractive", "-Command",
+            $"Get-CimInstance Win32_Process -Filter \"Name='{image}'\" | ForEach-Object {{ $_.CommandLine }}" }) info.ArgumentList.Add(argument);
+        using var process = System.Diagnostics.Process.Start(info)!;
+        var text = process.StandardOutput.ReadToEnd();
+        process.WaitForExit();
+        var lines = text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+        Assert.Contains(lines, line => line.Contains("authorize", StringComparison.Ordinal));
+        return lines;
+    }
+
     [SiteTransfersFact]
     public async Task TurningSitesOffCancelsTheBrowserAuthorization()
     {
